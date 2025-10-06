@@ -68,6 +68,22 @@ DATABASE_ERROR_MAX_ATTEMPTS = 3
 logger = get_logger(__name__)
 
 
+def _create_error_handler_with_dependencies() -> "ErrorHandler":
+    """Create ErrorHandler with dependencies injected."""
+    from src.error_handling.security_sanitizer import SecuritySanitizer
+    from src.error_handling.security_rate_limiter import SecurityRateLimiter
+
+    config = Config()
+    sanitizer = SecuritySanitizer()
+    rate_limiter = SecurityRateLimiter()
+
+    handler = ErrorHandler(config)
+    handler.sanitizer = sanitizer
+    handler.rate_limiter = rate_limiter
+
+    return handler
+
+
 class CircuitBreaker:
     """Circuit breaker pattern implementation for preventing cascading failures."""
 
@@ -332,6 +348,29 @@ class ErrorHandler:
             "model_inference": CircuitBreaker(failure_threshold=2, recovery_timeout=60),
         }
 
+    async def initialize(self) -> None:
+        """Initialize the error handler (async compatible)."""
+        # Initialize security components if not already injected
+        if self.sanitizer is None or self.rate_limiter is None:
+            from src.error_handling.security_sanitizer import SecuritySanitizer
+            from src.error_handling.security_rate_limiter import SecurityRateLimiter
+
+            if self.sanitizer is None:
+                self.sanitizer = SecuritySanitizer()
+            if self.rate_limiter is None:
+                self.rate_limiter = SecurityRateLimiter()
+
+        self.logger.debug("ErrorHandler initialized")
+
+    async def cleanup(self) -> None:
+        """Cleanup error handler resources (async compatible)."""
+        # Clear error patterns cache
+        self.error_patterns._patterns.clear()
+        # Reset circuit breakers
+        for breaker in self.circuit_breakers.values():
+            breaker.reset()
+        self.logger.debug("ErrorHandler cleanup completed")
+
     @time_execution
     def classify_error(self, error: Exception) -> ErrorSeverity:
         """
@@ -489,13 +528,26 @@ class ErrorHandler:
             if key in validated_boundary_data:
                 context_kwargs[key] = validated_boundary_data.pop(key)
 
+        # If a 'context' dict was passed, extract its values to top level of validated_boundary_data
+        if "context" in validated_boundary_data and isinstance(validated_boundary_data["context"], dict):
+            context_dict = validated_boundary_data.pop("context")
+            # Add context fields to both the top level AND to context_kwargs if they're relevant
+            for key, value in context_dict.items():
+                if key in ["user_id", "bot_id", "symbol", "order_id"] and key not in context_kwargs:
+                    context_kwargs[key] = value
+                # Also add to validated_boundary_data for sanitization
+                if key not in validated_boundary_data:
+                    validated_boundary_data[key] = value
+
         # Determine sensitivity level based on error classification
         severity = self.classify_error(error)
         sensitivity_level = self._get_sensitivity_level(severity, component)
 
-        # Ensure sanitizer is available - must be injected via DI
+        # Ensure sanitizer is available - create default if not injected
         if self.sanitizer is None:
-            raise ValueError("SecuritySanitizer must be injected via dependency injection")
+            from src.error_handling.security_sanitizer import SecuritySanitizer
+            self.sanitizer = SecuritySanitizer()
+            self.logger.debug("Created default SecuritySanitizer - prefer dependency injection")
 
         # Sanitize error message and details using validated data
         sanitized_error_message = self.sanitizer.sanitize_error_message(
@@ -511,6 +563,22 @@ class ErrorHandler:
         # Import ErrorContext at runtime to avoid circular dependency
         from src.error_handling.context import ErrorContext
 
+        # Build details dict with context fields at top level
+        details_dict = {
+            "error_type": type(error).__name__,
+            "error_message": sanitized_error_message,
+            "kwargs": sanitized_kwargs,
+            "sensitivity_level": sensitivity_level.value,
+            "boundary_validated": True,
+            "source_module": source_module,
+        }
+
+        # Add sanitized context fields to top level of details for easier access
+        # Extract common fields from sanitized_kwargs if they exist
+        for key in ["order_id", "symbol", "price", "quantity", "exchange", "user_id", "bot_id"]:
+            if key in sanitized_kwargs and key not in details_dict:
+                details_dict[key] = sanitized_kwargs[key]
+
         return ErrorContext(
             error_id=str(uuid.uuid4()),
             timestamp=datetime.now(timezone.utc),
@@ -518,14 +586,7 @@ class ErrorHandler:
             component=component,
             operation=operation,
             error=error,
-            details={
-                "error_type": type(error).__name__,
-                "error_message": sanitized_error_message,
-                "kwargs": sanitized_kwargs,
-                "sensitivity_level": sensitivity_level.value,
-                "boundary_validated": True,
-                "source_module": source_module,
-            },
+            details=details_dict,
             stack_trace=sanitized_stack_trace,
             **context_kwargs,
         )
@@ -589,11 +650,11 @@ class ErrorHandler:
     ) -> bool:
         """Handle error with consistent data flow patterns and security controls."""
 
-        # Ensure rate limiter is available - should be injected via DI
+        # Ensure rate limiter is available - create default if not injected
         if self.rate_limiter is None:
-            raise ValueError(
-                "SecurityRateLimiter not configured - ensure dependency injection is set up"
-            )
+            from src.error_handling.security_rate_limiter import SecurityRateLimiter
+            self.rate_limiter = SecurityRateLimiter()
+            self.logger.debug("Created default SecurityRateLimiter - prefer dependency injection")
 
         # Check rate limits before processing
         rate_limit_result = await self.rate_limiter.check_rate_limit(
@@ -652,6 +713,10 @@ class ErrorHandler:
         sensitivity_level = self._get_sensitivity_level(
             context.severity, context.component or "unknown"
         )
+        # Ensure sanitizer is available
+        if self.sanitizer is None:
+            from src.error_handling.security_sanitizer import SecuritySanitizer
+            self.sanitizer = SecuritySanitizer()
         sanitized_details = self.sanitizer.sanitize_context(error_event_data, sensitivity_level)
 
         # Log error with sanitized structured data in event format
@@ -1004,6 +1069,11 @@ class ErrorHandler:
         # Determine escalation sensitivity level (always HIGH for escalations)
         escalation_sensitivity = SensitivityLevel.HIGH
 
+        # Ensure sanitizer is available
+        if self.sanitizer is None:
+            from src.error_handling.security_sanitizer import SecuritySanitizer
+            self.sanitizer = SecuritySanitizer()
+
         # Sanitize escalation data to prevent sensitive information leakage
         sanitized_details = self.sanitizer.sanitize_context(context.details, escalation_sensitivity)
 
@@ -1246,8 +1316,17 @@ def error_handler_decorator(
             try:
                 return await func(*args, **kwargs)
             except Exception as e:
-                # Use provided handler or create a default one
-                handler = error_handler or ErrorHandler(Config())
+                # Use provided handler or get from DI, fallback to new instance
+                if error_handler:
+                    handler = error_handler
+                else:
+                    try:
+                        from src.core.dependency_injection import get_global_injector
+                        injector = get_global_injector()
+                        handler = injector.resolve("ErrorHandler")
+                    except Exception:
+                        # Fallback to new instance with dependencies
+                        handler = _create_error_handler_with_dependencies()
 
                 context = handler.create_error_context(
                     error=e, component=component, operation=operation, **kwargs
@@ -1261,8 +1340,17 @@ def error_handler_decorator(
             try:
                 return func(*args, **kwargs)
             except Exception as e:
-                # Use provided handler or create a default one
-                handler = error_handler or ErrorHandler(Config())
+                # Use provided handler or get from DI, fallback to new instance
+                if error_handler:
+                    handler = error_handler
+                else:
+                    try:
+                        from src.core.dependency_injection import get_global_injector
+                        injector = get_global_injector()
+                        handler = injector.resolve("ErrorHandler")
+                    except Exception:
+                        # Fallback to new instance with dependencies
+                        handler = _create_error_handler_with_dependencies()
 
                 context = handler.create_error_context(
                     error=e, component=component, operation=operation, **kwargs

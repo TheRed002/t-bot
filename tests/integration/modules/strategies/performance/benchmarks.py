@@ -16,16 +16,17 @@ Key Features:
 import asyncio
 import gc
 import time
-from decimal import Decimal
-from typing import Dict, List, Any
-import psutil
 import tracemalloc
+from decimal import Decimal
+from typing import Any
 
-from src.core.types import MarketData, Signal
+import psutil
 from tests.integration.modules.strategies.fixtures.market_data_generators import (
     MarketDataGenerator,
     create_test_market_data_suite,
 )
+
+from src.core.types import MarketData
 
 
 class PerformanceMetrics:
@@ -61,7 +62,7 @@ class StrategyPerformanceBenchmarker:
         self,
         technical_indicators,
         indicator_name: str,
-        market_data: List[MarketData],
+        market_data: list[MarketData],
         iterations: int = 100,
         **kwargs,
     ) -> PerformanceMetrics:
@@ -87,7 +88,9 @@ class StrategyPerformanceBenchmarker:
             "sma": lambda data: technical_indicators.calculate_sma(data, **kwargs),
             "ema": lambda data: technical_indicators.calculate_ema(data, **kwargs),
             "macd": lambda data: technical_indicators.calculate_macd(data, **kwargs),
-            "bollinger_bands": lambda data: technical_indicators.calculate_bollinger_bands(data, **kwargs),
+            "bollinger_bands": lambda data: technical_indicators.calculate_bollinger_bands(
+                data, **kwargs
+            ),
             "atr": lambda data: technical_indicators.calculate_atr(data, **kwargs),
         }
 
@@ -139,9 +142,9 @@ class StrategyPerformanceBenchmarker:
     async def benchmark_signal_generation(
         self,
         strategy,
-        market_data_scenarios: Dict[str, List[MarketData]],
+        market_data_scenarios: dict[str, list[MarketData]],
         iterations_per_scenario: int = 50,
-    ) -> Dict[str, PerformanceMetrics]:
+    ) -> dict[str, PerformanceMetrics]:
         """
         Benchmark complete signal generation across different market scenarios.
 
@@ -209,9 +212,9 @@ class StrategyPerformanceBenchmarker:
         self,
         strategy_service,
         risk_service,
-        test_strategies: List[Any],
+        test_strategies: list[Any],
         iterations: int = 20,
-    ) -> Dict[str, PerformanceMetrics]:
+    ) -> dict[str, PerformanceMetrics]:
         """
         Benchmark database operations for strategy persistence.
 
@@ -285,11 +288,13 @@ class StrategyPerformanceBenchmarker:
                 risk_metrics_data = await risk_service.calculate_portfolio_risk()
 
                 # Update portfolio state
-                await risk_service.update_portfolio_metrics({
-                    "total_value": portfolio_value,
-                    "unrealized_pnl": Decimal("1000.00"),
-                    "realized_pnl": Decimal("500.00"),
-                })
+                await risk_service.update_portfolio_metrics(
+                    {
+                        "total_value": portfolio_value,
+                        "unrealized_pnl": Decimal("1000.00"),
+                        "realized_pnl": Decimal("500.00"),
+                    }
+                )
 
             end_time = time.perf_counter()
             current, peak = tracemalloc.get_traced_memory()
@@ -312,7 +317,7 @@ class StrategyPerformanceBenchmarker:
     async def benchmark_concurrent_operations(
         self,
         strategy_service,
-        market_data: List[MarketData],
+        market_data: list[MarketData],
         concurrent_strategies: int = 5,
         operations_per_strategy: int = 10,
     ) -> PerformanceMetrics:
@@ -334,7 +339,7 @@ class StrategyPerformanceBenchmarker:
         metrics = PerformanceMetrics()
         metrics.iterations = concurrent_strategies * operations_per_strategy
 
-        async def strategy_worker(strategy_id: str, worker_market_data: List[MarketData]):
+        async def strategy_worker(strategy_id: str, worker_market_data: list[MarketData]):
             """Worker function for concurrent strategy operations."""
             try:
                 for i in range(operations_per_strategy):
@@ -355,9 +360,7 @@ class StrategyPerformanceBenchmarker:
             # Create concurrent tasks
             tasks = []
             for i in range(concurrent_strategies):
-                task = asyncio.create_task(
-                    strategy_worker(f"strategy_{i}", market_data)
-                )
+                task = asyncio.create_task(strategy_worker(f"strategy_{i}", market_data))
                 tasks.append(task)
 
             # Wait for all tasks to complete
@@ -390,9 +393,7 @@ class StrategyPerformanceBenchmarker:
 
         return metrics
 
-    def generate_performance_report(
-        self, benchmark_results: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    def generate_performance_report(self, benchmark_results: dict[str, Any]) -> dict[str, Any]:
         """
         Generate a comprehensive performance report.
 
@@ -463,8 +464,8 @@ async def run_comprehensive_benchmarks(
     technical_indicators,
     strategy_service,
     risk_service,
-    test_strategies: List[Any],
-) -> Dict[str, Any]:
+    test_strategies: list[Any],
+) -> dict[str, Any]:
     """
     Run comprehensive performance benchmarks for strategy integration.
 

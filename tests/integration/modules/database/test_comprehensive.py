@@ -13,8 +13,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
-
 import pytest_asyncio
+
 from src.database.models.audit import CapitalAuditLog
 from src.database.models.bot import Bot, Signal, Strategy
 from src.database.models.capital import CapitalAllocationDB, FundFlowDB
@@ -25,10 +25,10 @@ from src.database.repository.bot import BotRepository, SignalRepository, Strateg
 from src.database.repository.capital import CapitalAllocationRepository, FundFlowRepository
 from src.database.repository.market_data import MarketDataRepository
 from src.database.repository.trading import OrderRepository, PositionRepository
-from tests.integration.infrastructure.service_factory import RealServiceFactory
+
 # Import the correct fixtures from infrastructure
 from tests.integration.infrastructure.conftest import clean_database, real_test_config  # noqa: F401
-
+from tests.integration.infrastructure.service_factory import RealServiceFactory
 
 logger = logging.getLogger(__name__)
 
@@ -41,29 +41,45 @@ class TestDatabaseIntegrationWorkflows:
     async def real_repositories(self, clean_database):
         """Create repository instances with real database session."""
         service_factory = RealServiceFactory()
+        session = None
 
         try:
             await service_factory.initialize_core_services(clean_database)
 
-            async with clean_database.get_async_session() as session:
-                repositories = {
-                    "bot": BotRepository(session),
-                    "strategy": StrategyRepository(session),
-                    "signal": SignalRepository(session),
-                    "capital_allocation": CapitalAllocationRepository(session),
-                    "fund_flow": FundFlowRepository(session),
-                    "market_data": MarketDataRepository(session),
-                    "order": OrderRepository(session),
-                    "position": PositionRepository(session),
-                    "audit": CapitalAuditLogRepository(session),
-                }
+            # Get session WITHOUT using async with - we'll close it manually
+            session_ctx = clean_database.get_async_session()
+            session = await session_ctx.__aenter__()
 
-                yield repositories, service_factory
+            repositories = {
+                "bot": BotRepository(session),
+                "strategy": StrategyRepository(session),
+                "signal": SignalRepository(session),
+                "capital_allocation": CapitalAllocationRepository(session),
+                "fund_flow": FundFlowRepository(session),
+                "market_data": MarketDataRepository(session),
+                "order": OrderRepository(session),
+                "position": PositionRepository(session),
+                "audit": CapitalAuditLogRepository(session),
+            }
+
+            yield repositories, service_factory
 
         finally:
-            await service_factory.cleanup()
+            # CRITICAL: Close session properly but DON'T cleanup service factory
+            # The clean_database fixture will handle its own cleanup
+            if session is not None:
+                try:
+                    # Rollback any uncommitted changes to avoid lock issues
+                    await session.rollback()
+                    await session.close()
+                except Exception as e:
+                    logger.warning(f"Error closing session: {e}")
+
+            # DON'T call service_factory.cleanup() here - it stops the database service
+            # which is still needed by clean_database fixture cleanup
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_complete_trading_workflow(self, real_repositories):
         """Test a complete trading workflow from bot creation to trade execution using real database."""
         repositories, service_factory = real_repositories
@@ -207,6 +223,7 @@ class TestDatabaseIntegrationWorkflows:
         logger.info("✅ Complete trading workflow test completed successfully")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_capital_management_workflow(self, real_repositories):
         """Test capital allocation and fund flow workflow using real database."""
         repositories, service_factory = real_repositories
@@ -252,7 +269,9 @@ class TestDatabaseIntegrationWorkflows:
         )
         created_allocation = await repositories["capital_allocation"].create(allocation)
         assert created_allocation is not None
-        logger.info(f"✅ Real database capital allocation created: {created_allocation.strategy_id}")
+        logger.info(
+            f"✅ Real database capital allocation created: {created_allocation.strategy_id}"
+        )
 
         # Step 2: Create fund flow record
         flow = FundFlowDB(
@@ -303,6 +322,7 @@ class TestDatabaseIntegrationWorkflows:
         logger.info("✅ Capital management workflow test completed successfully")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_concurrent_repository_operations(self, real_repositories):
         """Test sequential operations across repositories using real database (real DBs don't support concurrent operations on same session)."""
         repositories, service_factory = real_repositories
@@ -343,25 +363,29 @@ class TestDatabaseIntegrationWorkflows:
             created_strategies.append(created_strategy)
 
         assert len(created_strategies) == 3
-        logger.info(f"✅ Real database sequential strategy creation: {len(created_strategies)} strategies")
+        logger.info(
+            f"✅ Real database sequential strategy creation: {len(created_strategies)} strategies"
+        )
 
         # Verify all data was created correctly in real database
         all_bots = await repositories["bot"].get_all()
-        concurrent_bots = [b for b in all_bots if f"Concurrent Bot" in b.name and unique_id in b.name]
+        concurrent_bots = [
+            b for b in all_bots if "Concurrent Bot" in b.name and unique_id in b.name
+        ]
         assert len(concurrent_bots) == 3
 
-        # Cleanup
-        cleanup_tasks = []
+        # Cleanup sequentially (real database doesn't support concurrent operations on same session)
+        # Delete strategies first (they have foreign key to bots)
         for strategy in created_strategies:
-            cleanup_tasks.append(repositories["strategy"].delete(strategy.id))
+            await repositories["strategy"].delete(strategy.id)
+        # Then delete bots
         for bot in created_bots:
-            cleanup_tasks.append(repositories["bot"].delete(bot.id))
-
-        await asyncio.gather(*cleanup_tasks)
+            await repositories["bot"].delete(bot.id)
 
         logger.info("✅ Concurrent repository operations test completed successfully")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_data_consistency_across_updates(self, real_repositories):
         """Test data consistency when updating related entities using real database."""
         repositories, service_factory = real_repositories
@@ -440,6 +464,7 @@ class TestDatabaseIntegrationWorkflows:
         logger.info("✅ Data consistency across updates test completed successfully")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_repository_error_handling(self, real_repositories):
         """Test error handling across repository operations using real database."""
         repositories, service_factory = real_repositories
@@ -505,6 +530,7 @@ class TestDatabaseIntegrationWorkflows:
         logger.info("✅ Repository error handling test completed successfully")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_repository_filtering_and_querying(self, real_repositories):
         """Test complex filtering and querying across repositories using real database."""
         repositories, service_factory = real_repositories
@@ -568,6 +594,7 @@ class TestDatabaseIntegrationWorkflows:
         logger.info("✅ Repository filtering and querying test completed successfully")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_transaction_rollback_scenario(self, real_repositories):
         """Test transaction rollback in complex scenarios using real database."""
         repositories, service_factory = real_repositories
@@ -643,6 +670,7 @@ class TestDatabaseIntegrationWorkflows:
         logger.info("✅ Transaction rollback scenario test completed successfully")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_financial_precision_across_models(self, real_repositories):
         """Test financial precision is maintained across different models using real database."""
         repositories, service_factory = real_repositories
@@ -651,7 +679,7 @@ class TestDatabaseIntegrationWorkflows:
 
         # Test with high-precision financial values
         high_precision_price = Decimal("45678.12345678")  # 18 decimal places
-        high_precision_quantity = Decimal("0.12345678")   # 18 decimal places
+        high_precision_quantity = Decimal("0.12345678")  # 18 decimal places
         high_precision_amount = Decimal("5000.12345678")  # 18 decimal places
 
         # Create bot with financial precision
@@ -751,7 +779,9 @@ class TestDatabaseIntegrationWorkflows:
         await repositories["order"].delete(created_order.id)
         await repositories["bot"].delete(created_bot.id)
 
-        logger.info(f"✅ Financial precision across models verified: {high_precision_price} * {high_precision_quantity} = {calculated_total}")
+        logger.info(
+            f"✅ Financial precision across models verified: {high_precision_price} * {high_precision_quantity} = {calculated_total}"
+        )
 
 
 if __name__ == "__main__":

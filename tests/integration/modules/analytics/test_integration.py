@@ -11,8 +11,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
-
 import pytest_asyncio
+
 from src.analytics import (
     AnalyticsService,
     AnalyticsServiceFactory,
@@ -22,18 +22,12 @@ from src.analytics import (
 )
 from src.analytics.repository import AnalyticsRepository
 from src.analytics.types import AnalyticsConfiguration, PortfolioMetrics, RiskMetrics
-from src.core.dependency_injection import DependencyInjector, DependencyContainer
+from src.core.dependency_injection import DependencyInjector
 from src.core.exceptions import ComponentError, DataError, ValidationError
 from src.core.types import Position, Trade
 from src.database.models.analytics import AnalyticsPortfolioMetrics, AnalyticsRiskMetrics
-from src.monitoring.metrics import get_metrics_collector
 
 # Import real service fixtures from infrastructure
-from tests.integration.infrastructure.conftest import (
-    clean_database,
-    real_database_service,
-    real_cache_manager
-)
 
 
 @pytest_asyncio.fixture
@@ -68,6 +62,7 @@ class TestAnalyticsDependencyInjection:
     """Test analytics dependency injection patterns with real services."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_analytics_services_registration(self, real_analytics_dependencies):
         """Test that all analytics services can be registered with DI using real services."""
         injector = real_analytics_dependencies
@@ -76,6 +71,7 @@ class TestAnalyticsDependencyInjection:
         assert isinstance(injector, DependencyInjector)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_analytics_service_resolution(self, real_analytics_dependencies):
         """Test that AnalyticsService can be resolved from DI container with real dependencies."""
         injector = real_analytics_dependencies
@@ -89,6 +85,7 @@ class TestAnalyticsDependencyInjection:
         await analytics_service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_analytics_factory_resolution(self, real_analytics_dependencies):
         """Test that AnalyticsServiceFactory can be resolved with real dependencies."""
         injector = real_analytics_dependencies
@@ -98,6 +95,7 @@ class TestAnalyticsDependencyInjection:
         assert isinstance(factory, AnalyticsServiceFactory)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_individual_service_resolution(self, real_analytics_dependencies):
         """Test that individual analytics services can be resolved with real dependencies."""
         injector = real_analytics_dependencies
@@ -126,8 +124,7 @@ class TestAnalyticsRepositoryIntegration:
         # Get real async session from database service
         async with real_database_service.get_session() as session:
             repository = AnalyticsRepository(
-                session=session,
-                transformation_service=transformation_service
+                session=session, transformation_service=transformation_service
             )
 
             yield repository
@@ -136,6 +133,7 @@ class TestAnalyticsRepositoryIntegration:
         await transformation_service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_store_portfolio_metrics(self, clean_database, real_database_service):
         """Test storing portfolio metrics through repository with real database."""
         from src.analytics.services.data_transformation_service import DataTransformationService
@@ -148,19 +146,19 @@ class TestAnalyticsRepositoryIntegration:
             # Get real async session from database service
             async with real_database_service.get_session() as session:
                 repository = AnalyticsRepository(
-                    session=session,
-                    transformation_service=transformation_service
+                    session=session, transformation_service=transformation_service
                 )
 
                 # First create a bot that we can reference
                 from src.database.models import Bot
+
                 bot_id = uuid.uuid4()
                 test_bot = Bot(
                     id=bot_id,
                     name="Test Analytics Bot",
                     exchange="binance",
                     status="running",
-                    created_at=datetime.now(timezone.utc)
+                    created_at=datetime.now(timezone.utc),
                 )
                 session.add(test_bot)
                 await session.flush()  # Ensure bot is saved first
@@ -189,6 +187,7 @@ class TestAnalyticsRepositoryIntegration:
             await transformation_service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_get_historical_portfolio_metrics(self, clean_database, real_database_service):
         """Test retrieving historical portfolio metrics from real database."""
         from src.analytics.services.data_transformation_service import DataTransformationService
@@ -201,19 +200,19 @@ class TestAnalyticsRepositoryIntegration:
             # Get real async session from database service
             async with real_database_service.get_session() as session:
                 repository = AnalyticsRepository(
-                    session=session,
-                    transformation_service=transformation_service
+                    session=session, transformation_service=transformation_service
                 )
 
                 # First create a bot that we can reference
                 from src.database.models import Bot
+
                 bot_id = uuid.uuid4()
                 test_bot = Bot(
                     id=bot_id,
                     name="Test Analytics Bot",
                     exchange="binance",
                     status="running",
-                    created_at=datetime.now(timezone.utc)
+                    created_at=datetime.now(timezone.utc),
                 )
                 session.add(test_bot)
                 await session.flush()  # Ensure bot is saved first
@@ -248,6 +247,7 @@ class TestAnalyticsRepositoryIntegration:
             await transformation_service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_invalid_date_range_validation(self, clean_database, real_database_service):
         """Test validation of invalid date ranges."""
         from src.analytics.services.data_transformation_service import DataTransformationService
@@ -260,8 +260,7 @@ class TestAnalyticsRepositoryIntegration:
             # Get real async session from database service
             async with real_database_service.get_session() as session:
                 repository = AnalyticsRepository(
-                    session=session,
-                    transformation_service=transformation_service
+                    session=session, transformation_service=transformation_service
                 )
 
                 start_date = datetime(2023, 12, 31)
@@ -274,6 +273,7 @@ class TestAnalyticsRepositoryIntegration:
             await transformation_service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_store_and_retrieve_risk_metrics(self, clean_database, real_database_service):
         """Test storing and retrieving risk metrics with real database."""
         from src.analytics.services.data_transformation_service import DataTransformationService
@@ -286,19 +286,19 @@ class TestAnalyticsRepositoryIntegration:
             # Get real async session from database service
             async with real_database_service.get_session() as session:
                 repository = AnalyticsRepository(
-                    session=session,
-                    transformation_service=transformation_service
+                    session=session, transformation_service=transformation_service
                 )
 
                 # First create a bot that we can reference
                 from src.database.models import Bot
+
                 bot_id = uuid.uuid4()
                 test_bot = Bot(
                     id=bot_id,
                     name="Test Analytics Bot",
                     exchange="binance",
                     status="running",
-                    created_at=datetime.now(timezone.utc)
+                    created_at=datetime.now(timezone.utc),
                 )
                 session.add(test_bot)
                 await session.flush()  # Ensure bot is saved first
@@ -315,6 +315,7 @@ class TestAnalyticsRepositoryIntegration:
 
                 # Create risk metrics directly for the database (bypass transformation for now)
                 from src.database.models.analytics import AnalyticsRiskMetrics
+
                 db_risk_metrics = AnalyticsRiskMetrics(
                     timestamp=datetime.now(timezone.utc),
                     bot_id=bot_id,
@@ -359,12 +360,14 @@ class TestAnalyticsServiceIntegration:
         await analytics_service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_analytics_service_initialization(self, real_analytics_service):
         """Test that analytics service initializes properly with real dependencies."""
         assert isinstance(real_analytics_service, AnalyticsService)
         assert real_analytics_service.config is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_missing_dependency_validation(self):
         """Test that missing dependencies are handled gracefully."""
         # The service should be able to initialize with minimal configuration
@@ -381,6 +384,7 @@ class TestAnalyticsServiceIntegration:
             assert "required" in str(e).lower() or "missing" in str(e).lower()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_lifecycle(self, real_analytics_dependencies):
         """Test analytics service start/stop lifecycle with real dependencies."""
         injector = real_analytics_dependencies
@@ -391,6 +395,7 @@ class TestAnalyticsServiceIntegration:
         await analytics_service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_portfolio_metrics_retrieval(self, real_analytics_service):
         """Test portfolio metrics retrieval through service with real dependencies."""
         # The service should return default metrics when no data is available
@@ -402,6 +407,7 @@ class TestAnalyticsServiceIntegration:
             assert metrics.timestamp is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_risk_metrics_retrieval(self, real_analytics_service):
         """Test risk metrics retrieval through service with real dependencies."""
         # The service should return default or calculated risk metrics
@@ -411,10 +417,12 @@ class TestAnalyticsServiceIntegration:
         assert metrics.timestamp is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_data_flow_integration(self, real_analytics_service):
         """Test data flow through real analytics service."""
         # Test position update
         from src.core.types.trading import PositionSide, PositionStatus
+
         test_position = Position(
             symbol="BTC/USDT",
             exchange="binance",
@@ -432,6 +440,7 @@ class TestAnalyticsServiceIntegration:
 
         # Test trade update - use try/except for real service error handling
         from src.core.types.trading import OrderSide
+
         test_trade = Trade(
             trade_id="trade-123",
             order_id="order-123",
@@ -477,6 +486,7 @@ class TestAnalyticsDataFlow:
     def sample_position(self):
         """Create sample position data."""
         from src.core.types.trading import PositionSide, PositionStatus
+
         return Position(
             symbol="BTC/USDT",
             exchange="binance",
@@ -493,6 +503,7 @@ class TestAnalyticsDataFlow:
     def sample_trade(self):
         """Create sample trade data."""
         from src.core.types.trading import OrderSide
+
         return Trade(
             trade_id=f"trade-{uuid.uuid4()}",
             order_id=f"order-{uuid.uuid4()}",
@@ -507,6 +518,7 @@ class TestAnalyticsDataFlow:
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_position_data_flow(self, real_analytics_service, sample_position):
         """Test position data flowing into analytics with real service."""
         # This should not raise an exception with real analytics service
@@ -517,6 +529,7 @@ class TestAnalyticsDataFlow:
         assert True  # If we get here, the update succeeded
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_trade_data_flow(self, real_analytics_service, sample_trade):
         """Test trade data flowing into analytics with real service."""
         # Test trade handling - the service should handle this gracefully
@@ -530,13 +543,15 @@ class TestAnalyticsDataFlow:
             pass
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_multiple_data_updates(self, real_analytics_service):
         """Test multiple data updates through real analytics service."""
         # Create multiple test positions
         from src.core.types.trading import PositionSide, PositionStatus
+
         positions = [
             Position(
-                symbol=f"ETH/USDT",
+                symbol="ETH/USDT",
                 exchange="binance",
                 quantity=Decimal("10.0"),
                 side=PositionSide.LONG,
@@ -547,7 +562,7 @@ class TestAnalyticsDataFlow:
                 opened_at=datetime.now(timezone.utc),
             ),
             Position(
-                symbol=f"ADA/USDT",
+                symbol="ADA/USDT",
                 exchange="binance",
                 quantity=Decimal("1000.0"),
                 side=PositionSide.LONG,
@@ -587,6 +602,7 @@ class TestAnalyticsErrorHandling:
         await analytics_service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_repository_error_propagation(self, clean_database):
         """Test that repository errors are properly propagated with real database."""
         from src.analytics.services.data_transformation_service import DataTransformationService
@@ -603,8 +619,7 @@ class TestAnalyticsErrorHandling:
             # Get real async session from database service
             async with failing_db_service.get_session() as session:
                 repository = AnalyticsRepository(
-                    session=session,
-                    transformation_service=transformation_service
+                    session=session, transformation_service=transformation_service
                 )
 
                 # This should handle database errors gracefully
@@ -625,10 +640,12 @@ class TestAnalyticsErrorHandling:
             await transformation_service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_error_resilience(self, real_analytics_service):
         """Test that analytics service handles errors gracefully."""
         # Test with invalid position data
         from src.core.types.trading import PositionSide, PositionStatus
+
         invalid_position = Position(
             symbol="INVALID/SYMBOL",
             exchange="invalid_exchange",
@@ -651,6 +668,7 @@ class TestAnalyticsErrorHandling:
             assert True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_boundary_protection(self, real_analytics_service):
         """Test that service boundaries are properly protected."""
         # Test that we can call service methods safely
@@ -702,6 +720,7 @@ class TestAnalyticsModuleBoundaries:
         assert configure_analytics_dependencies is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_analytics_interfaces_compliance(self, real_analytics_service):
         """Test that concrete implementations comply with interfaces."""
         # Verify that AnalyticsService implements the protocol
@@ -734,12 +753,14 @@ class TestAnalyticsModuleBoundaries:
         assert AnalyticsPositionMetrics.__tablename__ == "analytics_position_metrics"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_core_types_integration(self, real_analytics_service):
         """Test that analytics properly uses core types with real service."""
         from src.core.types import Position
 
         # Analytics should work with core types
         from src.core.types.trading import PositionSide, PositionStatus
+
         position = Position(
             symbol="BTC/USDT",
             exchange="binance",
@@ -760,14 +781,14 @@ class TestAnalyticsModuleBoundaries:
         real_analytics_service.update_position(position)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_cross_module_integration(self, real_analytics_service, clean_database):
         """Test integration with other modules through real services."""
         # Test that analytics can work with database models
-        from src.database.models.analytics import AnalyticsPortfolioMetrics
-        from sqlalchemy import select
 
         # Store some analytics data through the service
         from src.core.types.trading import PositionSide, PositionStatus
+
         test_position = Position(
             symbol="ETH/USDT",
             exchange="binance",

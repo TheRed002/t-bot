@@ -20,10 +20,13 @@ import redis.asyncio as redis
 from sqlalchemy import asc, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.base.interfaces import DatabaseServiceInterface, HealthStatus
+from src.core.base.interfaces import HealthCheckResult, HealthStatus
 
 # Import core components
 from src.core.base.service import BaseService
+
+# Import database interfaces
+from src.database.interfaces import DatabaseServiceInterface
 from src.core.exceptions import ComponentError, DatabaseError, ValidationError
 from src.core.logging import get_logger
 
@@ -46,6 +49,8 @@ class DatabaseService(BaseService, DatabaseServiceInterface):
 
     This service provides basic database operations with connection management,
     transaction support, and simple caching.
+
+    Implements DatabaseServiceInterface.
     """
 
     def __init__(
@@ -154,6 +159,87 @@ class DatabaseService(BaseService, DatabaseServiceInterface):
             logger.error(f"Error stopping DatabaseService: {e}")
         finally:
             self._redis_client = None
+
+    async def get_health_status(self) -> HealthStatus:
+        """
+        Get service health status.
+
+        Returns:
+            HealthStatus enum value
+        """
+        try:
+            # Check if service is started
+            if not self._started:
+                return HealthStatus.UNHEALTHY
+
+            # Check database connection
+            if not self.connection_manager or not self.connection_manager.async_engine:
+                return HealthStatus.UNHEALTHY
+
+            # Try a simple query
+            async with self.connection_manager.get_async_session() as session:
+                await session.execute(select(1))
+
+            return HealthStatus.HEALTHY
+
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+            return HealthStatus.UNHEALTHY
+
+    async def health_check(self) -> HealthCheckResult:
+        """
+        Perform database health check.
+
+        Returns:
+            HealthCheckResult with database status and details
+        """
+        try:
+            # Check if service is started
+            if not self._started:
+                return HealthCheckResult(
+                    status=HealthStatus.UNHEALTHY,
+                    message="Database service not started",
+                    details={"component": "DatabaseService"}
+                )
+
+            # Check database connection
+            if not self.connection_manager or not self.connection_manager.async_engine:
+                return HealthCheckResult(
+                    status=HealthStatus.UNHEALTHY,
+                    message="Database connection not available",
+                    details={"component": "DatabaseService"}
+                )
+
+            # Try a simple query
+            async with self.connection_manager.get_async_session() as session:
+                await session.execute(select(1))
+
+            # Check Redis if enabled
+            redis_status = "disabled"
+            if self._cache_enabled and self._redis_client:
+                try:
+                    await self._redis_client.ping()
+                    redis_status = "healthy"
+                except Exception:
+                    redis_status = "unhealthy"
+
+            return HealthCheckResult(
+                status=HealthStatus.HEALTHY,
+                message="Database service is healthy",
+                details={
+                    "component": "DatabaseService",
+                    "database": "connected",
+                    "redis_cache": redis_status
+                }
+            )
+
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+            return HealthCheckResult(
+                status=HealthStatus.UNHEALTHY,
+                message=f"Health check failed: {e}",
+                details={"component": "DatabaseService", "error": str(e)}
+            )
 
     # CRUD Operations
 

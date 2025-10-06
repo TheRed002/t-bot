@@ -40,9 +40,19 @@ class TestUtilsDependencyInjection:
         """Setup clean DI container for each test."""
         injector.get_container().clear()
 
+        # Reset the registration flag to allow re-registration
+        import src.utils.service_registry as registry_module
+
+        registry_module._services_registered = False
+
     def teardown_method(self):
         """Cleanup DI container after each test."""
         injector.get_container().clear()
+
+        # Reset the registration flag
+        import src.utils.service_registry as registry_module
+
+        registry_module._services_registered = False
 
     def test_service_registry_registration(self):
         """Test that register_util_services properly registers all services."""
@@ -236,6 +246,11 @@ class TestUtilsDependencyInjection:
         for order in orders:
             # Clear and re-register for each test
             injector.get_container().clear()
+
+            # Reset registration flag before re-registering
+            import src.utils.service_registry as registry_module
+
+            registry_module._services_registered = False
             register_util_services()
 
             services = []
@@ -312,6 +327,11 @@ class TestUtilsDependencyInjection:
         # Clear container
         injector.get_container().clear()
 
+        # Reset registration flag before re-registering
+        import src.utils.service_registry as registry_module
+
+        registry_module._services_registered = False
+
         # Re-register
         register_util_services()
         service2 = injector.resolve("ValidationService")
@@ -331,9 +351,19 @@ class TestUtilsDependencyInjectionEdgeCases:
         """Setup clean DI container."""
         injector.get_container().clear()
 
+        # Reset the registration flag to allow re-registration
+        import src.utils.service_registry as registry_module
+
+        registry_module._services_registered = False
+
     def teardown_method(self):
         """Cleanup DI container."""
         injector.get_container().clear()
+
+        # Reset the registration flag
+        import src.utils.service_registry as registry_module
+
+        registry_module._services_registered = False
 
     def test_partial_registration_handling(self):
         """Test handling of partial service registration."""

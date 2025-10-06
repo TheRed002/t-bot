@@ -5,10 +5,9 @@ This module provides fixtures for creating real risk management service instance
 with proper dependency injection, database integration, and NO MOCKS.
 """
 
-import asyncio
+from collections.abc import AsyncGenerator
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from datetime import datetime, timezone, timedelta
-from typing import Any, AsyncGenerator
 from uuid import uuid4
 
 import pytest
@@ -17,25 +16,24 @@ import pytest_asyncio
 from src.core.config import Config
 from src.core.types import (
     MarketData,
-    Position,
-    PositionSide,
-    PositionStatus,
     OrderRequest,
     OrderSide,
     OrderType,
+    Position,
+    PositionSide,
+    PositionStatus,
     Signal,
     SignalDirection,
-    RiskLevel,
 )
-from src.risk_management.service import RiskService
 from src.risk_management.factory import RiskManagementFactory
+from src.risk_management.service import RiskService
 
 
 @pytest_asyncio.fixture
 async def real_risk_service(clean_database) -> AsyncGenerator[RiskService, None]:
     """Create real risk management service with all dependencies."""
     from src.core.dependency_injection import DependencyInjector
-    from src.database.repository.risk import RiskMetricsRepository, PortfolioRepository
+    from src.database.repository.risk import PortfolioRepository, RiskMetricsRepository
 
     config = Config()
 
@@ -57,7 +55,7 @@ async def real_risk_service(clean_database) -> AsyncGenerator[RiskService, None]
         state_service=None,  # Optional in constructor
         analytics_service=None,  # Optional in constructor
         config=config,
-        correlation_id="test_correlation_id"
+        correlation_id="test_correlation_id",
     )
 
     await risk_service.initialize()
@@ -84,7 +82,9 @@ async def minimal_state_service(clean_database) -> AsyncGenerator:
 
 
 @pytest_asyncio.fixture
-async def real_risk_factory(clean_database, minimal_state_service) -> AsyncGenerator[RiskManagementFactory, None]:
+async def real_risk_factory(
+    clean_database, minimal_state_service
+) -> AsyncGenerator[RiskManagementFactory, None]:
     """Create real risk management factory."""
     from src.core.dependency_injection import DependencyInjector
     from src.risk_management.di_registration import register_risk_management_services
@@ -115,7 +115,7 @@ def generate_realistic_price_sequence(
     base_price: Decimal,
     periods: int = 30,
     volatility: Decimal = Decimal("0.02"),
-    trend: Decimal = Decimal("0.0")
+    trend: Decimal = Decimal("0.0"),
 ) -> list[Decimal]:
     """
     Generate realistic price sequence with volatility and trend.
@@ -148,7 +148,7 @@ def generate_realistic_market_data_sequence(
     periods: int = 30,
     volatility: Decimal = Decimal("0.02"),
     trend: Decimal = Decimal("0.0"),
-    exchange: str = "binance"
+    exchange: str = "binance",
 ) -> list[MarketData]:
     """Generate realistic market data sequence for testing."""
     prices = generate_realistic_price_sequence(base_price, periods, volatility, trend)
@@ -160,11 +160,13 @@ def generate_realistic_market_data_sequence(
         # Add some intraday variation
         high_price = close_price * Decimal("1.01")
         low_price = close_price * Decimal("0.99")
-        open_price = prices[i-1] if i > 0 else close_price
+        open_price = prices[i - 1] if i > 0 else close_price
 
         # Volume varies with volatility
         base_volume = Decimal("1000")
-        volume = base_volume * (Decimal("1") + abs(close_price - open_price) / close_price * Decimal("10"))
+        volume = base_volume * (
+            Decimal("1") + abs(close_price - open_price) / close_price * Decimal("10")
+        )
 
         market_data = MarketData(
             symbol=symbol,
@@ -174,7 +176,7 @@ def generate_realistic_market_data_sequence(
             close=close_price,
             volume=volume,
             timestamp=start_time + timedelta(hours=i),
-            exchange=exchange
+            exchange=exchange,
         )
         market_data_list.append(market_data)
 
@@ -188,7 +190,7 @@ def generate_bull_market_scenario(symbol: str = "BTC/USDT") -> list[MarketData]:
         base_price=Decimal("50000"),
         periods=50,
         volatility=Decimal("0.015"),
-        trend=Decimal("0.002")  # 0.2% daily uptrend
+        trend=Decimal("0.002"),  # 0.2% daily uptrend
     )
 
 
@@ -199,7 +201,7 @@ def generate_bear_market_scenario(symbol: str = "BTC/USDT") -> list[MarketData]:
         base_price=Decimal("50000"),
         periods=50,
         volatility=Decimal("0.025"),
-        trend=Decimal("-0.0015")  # -0.15% daily downtrend
+        trend=Decimal("-0.0015"),  # -0.15% daily downtrend
     )
 
 
@@ -210,7 +212,7 @@ def generate_high_volatility_scenario(symbol: str = "BTC/USDT") -> list[MarketDa
         base_price=Decimal("50000"),
         periods=50,
         volatility=Decimal("0.05"),  # High volatility
-        trend=Decimal("0.0")
+        trend=Decimal("0.0"),
     )
 
 
@@ -222,7 +224,7 @@ def generate_crash_scenario(symbol: str = "BTC/USDT") -> list[MarketData]:
         base_price=Decimal("50000"),
         periods=20,
         volatility=Decimal("0.015"),
-        trend=Decimal("0.001")
+        trend=Decimal("0.001"),
     )
 
     # Then crash
@@ -231,7 +233,7 @@ def generate_crash_scenario(symbol: str = "BTC/USDT") -> list[MarketData]:
         base_price=normal_data[-1].close,
         periods=10,
         volatility=Decimal("0.08"),  # Extreme volatility
-        trend=Decimal("-0.05")  # Severe downtrend
+        trend=Decimal("-0.05"),  # Severe downtrend
     )
 
     # Then recovery
@@ -240,7 +242,7 @@ def generate_crash_scenario(symbol: str = "BTC/USDT") -> list[MarketData]:
         base_price=crash_data[-1].close,
         periods=20,
         volatility=Decimal("0.03"),
-        trend=Decimal("0.002")
+        trend=Decimal("0.002"),
     )
 
     return normal_data + crash_data[1:] + recovery_data[1:]
@@ -262,7 +264,7 @@ def sample_position() -> Position:
         opened_at=datetime.now(timezone.utc),
         exchange="binance",
         stop_loss=Decimal("49000"),
-        take_profit=Decimal("52000")
+        take_profit=Decimal("52000"),
     )
 
 
@@ -283,7 +285,7 @@ def sample_positions() -> list[Position]:
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
             stop_loss=Decimal("49000"),
-            take_profit=Decimal("52000")
+            take_profit=Decimal("52000"),
         ),
         Position(
             position_id=str(uuid4()),
@@ -298,7 +300,7 @@ def sample_positions() -> list[Position]:
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
             stop_loss=Decimal("2900"),
-            take_profit=Decimal("3200")
+            take_profit=Decimal("3200"),
         ),
     ]
 
@@ -320,8 +322,8 @@ def sample_signal() -> Signal:
             "entry_price": Decimal("50000"),
             "stop_loss": Decimal("49000"),
             "take_profit": Decimal("52000"),
-            "risk_reward_ratio": Decimal("2.0")
-        }
+            "risk_reward_ratio": Decimal("2.0"),
+        },
     )
 
 
@@ -338,5 +340,5 @@ def sample_order_request() -> OrderRequest:
         take_profit=Decimal("52000"),
         exchange="binance",
         strategy_id="test_strategy",
-        signal_id=str(uuid4())
+        signal_id=str(uuid4()),
     )

@@ -2,13 +2,15 @@
 
 import asyncio
 
+import pytest
+
 from src.core.dependency_injection import injector
 from src.utils.service_registry import register_util_services
 from src.utils.validation.service import ValidationResult, ValidationService, ValidationType
-import pytest
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_utils_integration_quick():
     """Quick test of utils integration."""
     # Setup

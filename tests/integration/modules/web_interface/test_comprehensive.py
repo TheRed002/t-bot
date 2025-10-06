@@ -7,16 +7,7 @@ testing real workflows and ensuring proper service layer integration.
 Uses REAL services - NO MOCKS for internal services.
 """
 
-import asyncio
-import json
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
-from typing import Any, Dict
-
 import pytest
-import pytest_asyncio
-from fastapi.testclient import TestClient
-from httpx import AsyncClient
 
 from src.core.logging import get_logger
 
@@ -65,8 +56,8 @@ class TestAuthAPIIntegration:
             json={
                 "username": "newuser",
                 "email": "newuser@example.com",
-                "password": "Password123!"
-            }
+                "password": "Password123!",
+            },
         )
         # Endpoint exists (200/400) or not implemented (404/405)
         assert response.status_code in [200, 400, 404, 405, 422]
@@ -74,11 +65,7 @@ class TestAuthAPIIntegration:
     def test_login_endpoint_exists(self, test_client):
         """Test that login endpoint exists."""
         response = test_client.post(
-            "/api/auth/login",
-            json={
-                "username": "testuser",
-                "password": "testpass"
-            }
+            "/api/auth/login", json={"username": "testuser", "password": "testpass"}
         )
         # Endpoint exists (200/400/401) or not (404/405)
         assert response.status_code in [200, 400, 401, 404, 405, 422]
@@ -95,11 +82,7 @@ class TestBotManagementAPIIntegration:
 
     def test_bot_create_endpoint(self, test_client, auth_headers, sample_bot_config):
         """Test bot creation endpoint."""
-        response = test_client.post(
-            "/api/bot",
-            json=sample_bot_config,
-            headers=auth_headers
-        )
+        response = test_client.post("/api/bot", json=sample_bot_config, headers=auth_headers)
         # May require auth (401), validation error (422), or success (200/201)
         assert response.status_code in [200, 201, 400, 401, 404, 422]
 
@@ -120,9 +103,7 @@ class TestTradingAPIIntegration:
     def test_create_order_endpoint(self, test_client, auth_headers, sample_order_request):
         """Test create order endpoint."""
         response = test_client.post(
-            "/api/trading/orders",
-            json=sample_order_request,
-            headers=auth_headers
+            "/api/trading/orders", json=sample_order_request, headers=auth_headers
         )
         # May require various validations
         assert response.status_code in [200, 201, 400, 401, 404, 422]
@@ -251,7 +232,7 @@ class TestErrorHandling:
         response = test_client.post(
             "/api/bot",
             data="invalid json",
-            headers={**auth_headers, "Content-Type": "application/json"}
+            headers={**auth_headers, "Content-Type": "application/json"},
         )
         assert response.status_code in [400, 422]
 

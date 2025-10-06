@@ -9,7 +9,6 @@ CRITICAL: All calculations must use Decimal for financial accuracy.
 
 import math
 from decimal import Decimal, getcontext
-from typing import List, Dict, Optional, Tuple
 
 # Set precision for Decimal calculations
 getcontext().prec = 28
@@ -19,7 +18,7 @@ class IndicatorValidator:
     """Validator for technical indicator mathematical accuracy."""
 
     @staticmethod
-    def calculate_sma(prices: List[Decimal], period: int) -> Optional[Decimal]:
+    def calculate_sma(prices: list[Decimal], period: int) -> Decimal | None:
         """
         Calculate Simple Moving Average with Decimal precision.
 
@@ -36,7 +35,7 @@ class IndicatorValidator:
         return sum(prices[-period:]) / Decimal(str(period))
 
     @staticmethod
-    def calculate_ema(prices: List[Decimal], period: int) -> Optional[Decimal]:
+    def calculate_ema(prices: list[Decimal], period: int) -> Decimal | None:
         """
         Calculate Exponential Moving Average with Decimal precision.
 
@@ -64,7 +63,7 @@ class IndicatorValidator:
         return ema
 
     @staticmethod
-    def calculate_rsi(prices: List[Decimal], period: int = 14) -> Optional[Decimal]:
+    def calculate_rsi(prices: list[Decimal], period: int = 14) -> Decimal | None:
         """
         Calculate Relative Strength Index with Decimal precision using Wilder's smoothing.
 
@@ -120,11 +119,8 @@ class IndicatorValidator:
 
     @staticmethod
     def calculate_macd(
-        prices: List[Decimal],
-        fast_period: int = 12,
-        slow_period: int = 26,
-        signal_period: int = 9
-    ) -> Optional[Dict[str, Decimal]]:
+        prices: list[Decimal], fast_period: int = 12, slow_period: int = 26, signal_period: int = 9
+    ) -> dict[str, Decimal] | None:
         """
         Calculate MACD (Moving Average Convergence Divergence) with Decimal precision.
 
@@ -157,18 +153,12 @@ class IndicatorValidator:
         # Calculate histogram
         histogram = macd_line - signal_line
 
-        return {
-            "macd": macd_line,
-            "signal": signal_line,
-            "histogram": histogram
-        }
+        return {"macd": macd_line, "signal": signal_line, "histogram": histogram}
 
     @staticmethod
     def calculate_bollinger_bands(
-        prices: List[Decimal],
-        period: int = 20,
-        std_dev_multiplier: float = 2.0
-    ) -> Optional[Dict[str, Decimal]]:
+        prices: list[Decimal], period: int = 20, std_dev_multiplier: float = 2.0
+    ) -> dict[str, Decimal] | None:
         """
         Calculate Bollinger Bands with Decimal precision.
 
@@ -190,7 +180,9 @@ class IndicatorValidator:
 
         # Calculate standard deviation
         recent_prices = prices[-period:]
-        variance = sum([(price - middle_band) ** 2 for price in recent_prices]) / Decimal(str(period))
+        variance = sum([(price - middle_band) ** 2 for price in recent_prices]) / Decimal(
+            str(period)
+        )
         std_dev = Decimal(str(math.sqrt(float(variance))))
 
         # Calculate bands
@@ -198,19 +190,15 @@ class IndicatorValidator:
         upper_band = middle_band + (std_dev * multiplier)
         lower_band = middle_band - (std_dev * multiplier)
 
-        return {
-            "upper": upper_band,
-            "middle": middle_band,
-            "lower": lower_band
-        }
+        return {"upper": upper_band, "middle": middle_band, "lower": lower_band}
 
     @staticmethod
     def calculate_atr(
-        high_prices: List[Decimal],
-        low_prices: List[Decimal],
-        close_prices: List[Decimal],
-        period: int = 14
-    ) -> Optional[Decimal]:
+        high_prices: list[Decimal],
+        low_prices: list[Decimal],
+        close_prices: list[Decimal],
+        period: int = 14,
+    ) -> Decimal | None:
         """
         Calculate Average True Range with Decimal precision.
 
@@ -223,7 +211,11 @@ class IndicatorValidator:
         Returns:
             ATR value as Decimal or None if insufficient data
         """
-        if len(high_prices) < period + 1 or len(low_prices) < period + 1 or len(close_prices) < period + 1:
+        if (
+            len(high_prices) < period + 1
+            or len(low_prices) < period + 1
+            or len(close_prices) < period + 1
+        ):
             return None
 
         true_ranges = []
@@ -231,8 +223,8 @@ class IndicatorValidator:
         for i in range(1, len(close_prices)):
             # Calculate true range components
             hl = high_prices[i] - low_prices[i]
-            hc = abs(high_prices[i] - close_prices[i-1])
-            lc = abs(low_prices[i] - close_prices[i-1])
+            hc = abs(high_prices[i] - close_prices[i - 1])
+            lc = abs(low_prices[i] - close_prices[i - 1])
 
             # True range is the maximum of the three
             true_range = max(hl, hc, lc)
@@ -247,12 +239,12 @@ class IndicatorValidator:
 
     @staticmethod
     def calculate_stochastic(
-        high_prices: List[Decimal],
-        low_prices: List[Decimal],
-        close_prices: List[Decimal],
+        high_prices: list[Decimal],
+        low_prices: list[Decimal],
+        close_prices: list[Decimal],
         k_period: int = 14,
-        d_period: int = 3
-    ) -> Optional[Dict[str, Decimal]]:
+        d_period: int = 3,
+    ) -> dict[str, Decimal] | None:
         """
         Calculate Stochastic Oscillator with Decimal precision.
 
@@ -266,7 +258,11 @@ class IndicatorValidator:
         Returns:
             Dictionary with %K and %D values or None if insufficient data
         """
-        if len(high_prices) < k_period or len(low_prices) < k_period or len(close_prices) < k_period:
+        if (
+            len(high_prices) < k_period
+            or len(low_prices) < k_period
+            or len(close_prices) < k_period
+        ):
             return None
 
         # Calculate %K
@@ -280,15 +276,14 @@ class IndicatorValidator:
         if highest_high == lowest_low:
             k_percent = Decimal("50")  # Neutral value when no range
         else:
-            k_percent = ((current_close - lowest_low) / (highest_high - lowest_low)) * Decimal("100")
+            k_percent = ((current_close - lowest_low) / (highest_high - lowest_low)) * Decimal(
+                "100"
+            )
 
         # For %D, we would need historical %K values (simplified for testing)
         d_percent = k_percent  # Simplified for testing
 
-        return {
-            "k_percent": k_percent,
-            "d_percent": d_percent
-        }
+        return {"k_percent": k_percent, "d_percent": d_percent}
 
     @staticmethod
     def validate_indicator_range(indicator_name: str, value: Decimal) -> bool:
@@ -306,7 +301,13 @@ class IndicatorValidator:
             return Decimal("0") <= value <= Decimal("100")
         elif indicator_name.lower() in ["stochastic_k", "stochastic_d"]:
             return Decimal("0") <= value <= Decimal("100")
-        elif indicator_name.lower() in ["sma", "ema", "bollinger_upper", "bollinger_middle", "bollinger_lower"]:
+        elif indicator_name.lower() in [
+            "sma",
+            "ema",
+            "bollinger_upper",
+            "bollinger_middle",
+            "bollinger_lower",
+        ]:
             return value > Decimal("0")  # Prices should be positive
         elif indicator_name.lower() == "atr":
             return value >= Decimal("0")  # ATR should be non-negative
@@ -315,10 +316,8 @@ class IndicatorValidator:
 
     @staticmethod
     def compare_indicators(
-        calculated_value: Decimal,
-        expected_value: Decimal,
-        tolerance: Decimal = Decimal("0.01")
-    ) -> Tuple[bool, Decimal]:
+        calculated_value: Decimal, expected_value: Decimal, tolerance: Decimal = Decimal("0.01")
+    ) -> tuple[bool, Decimal]:
         """
         Compare calculated indicator value with expected value.
 
@@ -375,12 +374,8 @@ class IndicatorAccuracyTester:
         self.test_results = []
 
     def test_sma_accuracy(
-        self,
-        strategy_sma_func,
-        test_prices: List[Decimal],
-        period: int,
-        symbol: str = "BTC/USDT"
-    ) -> Dict[str, any]:
+        self, strategy_sma_func, test_prices: list[Decimal], period: int, symbol: str = "BTC/USDT"
+    ) -> dict[str, any]:
         """
         Test SMA calculation accuracy.
 
@@ -397,11 +392,7 @@ class IndicatorAccuracyTester:
         expected_sma = self.validator.calculate_sma(test_prices, period)
 
         if expected_sma is None:
-            return {
-                "test": "SMA Accuracy",
-                "status": "SKIPPED",
-                "reason": "Insufficient data"
-            }
+            return {"test": "SMA Accuracy", "status": "SKIPPED", "reason": "Insufficient data"}
 
         # Calculate strategy SMA (this would be async in real implementation)
         try:
@@ -412,7 +403,7 @@ class IndicatorAccuracyTester:
                 return {
                     "test": "SMA Accuracy",
                     "status": "FAILED",
-                    "reason": "Strategy returned None"
+                    "reason": "Strategy returned None",
                 }
 
             # Validate Decimal precision
@@ -420,7 +411,7 @@ class IndicatorAccuracyTester:
                 return {
                     "test": "SMA Accuracy",
                     "status": "FAILED",
-                    "reason": f"Strategy returned {type(calculated_sma)}, expected Decimal"
+                    "reason": f"Strategy returned {type(calculated_sma)}, expected Decimal",
                 }
 
             # Compare values
@@ -434,20 +425,16 @@ class IndicatorAccuracyTester:
                 "calculated": calculated_sma,
                 "expected": expected_sma,
                 "difference": difference,
-                "tolerance": Decimal("0.01")
+                "tolerance": Decimal("0.01"),
             }
 
             self.test_results.append(result)
             return result
 
         except Exception as e:
-            return {
-                "test": "SMA Accuracy",
-                "status": "ERROR",
-                "error": str(e)
-            }
+            return {"test": "SMA Accuracy", "status": "ERROR", "error": str(e)}
 
-    def generate_comprehensive_test_report(self) -> Dict[str, any]:
+    def generate_comprehensive_test_report(self) -> dict[str, any]:
         """
         Generate comprehensive test report for all indicator tests.
 
@@ -467,13 +454,13 @@ class IndicatorAccuracyTester:
                 "failed": failed_tests,
                 "errors": error_tests,
                 "skipped": skipped_tests,
-                "pass_rate": (passed_tests / total_tests * 100) if total_tests > 0 else 0
+                "pass_rate": (passed_tests / total_tests * 100) if total_tests > 0 else 0,
             },
             "details": self.test_results,
-            "recommendations": self._generate_recommendations()
+            "recommendations": self._generate_recommendations(),
         }
 
-    def _generate_recommendations(self) -> List[str]:
+    def _generate_recommendations(self) -> list[str]:
         """Generate recommendations based on test results."""
         recommendations = []
 

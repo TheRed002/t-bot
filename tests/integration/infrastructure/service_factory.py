@@ -37,14 +37,18 @@ class RealServiceFactory:
         self.container = None
         self._initialized = False
 
-    async def initialize_core_services(self, clean_database: DatabaseConnectionManager | None = None) -> None:
+    async def initialize_core_services(
+        self, clean_database: DatabaseConnectionManager | None = None
+    ) -> None:
         """
         Initialize core services with proper dependency chain.
 
         Args:
             clean_database: Optional pre-configured database connection manager
         """
-        print(f"DEBUG: initialize_core_services called with clean_database type: {type(clean_database)}")
+        print(
+            f"DEBUG: initialize_core_services called with clean_database type: {type(clean_database)}"
+        )
         print(f"DEBUG: clean_database value: {clean_database}")
 
         if self._initialized:
@@ -59,17 +63,29 @@ class RealServiceFactory:
         # 2. Setup database connection manager
         if clean_database:
             self.connection_manager = clean_database
-            logger.debug(f"Using provided database connection manager, type: {type(clean_database)}")
+            logger.debug(
+                f"Using provided database connection manager, type: {type(clean_database)}"
+            )
         else:
             self.connection_manager = DatabaseConnectionManager(self.config)
             await self.connection_manager.initialize()
             logger.debug("Database connection manager initialized")
 
+        # Set as global connection manager for DatabaseQueries and other components
+        from src.database.connection import set_connection_manager
+
+        set_connection_manager(self.connection_manager)
+        logger.debug("Global connection manager set for database queries")
+
         logger.debug(f"After setup, self.connection_manager type: {type(self.connection_manager)}")
 
         # 3. Create database service
-        logger.debug(f"Creating DatabaseService with connection_manager type: {type(self.connection_manager)}")
-        logger.debug(f"Creating DatabaseService with connection_manager value: {self.connection_manager}")
+        logger.debug(
+            f"Creating DatabaseService with connection_manager type: {type(self.connection_manager)}"
+        )
+        logger.debug(
+            f"Creating DatabaseService with connection_manager value: {self.connection_manager}"
+        )
         self.database_service = DatabaseService(
             connection_manager=self.connection_manager,
             config_service=None,  # Optional for testing
@@ -92,7 +108,6 @@ class RealServiceFactory:
 
     def _create_redis_adapter(self, raw_redis_client):
         """Create an adapter to make raw Redis client compatible with CacheClientInterface."""
-        from src.core.base.interfaces import CacheClientInterface
 
         class RedisAdapter:
             def __init__(self, redis_client):
@@ -102,7 +117,7 @@ class RealServiceFactory:
                 pass  # Already connected
 
             async def disconnect(self):
-                if hasattr(self.client, 'aclose'):
+                if hasattr(self.client, "aclose"):
                     await self.client.aclose()
                 else:
                     await self.client.close()
@@ -120,12 +135,16 @@ class RealServiceFactory:
                     return None
                 try:
                     import json
+
                     return json.loads(value)
                 except json.JSONDecodeError:
                     return value
 
-            async def set(self, key: str, value, ttl: int | None = None, namespace: str = "cache") -> bool:
+            async def set(
+                self, key: str, value, ttl: int | None = None, namespace: str = "cache"
+            ) -> bool:
                 import json
+
                 namespaced_key = f"{namespace}:{key}"
 
                 # Serialize value
@@ -138,7 +157,9 @@ class RealServiceFactory:
                 if ttl is not None:
                     result = await self.client.setex(namespaced_key, ttl, serialized_value)
                 else:
-                    result = await self.client.setex(namespaced_key, 3600, serialized_value)  # Default 1 hour
+                    result = await self.client.setex(
+                        namespaced_key, 3600, serialized_value
+                    )  # Default 1 hour
                 return result
 
             async def delete(self, key: str, namespace: str = "cache") -> bool:
@@ -187,6 +208,7 @@ class RealServiceFactory:
         """
         # Create MetricsCollector with proper parameters
         from prometheus_client import CollectorRegistry
+
         registry = CollectorRegistry()
         metrics_collector = MetricsCollector(registry=registry, auto_register_metrics=True)
         container.register("MetricsCollector", metrics_collector, singleton=True)
@@ -232,51 +254,80 @@ class RealServiceFactory:
 
     def _create_mock_execution_service(self):
         """Create mock ExecutionService for infrastructure testing."""
+
         class MockExecutionRepositoryService:
-            async def create_execution_record(self, data): return {"id": "mock_execution"}
-            async def health_check(self): return True
+            async def create_execution_record(self, data):
+                return {"id": "mock_execution"}
+
+            async def health_check(self):
+                return True
 
         class MockExecutionService:
             def __init__(self):
                 self.repository_service = MockExecutionRepositoryService()
 
-            async def health_check(self): return True
-            async def submit_order(self, **kwargs): return {"order_id": "mock_order", "status": "submitted"}
+            async def health_check(self):
+                return True
+
+            async def submit_order(self, **kwargs):
+                return {"order_id": "mock_order", "status": "submitted"}
 
         return MockExecutionService()
 
     def _create_mock_risk_service(self):
         """Create mock RiskService for infrastructure testing."""
+
         class MockRiskService:
-            async def health_check(self): return True
-            async def calculate_position_size(self, **kwargs): return {"size": 100, "risk": 0.02}
-            async def check_risk_limits(self, **kwargs): return True
+            async def health_check(self):
+                return True
+
+            async def calculate_position_size(self, **kwargs):
+                return {"size": 100, "risk": 0.02}
+
+            async def check_risk_limits(self, **kwargs):
+                return True
 
         return MockRiskService()
 
     def _create_mock_strategy_service(self):
         """Create mock StrategyService for infrastructure testing."""
+
         class MockStrategyService:
-            async def health_check(self): return True
-            async def get_active_strategies(self): return []
-            async def generate_signals(self): return []
+            async def health_check(self):
+                return True
+
+            async def get_active_strategies(self):
+                return []
+
+            async def generate_signals(self):
+                return []
 
         return MockStrategyService()
 
     def _create_mock_data_service(self):
         """Create mock DataService for infrastructure testing."""
+
         class MockDataService:
-            async def health_check(self): return True
-            async def get_market_data(self, symbol): return {"symbol": symbol, "price": 50000}
-            async def get_historical_data(self, **kwargs): return []
+            async def health_check(self):
+                return True
+
+            async def get_market_data(self, symbol):
+                return {"symbol": symbol, "price": 50000}
+
+            async def get_historical_data(self, **kwargs):
+                return []
 
         return MockDataService()
 
     def _create_mock_analytics_service(self):
         """Create mock AnalyticsService for infrastructure testing."""
+
         class MockAnalyticsService:
-            async def health_check(self): return True
-            async def calculate_performance_metrics(self): return {"total_return": 0.05}
+            async def health_check(self):
+                return True
+
+            async def calculate_performance_metrics(self):
+                return {"total_return": 0.05}
 
         return MockAnalyticsService()
 
@@ -302,7 +353,9 @@ class RealServiceFactory:
 
         logger.info("✅ Bot management services initialized")
 
-    async def create_full_container(self, clean_database: DatabaseConnectionManager | None = None) -> DependencyContainer:
+    async def create_full_container(
+        self, clean_database: DatabaseConnectionManager | None = None
+    ) -> DependencyContainer:
         """
         Create fully configured DI container with all real services.
 
@@ -332,7 +385,10 @@ class RealServiceFactory:
                     await self.cache_manager.health_check()
                 else:
                     # Fallback: test the Redis client directly
-                    if hasattr(self.cache_manager, "redis_client") and self.cache_manager.redis_client:
+                    if (
+                        hasattr(self.cache_manager, "redis_client")
+                        and self.cache_manager.redis_client
+                    ):
                         await self.cache_manager.redis_client.ping()
                 logger.debug("Cache health check passed")
             except Exception as e:
@@ -393,7 +449,9 @@ class ProductionReadyTestBase:
         self.service_factory = RealServiceFactory()
         self.container: DependencyContainer | None = None
 
-    async def setup_real_services(self, clean_database: DatabaseConnectionManager | None = None) -> DependencyContainer:
+    async def setup_real_services(
+        self, clean_database: DatabaseConnectionManager | None = None
+    ) -> DependencyContainer:
         """
         Setup real services for integration testing.
 
@@ -449,7 +507,9 @@ class ProductionReadyTestBase:
 
 
 # Convenience functions for common patterns
-async def create_test_database_service(clean_database: DatabaseConnectionManager) -> DatabaseService:
+async def create_test_database_service(
+    clean_database: DatabaseConnectionManager,
+) -> DatabaseService:
     """
     Create a properly configured DatabaseService for testing.
 

@@ -4,8 +4,6 @@ Exchange integration test fixtures.
 Provides fixtures for testing real exchange services with mock exchange implementations.
 """
 
-import asyncio
-from decimal import Decimal
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -23,7 +21,6 @@ def config():
 @pytest_asyncio.fixture
 async def container(config):
     """Create DI injector with all real services registered."""
-    from src.core.dependency_injection import DependencyInjector
     from src.core.di_master_registration import register_all_services
 
     # Register all services using the master registration
@@ -36,7 +33,7 @@ async def container(config):
     # Try to get and stop exchange service if it exists
     try:
         exchange_service = injector.resolve("exchange_service")
-        if exchange_service and hasattr(exchange_service, 'stop'):
+        if exchange_service and hasattr(exchange_service, "stop"):
             await exchange_service.stop()
     except:
         pass
@@ -70,7 +67,7 @@ async def di_container():
     Uses master DI registration to ensure all dependencies are properly configured
     in the correct order without circular dependency issues.
     """
-    from tests.integration.conftest import register_all_services_for_testing, cleanup_di_container
+    from tests.integration.conftest import cleanup_di_container, register_all_services_for_testing
 
     container = register_all_services_for_testing()
     yield container

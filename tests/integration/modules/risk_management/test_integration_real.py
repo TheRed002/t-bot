@@ -10,20 +10,14 @@ NO MOCKS - All tests use real RiskService with dependency injection.
 
 import asyncio
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import List
 
 import pytest
-import pytest_asyncio
 
-from src.core.config import Config
-from src.core.exceptions import RiskManagementError, ValidationError, ServiceError
+from src.core.exceptions import RiskManagementError, ServiceError, ValidationError
 from src.core.types import (
     MarketData,
-    OrderRequest,
-    OrderSide,
-    OrderType,
     Position,
     PositionSide,
     PositionStatus,
@@ -35,14 +29,8 @@ from src.core.types import (
 from src.risk_management.service import RiskService
 
 from .fixtures.real_service_fixtures import (
-    real_risk_service,
-    real_risk_factory,
-    generate_realistic_market_data_sequence,
-    generate_bull_market_scenario,
-    generate_bear_market_scenario,
     generate_high_volatility_scenario,
-    sample_positions,
-    sample_signal,
+    generate_realistic_market_data_sequence,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,17 +40,16 @@ class TestRiskManagementRealIntegration:
     """Integration tests using real risk management service."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_complete_risk_management_workflow(
-        self, real_risk_service: RiskService, sample_positions: List[Position]
+        self, real_risk_service: RiskService, sample_positions: list[Position]
     ):
         """Test complete risk management workflow with real services."""
         # GIVEN: Portfolio with real positions
         portfolio_value = Decimal("100000.00")
 
         # Generate real market data
-        btc_data = generate_realistic_market_data_sequence(
-            symbol="BTC/USDT", periods=30
-        )
+        btc_data = generate_realistic_market_data_sequence(symbol="BTC/USDT", periods=30)
         eth_data = generate_realistic_market_data_sequence(
             symbol="ETH/USDT", base_price=Decimal("3000"), periods=30
         )
@@ -71,20 +58,21 @@ class TestRiskManagementRealIntegration:
         # WHEN: Execute complete workflow
         # Step 1: Update portfolio state
         await real_risk_service.update_portfolio_state(
-            positions=sample_positions,
-            available_capital=portfolio_value
+            positions=sample_positions, available_capital=portfolio_value
         )
 
         # Step 2: Calculate risk metrics
         risk_metrics = await real_risk_service.calculate_risk_metrics(
-            positions=sample_positions,
-            market_data=market_data
+            positions=sample_positions, market_data=market_data
         )
 
         # THEN: Validate risk metrics
         assert isinstance(risk_metrics, RiskMetrics)
         assert risk_metrics.risk_level in [
-            RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL
+            RiskLevel.LOW,
+            RiskLevel.MEDIUM,
+            RiskLevel.HIGH,
+            RiskLevel.CRITICAL,
         ]
         assert isinstance(risk_metrics.var_95, Decimal)
         assert isinstance(risk_metrics.expected_shortfall, Decimal)
@@ -100,7 +88,7 @@ class TestRiskManagementRealIntegration:
             confidence=Decimal("0.85"),
             strength=Decimal("0.75"),
             source="test",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         is_valid = await real_risk_service.validate_signal(test_signal)
@@ -108,9 +96,7 @@ class TestRiskManagementRealIntegration:
 
         # Step 4: Calculate position sizes
         position_size = await real_risk_service.calculate_position_size(
-            signal=test_signal,
-            available_capital=portfolio_value,
-            current_price=Decimal("50000")
+            signal=test_signal, available_capital=portfolio_value, current_price=Decimal("50000")
         )
         assert isinstance(position_size, Decimal)
         assert position_size > Decimal("0")
@@ -126,7 +112,7 @@ class TestRiskManagementRealIntegration:
             side=PositionSide.LONG,
             status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
 
         can_add = await real_risk_service.check_portfolio_limits(new_position)
@@ -135,12 +121,11 @@ class TestRiskManagementRealIntegration:
         # Step 6: Get comprehensive risk summary
         summary = await real_risk_service.get_risk_summary()
         assert isinstance(summary, dict)
-        assert 'current_risk_level' in summary or 'risk_level' in summary
+        assert "current_risk_level" in summary or "risk_level" in summary
 
     @pytest.mark.asyncio
-    async def test_risk_management_with_large_portfolio(
-        self, real_risk_service: RiskService
-    ):
+    @pytest.mark.timeout(300)
+    async def test_risk_management_with_large_portfolio(self, real_risk_service: RiskService):
         """Test risk management with a large portfolio using real calculations."""
         # GIVEN: Large portfolio with multiple positions
         portfolio_value = Decimal("1000000.00")  # 1M portfolio
@@ -162,14 +147,12 @@ class TestRiskManagementRealIntegration:
                 opened_at=datetime.now(timezone.utc),
                 exchange="binance",
                 stop_loss=Decimal("49000"),
-                take_profit=Decimal("52000")
+                take_profit=Decimal("52000"),
             )
             positions.append(position)
 
             # Generate realistic market data for each symbol
-            symbol_data = generate_realistic_market_data_sequence(
-                symbol=symbol, periods=50
-            )
+            symbol_data = generate_realistic_market_data_sequence(symbol=symbol, periods=50)
             market_data.extend(symbol_data)
 
         # WHEN: Update portfolio state with historical data
@@ -177,19 +160,20 @@ class TestRiskManagementRealIntegration:
             variation = (i % 10 - 5) * Decimal("10000")  # Simulate volatility
             current_value = portfolio_value + variation
             await real_risk_service.update_portfolio_state(
-                positions=positions,
-                available_capital=current_value
+                positions=positions, available_capital=current_value
             )
 
         # Calculate risk metrics
         risk_metrics = await real_risk_service.calculate_risk_metrics(
-            positions=positions,
-            market_data=market_data
+            positions=positions, market_data=market_data
         )
 
         # THEN: Validate metrics for large portfolio
         assert risk_metrics.risk_level in [
-            RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL
+            RiskLevel.LOW,
+            RiskLevel.MEDIUM,
+            RiskLevel.HIGH,
+            RiskLevel.CRITICAL,
         ]
         assert isinstance(risk_metrics.var_95, Decimal)
         assert risk_metrics.var_95 >= Decimal("0")
@@ -204,13 +188,11 @@ class TestRiskManagementRealIntegration:
             confidence=Decimal("0.90"),
             strength=Decimal("0.85"),
             source="test",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         position_size = await real_risk_service.calculate_position_size(
-            signal=signal,
-            available_capital=portfolio_value,
-            current_price=Decimal("51000")
+            signal=signal, available_capital=portfolio_value, current_price=Decimal("51000")
         )
 
         assert isinstance(position_size, Decimal)
@@ -219,9 +201,8 @@ class TestRiskManagementRealIntegration:
         # Note: The actual value may vary based on risk calculations
 
     @pytest.mark.asyncio
-    async def test_risk_management_with_high_volatility(
-        self, real_risk_service: RiskService
-    ):
+    @pytest.mark.timeout(300)
+    async def test_risk_management_with_high_volatility(self, real_risk_service: RiskService):
         """Test risk management during high volatility scenarios."""
         # GIVEN: High volatility market conditions
         high_vol_data = generate_high_volatility_scenario(symbol="BTC/USDT")
@@ -239,7 +220,7 @@ class TestRiskManagementRealIntegration:
                 opened_at=datetime.now(timezone.utc),
                 exchange="binance",
                 stop_loss=Decimal("44000"),
-                take_profit=Decimal("52000")
+                take_profit=Decimal("52000"),
             )
         ]
 
@@ -248,26 +229,26 @@ class TestRiskManagementRealIntegration:
         for i in range(20):
             declining_value = initial_value * (Decimal("1") - Decimal("0.01") * Decimal(str(i)))
             await real_risk_service.update_portfolio_state(
-                positions=positions,
-                available_capital=declining_value
+                positions=positions, available_capital=declining_value
             )
 
         # WHEN: Calculate risk metrics in high volatility
         risk_metrics = await real_risk_service.calculate_risk_metrics(
-            positions=positions,
-            market_data=high_vol_data
+            positions=positions, market_data=high_vol_data
         )
 
         # THEN: Risk level should be elevated
-        assert risk_metrics.risk_level in [RiskLevel.HIGH, RiskLevel.CRITICAL], \
+        assert risk_metrics.risk_level in [RiskLevel.HIGH, RiskLevel.CRITICAL], (
             "Risk level should be high during volatility"
+        )
         assert isinstance(risk_metrics.max_drawdown, Decimal)
         # Drawdown is represented as a positive percentage (e.g., 0.1 = 10% drawdown)
         assert risk_metrics.max_drawdown >= Decimal("0"), "Drawdown should be positive percentage"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_risk_management_performance(
-        self, real_risk_service: RiskService, sample_positions: List[Position]
+        self, real_risk_service: RiskService, sample_positions: list[Position]
     ):
         """Test that real risk calculations meet performance requirements."""
         import time
@@ -281,8 +262,7 @@ class TestRiskManagementRealIntegration:
 
         # Calculate risk metrics
         risk_metrics = await real_risk_service.calculate_risk_metrics(
-            positions=sample_positions,
-            market_data=market_data
+            positions=sample_positions, market_data=market_data
         )
 
         # Calculate position size
@@ -295,13 +275,11 @@ class TestRiskManagementRealIntegration:
             confidence=Decimal("0.80"),
             strength=Decimal("0.70"),
             source="test",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         position_size = await real_risk_service.calculate_position_size(
-            signal=signal,
-            available_capital=portfolio_value,
-            current_price=Decimal("50000")
+            signal=signal, available_capital=portfolio_value, current_price=Decimal("50000")
         )
 
         # Validate signal
@@ -316,9 +294,8 @@ class TestRiskManagementRealIntegration:
         assert isinstance(is_valid, bool)
 
     @pytest.mark.asyncio
-    async def test_risk_management_error_handling(
-        self, real_risk_service: RiskService
-    ):
+    @pytest.mark.timeout(300)
+    async def test_risk_management_error_handling(self, real_risk_service: RiskService):
         """Test error handling in risk management service."""
         # GIVEN: Signal with edge case values (valid for Pydantic but may fail business logic)
         edge_case_signal = Signal(
@@ -330,7 +307,7 @@ class TestRiskManagementRealIntegration:
             confidence=Decimal("0.01"),  # Very low confidence
             strength=Decimal("0.01"),  # Very low strength
             source="test",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # WHEN/THEN: Should handle gracefully
@@ -343,15 +320,13 @@ class TestRiskManagementRealIntegration:
             pass
 
     @pytest.mark.asyncio
-    async def test_risk_management_edge_cases(
-        self, real_risk_service: RiskService
-    ):
+    @pytest.mark.timeout(300)
+    async def test_risk_management_edge_cases(self, real_risk_service: RiskService):
         """Test edge cases in risk management."""
         # Test with empty positions - empty data may cause validation errors, which is expected
         try:
             empty_metrics = await real_risk_service.calculate_risk_metrics(
-                positions=[],
-                market_data=[]
+                positions=[], market_data=[]
             )
             # If it succeeds, metrics should indicate no positions
             assert isinstance(empty_metrics, RiskMetrics)
@@ -370,15 +345,13 @@ class TestRiskManagementRealIntegration:
             confidence=Decimal("0.80"),
             strength=Decimal("0.70"),
             source="test",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Should handle zero portfolio gracefully
         try:
             position_size = await real_risk_service.calculate_position_size(
-                signal=signal,
-                available_capital=Decimal("0"),
-                current_price=Decimal("50000")
+                signal=signal, available_capital=Decimal("0"), current_price=Decimal("50000")
             )
             assert position_size == Decimal("0"), "Zero portfolio should give zero size"
         except (ValidationError, RiskManagementError, ServiceError):
@@ -386,17 +359,14 @@ class TestRiskManagementRealIntegration:
             pass
 
     @pytest.mark.asyncio
-    async def test_emergency_stop_functionality(
-        self, real_risk_service: RiskService
-    ):
+    @pytest.mark.timeout(300)
+    async def test_emergency_stop_functionality(self, real_risk_service: RiskService):
         """Test emergency stop activation and deactivation."""
         # GIVEN: Normal operating conditions
         assert real_risk_service.is_emergency_stop_active() is False
 
         # WHEN: Activate emergency stop
-        await real_risk_service.trigger_emergency_stop(
-            reason="Test emergency stop"
-        )
+        await real_risk_service.trigger_emergency_stop(reason="Test emergency stop")
 
         # THEN: Emergency stop should be active
         assert real_risk_service.is_emergency_stop_active() is True
@@ -411,7 +381,7 @@ class TestRiskManagementRealIntegration:
             confidence=Decimal("0.90"),
             strength=Decimal("0.85"),
             source="test",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         is_valid = await real_risk_service.validate_signal(signal)
@@ -424,9 +394,8 @@ class TestRiskManagementRealIntegration:
         assert real_risk_service.is_emergency_stop_active() is False
 
     @pytest.mark.asyncio
-    async def test_concurrent_risk_operations(
-        self, real_risk_service: RiskService
-    ):
+    @pytest.mark.timeout(300)
+    async def test_concurrent_risk_operations(self, real_risk_service: RiskService):
         """Test concurrent risk management operations."""
         # GIVEN: Multiple signals
         signals = [
@@ -439,7 +408,7 @@ class TestRiskManagementRealIntegration:
                 confidence=Decimal("0.80"),
                 strength=Decimal("0.70"),
                 source="test",
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
             for i in range(10)
         ]
@@ -449,9 +418,7 @@ class TestRiskManagementRealIntegration:
         # WHEN: Process signals concurrently
         tasks = [
             real_risk_service.calculate_position_size(
-                signal=signal,
-                available_capital=portfolio_value,
-                current_price=Decimal("50000")
+                signal=signal, available_capital=portfolio_value, current_price=Decimal("50000")
             )
             for signal in signals
         ]
@@ -464,8 +431,9 @@ class TestRiskManagementRealIntegration:
         assert all(r > Decimal("0") for r in results)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_decimal_precision_maintained(
-        self, real_risk_service: RiskService, sample_positions: List[Position]
+        self, real_risk_service: RiskService, sample_positions: list[Position]
     ):
         """Test that Decimal precision is maintained throughout calculations."""
         # GIVEN: High precision values
@@ -479,15 +447,14 @@ class TestRiskManagementRealIntegration:
                 close=Decimal("50156.789012"),
                 volume=Decimal("1234.567890"),
                 timestamp=datetime.now(timezone.utc) - timedelta(hours=i),
-                exchange="binance"
+                exchange="binance",
             )
             for i in range(50)
         ]
 
         # WHEN: Calculate risk metrics
         risk_metrics = await real_risk_service.calculate_risk_metrics(
-            positions=sample_positions,
-            market_data=market_data
+            positions=sample_positions, market_data=market_data
         )
 
         # THEN: All values must be Decimal (NEVER float)
@@ -507,8 +474,9 @@ class TestRiskManagementDatabasePersistence:
     """Test database persistence for risk management data."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_risk_state_persistence(
-        self, real_risk_service: RiskService, sample_positions: List[Position]
+        self, real_risk_service: RiskService, sample_positions: list[Position]
     ):
         """Test that risk state is persisted to database."""
         # GIVEN: Portfolio state
@@ -516,8 +484,7 @@ class TestRiskManagementDatabasePersistence:
 
         # WHEN: Update portfolio state
         await real_risk_service.update_portfolio_state(
-            positions=sample_positions,
-            available_capital=portfolio_value
+            positions=sample_positions, available_capital=portfolio_value
         )
 
         # THEN: State should be persisted (verified through service)
@@ -525,8 +492,9 @@ class TestRiskManagementDatabasePersistence:
         assert isinstance(summary, dict)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_risk_metrics_history(
-        self, real_risk_service: RiskService, sample_positions: List[Position]
+        self, real_risk_service: RiskService, sample_positions: list[Position]
     ):
         """Test that risk metrics history is maintained."""
         # GIVEN: Multiple risk calculations over time
@@ -535,8 +503,7 @@ class TestRiskManagementDatabasePersistence:
         # WHEN: Calculate metrics multiple times
         for i in range(5):
             await real_risk_service.calculate_risk_metrics(
-                positions=sample_positions,
-                market_data=market_data[i*20:(i+1)*20]
+                positions=sample_positions, market_data=market_data[i * 20 : (i + 1) * 20]
             )
 
         # THEN: History should be available (implementation-specific)

@@ -19,14 +19,14 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from src.core.dependency_injection import DependencyContainer
-from src.database.service import DatabaseService
-from src.database.models import User, Bot, Strategy, Position
 from src.database.interfaces import DatabaseServiceInterface
-from tests.integration.infrastructure.conftest import clean_database
+from src.database.models import Bot, Position, Strategy, User
+from src.database.service import DatabaseService
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_database_module_dependency_injection(clean_database):
     """Test database module integrates properly with DI container."""
     # Create DI container
@@ -56,7 +56,7 @@ async def test_database_module_dependency_injection(clean_database):
                 username=f"di_test_user_{unique_id}",
                 email=f"di_{unique_id}@test.com",
                 password_hash="hashed_password_test",
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(user)
             await session.commit()
@@ -74,6 +74,7 @@ async def test_database_module_dependency_injection(clean_database):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_database_service_interface_compliance(clean_database):
     """Test database service implements required interfaces correctly."""
     db_service = DatabaseService(clean_database)
@@ -102,6 +103,7 @@ async def test_database_service_interface_compliance(clean_database):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_database_module_boundaries(clean_database):
     """Test database module respects proper boundaries."""
     db_service = DatabaseService(clean_database)
@@ -119,7 +121,7 @@ async def test_database_module_boundaries(clean_database):
                 username=f"boundary_test_{unique_id}",
                 email=f"boundary_{unique_id}@test.com",
                 password_hash="hashed_password_test",
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(user)
             await session.commit()
@@ -141,6 +143,7 @@ async def test_database_module_boundaries(clean_database):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_database_service_error_handling(clean_database):
     """Test database service error handling and resilience."""
     db_service = DatabaseService(clean_database)
@@ -156,7 +159,7 @@ async def test_database_service_error_handling(clean_database):
                 username=f"user1_{unique_id_1}",
                 email=f"user1_{unique_id_1}@test.com",
                 password_hash="hashed_password_test",
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(user1)
             await session.commit()
@@ -169,13 +172,16 @@ async def test_database_service_error_handling(clean_database):
                 username=f"user2_{unique_id_2}",
                 email=f"user2_{unique_id_2}@test.com",
                 password_hash="hashed_password_test",
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             test_session.add(user2)
 
             # Should raise constraint violation when trying to commit duplicate UUID
             with pytest.raises((Exception, IntegrityError)):
                 await test_session.commit()
+
+            # Rollback the failed transaction to prevent PendingRollbackError on context exit
+            await test_session.rollback()
 
         # Test successful operation after error
         async with db_service.get_session() as session:
@@ -185,7 +191,7 @@ async def test_database_service_error_handling(clean_database):
                 username=f"valid_user_{unique_id_valid}",
                 email=f"valid_{unique_id_valid}@test.com",
                 password_hash="hashed_password_test",
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(valid_user)
             await session.commit()
@@ -203,6 +209,7 @@ async def test_database_service_error_handling(clean_database):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_database_service_lifecycle_management(clean_database):
     """Test database service lifecycle management."""
     db_service = DatabaseService(clean_database)
@@ -231,6 +238,7 @@ async def test_database_service_lifecycle_management(clean_database):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_database_models_with_service_layer(clean_database):
     """Test database models work correctly with service layer."""
     db_service = DatabaseService(clean_database)
@@ -244,7 +252,7 @@ async def test_database_models_with_service_layer(clean_database):
                 name="Module Test Bot",
                 exchange="binance",
                 status="running",
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(bot)
             await session.flush()
@@ -258,7 +266,7 @@ async def test_database_models_with_service_layer(clean_database):
                 bot_id=bot.id,
                 max_position_size=Decimal("1000.0"),
                 risk_per_trade=Decimal("0.02"),
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(strategy)
             await session.flush()
@@ -278,15 +286,13 @@ async def test_database_models_with_service_layer(clean_database):
                 entry_price=Decimal("100.0"),
                 current_price=Decimal("105.0"),
                 unrealized_pnl=Decimal("50.0"),
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(position)
             await session.commit()
 
             # Test model retrieval
-            result = await session.execute(
-                select(Position).where(Position.symbol == unique_symbol)
-            )
+            result = await session.execute(select(Position).where(Position.symbol == unique_symbol))
             retrieved_position = result.scalar_one()
 
             # Verify model attributes

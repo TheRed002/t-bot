@@ -6,15 +6,12 @@ Tests JWT generation and validation using the actual JWTHandler implementation.
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
 
-import jwt
 import pytest
-from jose import JWTError
 
-from src.core.exceptions import AuthenticationError
 from src.core.config import Config
-from src.web_interface.security.jwt_handler import JWTHandler, TokenData
+from src.core.exceptions import AuthenticationError
+from src.web_interface.security.jwt_handler import JWTHandler
 from tests.integration.infrastructure.service_factory import RealServiceFactory
 
 logger = logging.getLogger(__name__)
@@ -46,6 +43,7 @@ class RealServiceSecurityTest:
         return container
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_jwt_generation_and_validation(self, clean_database):
         """Test JWT generation and validation with real components."""
         container = await self.setup_test_services(clean_database)
@@ -57,9 +55,7 @@ class RealServiceSecurityTest:
 
             # Generate JWT
             token = self.jwt_handler.create_access_token(
-                user_id=user_id,
-                username=username,
-                scopes=scopes
+                user_id=user_id, username=username, scopes=scopes
             )
             assert token is not None
             assert isinstance(token, str)
@@ -83,6 +79,7 @@ class RealServiceSecurityTest:
             container.clear()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_token_expiry(self, clean_database):
         """Test token expiry handling."""
         container = await self.setup_test_services(clean_database)
@@ -92,10 +89,7 @@ class RealServiceSecurityTest:
             username = "expiryuser"
 
             # Generate token
-            token = self.jwt_handler.create_access_token(
-                user_id=user_id,
-                username=username
-            )
+            token = self.jwt_handler.create_access_token(user_id=user_id, username=username)
 
             # Immediately decode should work
             decoded = self.jwt_handler.validate_token(token)
@@ -112,19 +106,18 @@ class RealServiceSecurityTest:
             container.clear()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_concurrent_token_operations(self, clean_database):
         """Test concurrent token operations."""
         container = await self.setup_test_services(clean_database)
 
         try:
+
             async def create_and_validate_token(user_id: str):
                 """Create and validate a token."""
                 username = f"user_{user_id.split('_')[-1]}"
 
-                token = self.jwt_handler.create_access_token(
-                    user_id=user_id,
-                    username=username
-                )
+                token = self.jwt_handler.create_access_token(user_id=user_id, username=username)
                 decoded = self.jwt_handler.validate_token(token)
 
                 assert decoded.user_id == user_id
@@ -139,7 +132,7 @@ class RealServiceSecurityTest:
             assert len(set(tokens)) == len(tokens)
 
             # All tokens should be valid
-            for token, user_id in zip(tokens, user_ids):
+            for token, user_id in zip(tokens, user_ids, strict=False):
                 decoded = self.jwt_handler.validate_token(token)
                 assert decoded.user_id == user_id
 
@@ -151,6 +144,7 @@ class RealServiceSecurityTest:
             container.clear()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_token_refresh(self, clean_database):
         """Test token refresh functionality."""
         container = await self.setup_test_services(clean_database)
@@ -162,9 +156,7 @@ class RealServiceSecurityTest:
 
             # Generate original token
             original_token = self.jwt_handler.create_access_token(
-                user_id=user_id,
-                username=username,
-                scopes=original_scopes
+                user_id=user_id, username=username, scopes=original_scopes
             )
 
             # Decode original token
@@ -173,9 +165,7 @@ class RealServiceSecurityTest:
             # Create refreshed token with updated scopes
             refreshed_scopes = ["read", "write", "trade"]
             refreshed_token = self.jwt_handler.create_access_token(
-                user_id=user_id,
-                username=username,
-                scopes=refreshed_scopes
+                user_id=user_id, username=username, scopes=refreshed_scopes
             )
 
             # Validate refreshed token
@@ -192,6 +182,7 @@ class RealServiceSecurityTest:
             container.clear()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_invalid_secret_key(self, clean_database):
         """Test token validation with wrong secret key."""
         container = await self.setup_test_services(clean_database)
@@ -201,10 +192,7 @@ class RealServiceSecurityTest:
             username = "wrongkeyuser"
 
             # Generate token with main handler
-            token = self.jwt_handler.create_access_token(
-                user_id=user_id,
-                username=username
-            )
+            token = self.jwt_handler.create_access_token(user_id=user_id, username=username)
 
             # Should work with correct handler
             decoded = self.jwt_handler.validate_token(token)
@@ -224,6 +212,7 @@ class RealServiceSecurityTest:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_comprehensive_real_security(clean_database):
     """Run comprehensive security tests with real services."""
     test = RealServiceSecurityTest()

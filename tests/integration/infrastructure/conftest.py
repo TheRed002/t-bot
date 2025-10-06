@@ -13,8 +13,8 @@ import uuid
 from collections.abc import AsyncGenerator
 
 import pytest
-
 import pytest_asyncio
+
 from src.core.caching.cache_manager import CacheManager
 from src.core.config import get_config
 from src.database.connection import DatabaseConnectionManager
@@ -74,7 +74,9 @@ async def real_test_config():
     object.__setattr__(config.database, "redis_host", "localhost")
     object.__setattr__(config.database, "redis_port", 6379)
     object.__setattr__(config.database, "redis_db", 1)  # Use DB 1 for tests
-    object.__setattr__(config.database, "redis_password", "redis_dev_password")  # Development Redis password
+    object.__setattr__(
+        config.database, "redis_password", "redis_dev_password"
+    )  # Development Redis password
 
     # InfluxDB settings for Docker test environment
     object.__setattr__(config.database, "influxdb_host", "localhost")
@@ -122,7 +124,9 @@ async def clean_database() -> AsyncGenerator[DatabaseConnectionManager, None]:
     object.__setattr__(config.database, "redis_host", "localhost")
     object.__setattr__(config.database, "redis_port", 6379)
     object.__setattr__(config.database, "redis_db", 1)  # Use DB 1 for tests
-    object.__setattr__(config.database, "redis_password", "redis_dev_password")  # Development Redis password
+    object.__setattr__(
+        config.database, "redis_password", "redis_dev_password"
+    )  # Development Redis password
 
     # InfluxDB settings for Docker test environment
     object.__setattr__(config.database, "influxdb_host", "localhost")
@@ -147,6 +151,7 @@ async def clean_database() -> AsyncGenerator[DatabaseConnectionManager, None]:
 
         # Create test schema for isolation
         from sqlalchemy import text
+
         async with connection_manager.get_async_session() as session:
             await session.execute(text(f"CREATE SCHEMA IF NOT EXISTS {test_schema}"))
             await session.commit()
@@ -166,7 +171,9 @@ async def clean_database() -> AsyncGenerator[DatabaseConnectionManager, None]:
                 # First attempt: try creating tables with checkfirst
                 async with connection_manager.async_engine.begin() as conn:
                     await conn.execute(text(f"SET search_path TO {test_schema}, public"))
-                    await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, checkfirst=True))
+                    await conn.run_sync(
+                        lambda sync_conn: Base.metadata.create_all(sync_conn, checkfirst=True)
+                    )
                     logger.info(f"Created all database tables in schema: {test_schema}")
             except Exception as e:
                 # If we get conflicts, rollback and retry with fresh schema
@@ -183,7 +190,9 @@ async def clean_database() -> AsyncGenerator[DatabaseConnectionManager, None]:
                         # Now create tables in a fresh transaction
                         async with connection_manager.async_engine.begin() as conn:
                             await conn.execute(text(f"SET search_path TO {test_schema}, public"))
-                            await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn))
+                            await conn.run_sync(
+                                lambda sync_conn: Base.metadata.create_all(sync_conn)
+                            )
                             logger.info(f"Recreated all database tables in schema: {test_schema}")
                     except Exception as recreate_error:
                         logger.error(f"Failed to recreate schema {test_schema}: {recreate_error}")
@@ -195,11 +204,7 @@ async def clean_database() -> AsyncGenerator[DatabaseConnectionManager, None]:
             raise RuntimeError("Database engine not initialized")
 
         # Verify all services are healthy
-        health_status = {
-            "postgresql": False,
-            "redis": False,
-            "influxdb": False
-        }
+        health_status = {"postgresql": False, "redis": False, "influxdb": False}
 
         # Test PostgreSQL
         try:
@@ -252,7 +257,9 @@ async def clean_database() -> AsyncGenerator[DatabaseConnectionManager, None]:
             if table_count == 0:
                 raise RuntimeError(f"No tables created in test schema {test_schema}")
 
-        logger.info(f"✅ Clean database environment ready - schema: {test_schema} with {table_count} tables")
+        logger.info(
+            f"✅ Clean database environment ready - schema: {test_schema} with {table_count} tables"
+        )
 
         yield connection_manager
 
@@ -264,6 +271,7 @@ async def clean_database() -> AsyncGenerator[DatabaseConnectionManager, None]:
             # Clean up test schema - try both the stored attribute and the local variable
             schema_to_clean = getattr(connection_manager, "_test_schema", test_schema)
             from sqlalchemy import text
+
             async with connection_manager.get_async_session() as session:
                 await session.execute(text(f"DROP SCHEMA IF EXISTS {schema_to_clean} CASCADE"))
                 await session.commit()
@@ -305,7 +313,9 @@ async def clean_database() -> AsyncGenerator[DatabaseConnectionManager, None]:
         # Cancel remaining tasks
         try:
             current_task = asyncio.current_task()
-            pending = [task for task in asyncio.all_tasks() if not task.done() and task is not current_task]
+            pending = [
+                task for task in asyncio.all_tasks() if not task.done() and task is not current_task
+            ]
             if pending:
                 logger.debug(f"Cancelling {len(pending)} remaining tasks")
                 for task in pending:
@@ -410,7 +420,9 @@ async def real_service_factory(clean_database) -> AsyncGenerator[RealServiceFact
 
 
 @pytest_asyncio.fixture
-async def production_ready_test_base(clean_database) -> AsyncGenerator[ProductionReadyTestBase, None]:
+async def production_ready_test_base(
+    clean_database,
+) -> AsyncGenerator[ProductionReadyTestBase, None]:
     """
     Provides a ProductionReadyTestBase instance for infrastructure tests.
 
@@ -542,11 +554,7 @@ def performance_monitor():
 
         def start(self):
             self.start_time = time.time()
-            self.metrics = {
-                "operations": 0,
-                "errors": 0,
-                "latencies": []
-            }
+            self.metrics = {"operations": 0, "errors": 0, "latencies": []}
 
         def record_operation(self, latency=None):
             self.metrics["operations"] += 1
@@ -558,7 +566,11 @@ def performance_monitor():
 
         def get_summary(self):
             duration = time.time() - (self.start_time or time.time())
-            avg_latency = sum(self.metrics["latencies"]) / len(self.metrics["latencies"]) if self.metrics["latencies"] else 0
+            avg_latency = (
+                sum(self.metrics["latencies"]) / len(self.metrics["latencies"])
+                if self.metrics["latencies"]
+                else 0
+            )
 
             return {
                 "duration": duration,
@@ -566,7 +578,7 @@ def performance_monitor():
                 "errors": self.metrics["errors"],
                 "error_rate": self.metrics["errors"] / max(1, self.metrics["operations"]),
                 "avg_latency": avg_latency,
-                "ops_per_second": self.metrics["operations"] / max(0.001, duration)
+                "ops_per_second": self.metrics["operations"] / max(0.001, duration),
             }
 
     monitor = PerformanceMonitor()
@@ -580,8 +592,7 @@ def performance_monitor():
 def configure_logging():
     """Configure logging for infrastructure tests."""
     logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
 
     # Reduce noise from external libraries

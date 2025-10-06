@@ -6,7 +6,7 @@ working together in realistic scenarios.
 """
 
 from decimal import Decimal
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -24,8 +24,8 @@ from src.core.exceptions import (
 from src.core.types import (
     AllocationStrategy,
 )
-from src.exchanges.base import BaseExchange
 from src.database.service import DatabaseService
+from src.exchanges.base import BaseExchange
 
 
 class TestCapitalManagementIntegration:
@@ -54,12 +54,13 @@ class TestCapitalManagementIntegration:
     @pytest.fixture
     def mock_capital_service(self, mock_database_service):
         """Create mock capital service."""
-        from src.core.types import CapitalAllocation
         from datetime import datetime
-        
+
+        from src.core.types import CapitalAllocation
+
         mock_service = Mock(spec=CapitalService)
         mock_service.database_service = mock_database_service
-        
+
         # Create a proper CapitalAllocation mock object
         mock_allocation = Mock(spec=CapitalAllocation)
         mock_allocation.allocation_id = "test_allocation_1"
@@ -69,7 +70,7 @@ class TestCapitalManagementIntegration:
         mock_allocation.allocation_percentage = 0.2  # 20%
         mock_allocation.timestamp = datetime.now()
         mock_allocation.status = "active"
-        
+
         # Create a proper CapitalMetrics mock object
         mock_metrics = Mock()
         mock_metrics.total_capital = Decimal("100000")
@@ -77,13 +78,15 @@ class TestCapitalManagementIntegration:
         mock_metrics.utilization_rate = Decimal("0.45")
         mock_metrics.allocation_count = 3
         mock_metrics.allocation_efficiency = 0.85
-        
+
         # Mock all the async methods that will be called
         mock_service.allocate_capital = AsyncMock(return_value=mock_allocation)
         mock_service.get_capital_metrics = AsyncMock(return_value=mock_metrics)
         mock_service.update_utilization = AsyncMock(return_value=True)
         mock_service.rebalance_allocations = AsyncMock(return_value=True)
-        mock_service.get_allocation_summary = AsyncMock(return_value={"total_allocations": 0, "total_capital": Decimal("100000")})
+        mock_service.get_allocation_summary = AsyncMock(
+            return_value={"total_allocations": 0, "total_capital": Decimal("100000")}
+        )
         return mock_service
 
     @pytest.fixture
@@ -97,12 +100,12 @@ class TestCapitalManagementIntegration:
         mock_binance = Mock(spec=BaseExchange)
         mock_okx = Mock(spec=BaseExchange)
         mock_coinbase = Mock(spec=BaseExchange)
-        
+
         # Mock async methods
         mock_binance.get_balance = AsyncMock(return_value={"USDT": Decimal("10000")})
         mock_okx.get_balance = AsyncMock(return_value={"USDT": Decimal("10000")})
         mock_coinbase.get_balance = AsyncMock(return_value={"USDT": Decimal("10000")})
-        
+
         return {"binance": mock_binance, "okx": mock_okx, "coinbase": mock_coinbase}
 
     @pytest.fixture
@@ -113,8 +116,12 @@ class TestCapitalManagementIntegration:
         distributor.distribute_capital = AsyncMock(return_value=True)
         distributor.rebalance_exchanges = AsyncMock(return_value=True)
         distributor.get_exchange_metrics = AsyncMock(return_value=[])
-        distributor.get_distribution_summary = AsyncMock(return_value={"total_allocated": Decimal("0"), "total_exchanges": 3})
-        distributor.get_exchange_allocation = AsyncMock(return_value=Mock(allocated_amount=Decimal("10000")))
+        distributor.get_distribution_summary = AsyncMock(
+            return_value={"total_allocated": Decimal("0"), "total_exchanges": 3}
+        )
+        distributor.get_exchange_allocation = AsyncMock(
+            return_value=Mock(allocated_amount=Decimal("10000"))
+        )
         return distributor
 
     @pytest.fixture
@@ -126,7 +133,9 @@ class TestCapitalManagementIntegration:
         manager.get_currency_risk_metrics = AsyncMock(return_value=["USDT", "BTC", "ETH"])
         manager.calculate_hedging_requirements = AsyncMock(return_value={"BTC": Decimal("1000")})
         manager.execute_currency_conversion = AsyncMock(return_value=True)
-        manager.get_currency_exposure = AsyncMock(return_value=Mock(total_exposure=Decimal("20000")))
+        manager.get_currency_exposure = AsyncMock(
+            return_value=Mock(total_exposure=Decimal("20000"))
+        )
         return manager
 
     @pytest.fixture
@@ -138,7 +147,9 @@ class TestCapitalManagementIntegration:
         manager.process_withdrawal = AsyncMock(return_value=True)
         manager.update_performance = AsyncMock(return_value=True)
         manager.process_auto_compound = AsyncMock(return_value=True)
-        manager.get_flow_summary = AsyncMock(return_value={"total_deposits": Decimal("5000"), "total_withdrawals": Decimal("2000")})
+        manager.get_flow_summary = AsyncMock(
+            return_value={"total_deposits": Decimal("5000"), "total_withdrawals": Decimal("2000")}
+        )
         manager.get_performance_summary = AsyncMock(return_value={"total_pnl": Decimal("1500")})
         manager.get_capital_protection_status = AsyncMock(return_value={"protection_active": False})
         manager.update_total_capital = AsyncMock(return_value=True)
@@ -146,6 +157,7 @@ class TestCapitalManagementIntegration:
         return manager
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_complete_capital_management_workflow(
         self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
     ):
@@ -203,6 +215,7 @@ class TestCapitalManagementIntegration:
         assert flow_summary["total_withdrawals"] > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_capital_management_with_large_portfolio(
         self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
     ):
@@ -244,6 +257,7 @@ class TestCapitalManagementIntegration:
         assert len(currency_metrics) > 0  # Check that we have currency metrics
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_capital_management_with_high_volatility(
         self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
     ):
@@ -273,6 +287,7 @@ class TestCapitalManagementIntegration:
         assert len(currency_metrics) > 0  # Should have currency metrics
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_capital_management_with_multiple_strategies(
         self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
     ):
@@ -326,6 +341,7 @@ class TestCapitalManagementIntegration:
         assert performance_summary["total_pnl"] > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_capital_management_parameter_validation(
         self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
     ):
@@ -351,6 +367,7 @@ class TestCapitalManagementIntegration:
             await fund_flow_manager.process_deposit(Decimal("500"), "USDT", "binance")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_capital_management_error_handling(
         self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
     ):
@@ -381,6 +398,7 @@ class TestCapitalManagementIntegration:
             await capital_allocator.allocate_capital("", "binance", Decimal("10000"))
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_capital_management_performance(
         self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
     ):
@@ -418,6 +436,7 @@ class TestCapitalManagementIntegration:
         assert len(currency_metrics) > 0  # Check that we have currency metrics
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_capital_management_edge_cases(
         self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
     ):
@@ -447,6 +466,7 @@ class TestCapitalManagementIntegration:
             await currency_manager.update_currency_exposures(balances)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_capital_management_configuration_changes(
         self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager, config
     ):
@@ -485,6 +505,7 @@ class TestCapitalManagementIntegration:
         assert hedging_requirements["BTC"] > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_capital_management_real_time_updates(
         self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
     ):
@@ -518,6 +539,7 @@ class TestCapitalManagementIntegration:
         )  # Should have same or more currencies
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_capital_management_data_consistency(
         self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
     ):
@@ -558,6 +580,7 @@ class TestCapitalManagementIntegration:
         assert flow_summary["total_deposits"] == amount
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_capital_management_integration_with_risk_management(
         self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
     ):
@@ -591,6 +614,7 @@ class TestCapitalManagementIntegration:
         assert "total_deposits" in flow_summary
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_capital_management_comprehensive_reporting(
         self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
     ):

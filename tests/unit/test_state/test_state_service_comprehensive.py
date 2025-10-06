@@ -13,10 +13,8 @@ from src.core.config import Config
 from src.core.exceptions import ServiceError, StateConsistencyError, ValidationError
 from src.core.types import StateType
 
-# Mock the telemetry module before importing StateService
-with patch('src.monitoring.get_tracer', return_value=MagicMock()), \
-     patch('src.monitoring.trace_async_function', return_value=lambda f: f):
-    from src.state.state_service import StateService
+# Import StateService with mocked dependencies
+from src.state.state_service import StateService
 
 
 class TestStateServiceClass:
@@ -159,10 +157,10 @@ class TestStateServiceEdgeCases:
 
     def test_invalid_state_type(self, mock_config):
         """Test with invalid state type."""
-        with patch('src.monitoring.get_tracer') as mock_tracer:
+        with patch('src.state.state_service.get_tracer') as mock_tracer:
             mock_tracer.return_value = MagicMock()
             service = StateService(config=mock_config)
-            
+
             # This test just verifies the service can be created
             assert service is not None
 
@@ -178,11 +176,11 @@ class TestStateServiceIntegration:
 
     def test_service_creation_integration(self, mock_config):
         """Test complete service creation workflow."""
-        with patch('src.monitoring.get_tracer') as mock_tracer:
+        with patch('src.state.state_service.get_tracer') as mock_tracer:
             mock_tracer.return_value = MagicMock()
-            
+
             service = StateService(config=mock_config)
-            
+
             # Verify the service is properly initialized
             assert service.config == mock_config
             assert service._memory_cache == {}

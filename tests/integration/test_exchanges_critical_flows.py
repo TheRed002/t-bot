@@ -6,8 +6,8 @@ that span multiple exchange components and real-world workflows.
 """
 
 import asyncio
-from decimal import Decimal
 from datetime import datetime, timezone
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -58,6 +58,7 @@ def mock_connection_manager():
 class TestExchangeServiceFactoryIntegration:
     """Test integration between ExchangeService and ExchangeFactory."""
 
+    @pytest.mark.timeout(300)
     async def test_service_factory_integration_success(self, mock_config):
         """Test successful integration between service and factory."""
         # Create mock factory
@@ -84,6 +85,7 @@ class TestExchangeServiceFactoryIntegration:
 
         await service.stop()
 
+    @pytest.mark.timeout(300)
     async def test_service_factory_integration_factory_failure(self, mock_config):
         """Test service behavior when factory fails."""
         mock_factory = AsyncMock(spec=ExchangeFactory)
@@ -103,6 +105,7 @@ class TestExchangeServiceFactoryIntegration:
 class TestExchangeOrderFlow:
     """Test complete order execution flows."""
 
+    @pytest.mark.timeout(300)
     async def test_complete_order_placement_flow(self, mock_config):
         """Test complete order placement workflow."""
         # Setup mocks
@@ -149,6 +152,7 @@ class TestExchangeOrderFlow:
 
         await service.stop()
 
+    @pytest.mark.timeout(300)
     async def test_order_cancellation_flow(self, mock_config):
         """Test complete order cancellation workflow."""
         # Setup mocks
@@ -174,6 +178,7 @@ class TestExchangeOrderFlow:
 
         await service.stop()
 
+    @pytest.mark.timeout(300)
     async def test_order_status_tracking_flow(self, mock_config):
         """Test order status tracking workflow."""
         # Setup mocks
@@ -203,6 +208,7 @@ class TestExchangeOrderFlow:
 class TestMultiExchangeScenarios:
     """Test scenarios involving multiple exchanges."""
 
+    @pytest.mark.timeout(300)
     async def test_multi_exchange_best_price_calculation(self, mock_config):
         """Test best price calculation across multiple exchanges."""
         # Setup mocks for multiple exchanges
@@ -237,6 +243,7 @@ class TestMultiExchangeScenarios:
 
         await service.stop()
 
+    @pytest.mark.timeout(300)
     async def test_multi_exchange_with_failures(self, mock_config):
         """Test multi-exchange operations with some exchanges failing."""
         mock_factory = AsyncMock(spec=ExchangeFactory)
@@ -276,6 +283,7 @@ class TestMultiExchangeScenarios:
 class TestExchangeHealthMonitoring:
     """Test health monitoring and failover scenarios."""
 
+    @pytest.mark.timeout(300)
     async def test_exchange_health_monitoring_flow(self, mock_config):
         """Test health monitoring workflow."""
         mock_factory = AsyncMock(spec=ExchangeFactory)
@@ -303,6 +311,7 @@ class TestExchangeHealthMonitoring:
 
         await service.stop()
 
+    @pytest.mark.timeout(300)
     async def test_exchange_failover_scenario(self, mock_config):
         """Test exchange failover when primary becomes unhealthy."""
         mock_factory = AsyncMock(spec=ExchangeFactory)
@@ -339,6 +348,7 @@ class TestExchangeHealthMonitoring:
 class TestConcurrentOperations:
     """Test concurrent exchange operations."""
 
+    @pytest.mark.timeout(300)
     async def test_concurrent_order_operations(self, mock_config):
         """Test concurrent order operations on the same exchange."""
         mock_factory = AsyncMock(spec=ExchangeFactory)
@@ -348,9 +358,36 @@ class TestConcurrentOperations:
 
         # Setup concurrent order responses
         order_responses = [
-            OrderResponse(id="order-1", symbol="BTCUSDT", side="buy", order_type="market", status=OrderStatus.NEW, quantity=Decimal("1.0"), created_at=datetime.now(timezone.utc), exchange="binance"),
-            OrderResponse(id="order-2", symbol="ETHUSDT", side="sell", order_type="market", status=OrderStatus.NEW, quantity=Decimal("10.0"), created_at=datetime.now(timezone.utc), exchange="binance"),
-            OrderResponse(id="order-3", symbol="ADAUSDT", side="buy", order_type="market", status=OrderStatus.NEW, quantity=Decimal("1000.0"), created_at=datetime.now(timezone.utc), exchange="binance"),
+            OrderResponse(
+                id="order-1",
+                symbol="BTCUSDT",
+                side="buy",
+                order_type="market",
+                status=OrderStatus.NEW,
+                quantity=Decimal("1.0"),
+                created_at=datetime.now(timezone.utc),
+                exchange="binance",
+            ),
+            OrderResponse(
+                id="order-2",
+                symbol="ETHUSDT",
+                side="sell",
+                order_type="market",
+                status=OrderStatus.NEW,
+                quantity=Decimal("10.0"),
+                created_at=datetime.now(timezone.utc),
+                exchange="binance",
+            ),
+            OrderResponse(
+                id="order-3",
+                symbol="ADAUSDT",
+                side="buy",
+                order_type="market",
+                status=OrderStatus.NEW,
+                quantity=Decimal("1000.0"),
+                created_at=datetime.now(timezone.utc),
+                exchange="binance",
+            ),
         ]
 
         mock_exchange.place_order.side_effect = order_responses
@@ -363,9 +400,15 @@ class TestConcurrentOperations:
 
         # Create concurrent orders
         orders = [
-            OrderRequest(symbol="BTCUSDT", side="buy", order_type="market", quantity=Decimal("1.0")),
-            OrderRequest(symbol="ETHUSDT", side="sell", order_type="market", quantity=Decimal("10.0")),
-            OrderRequest(symbol="ADAUSDT", side="buy", order_type="market", quantity=Decimal("1000.0")),
+            OrderRequest(
+                symbol="BTCUSDT", side="buy", order_type="market", quantity=Decimal("1.0")
+            ),
+            OrderRequest(
+                symbol="ETHUSDT", side="sell", order_type="market", quantity=Decimal("10.0")
+            ),
+            OrderRequest(
+                symbol="ADAUSDT", side="buy", order_type="market", quantity=Decimal("1000.0")
+            ),
         ]
 
         # Execute orders concurrently
@@ -383,6 +426,7 @@ class TestConcurrentOperations:
 
         await service.stop()
 
+    @pytest.mark.timeout(300)
     async def test_concurrent_multi_exchange_operations(self, mock_config):
         """Test concurrent operations across multiple exchanges."""
         # Setup multiple exchanges
@@ -420,10 +464,24 @@ class TestConcurrentOperations:
         )
 
         binance_response = OrderResponse(
-            id="binance-order-1", symbol="BTCUSDT", side="buy", order_type="market", status=OrderStatus.NEW, quantity=Decimal("1.0"), created_at=datetime.now(timezone.utc), exchange="binance"
+            id="binance-order-1",
+            symbol="BTCUSDT",
+            side="buy",
+            order_type="market",
+            status=OrderStatus.NEW,
+            quantity=Decimal("1.0"),
+            created_at=datetime.now(timezone.utc),
+            exchange="binance",
         )
         coinbase_response = OrderResponse(
-            id="coinbase-order-1", symbol="BTCUSD", side="sell", order_type="market", status=OrderStatus.NEW, quantity=Decimal("1.0"), created_at=datetime.now(timezone.utc), exchange="coinbase"
+            id="coinbase-order-1",
+            symbol="BTCUSD",
+            side="sell",
+            order_type="market",
+            status=OrderStatus.NEW,
+            quantity=Decimal("1.0"),
+            created_at=datetime.now(timezone.utc),
+            exchange="coinbase",
         )
 
         binance_exchange.place_order.return_value = binance_response
@@ -452,6 +510,7 @@ class TestConcurrentOperations:
 class TestErrorRecoveryFlows:
     """Test error recovery and resilience scenarios."""
 
+    @pytest.mark.timeout(300)
     async def test_exchange_connection_recovery(self, mock_config):
         """Test exchange connection recovery after failure."""
         mock_factory = AsyncMock(spec=ExchangeFactory)
@@ -487,6 +546,7 @@ class TestErrorRecoveryFlows:
 
         await service.stop()
 
+    @pytest.mark.timeout(300)
     async def test_service_graceful_shutdown_with_errors(self, mock_config):
         """Test service graceful shutdown even when some operations fail."""
         mock_factory = AsyncMock(spec=ExchangeFactory)
@@ -535,6 +595,7 @@ class TestErrorRecoveryFlows:
 class TestWebSocketIntegration:
     """Test WebSocket integration scenarios."""
 
+    @pytest.mark.timeout(300)
     async def test_websocket_subscription_flow(self, mock_config):
         """Test WebSocket subscription workflow."""
         mock_factory = AsyncMock(spec=ExchangeFactory)
@@ -558,6 +619,7 @@ class TestWebSocketIntegration:
 
         await service.stop()
 
+    @pytest.mark.timeout(300)
     async def test_websocket_subscription_failure(self, mock_config):
         """Test WebSocket subscription failure handling."""
         mock_factory = AsyncMock(spec=ExchangeFactory)
@@ -584,6 +646,7 @@ class TestWebSocketIntegration:
 class TestConfigurationScenarios:
     """Test various configuration scenarios."""
 
+    @pytest.mark.timeout(300)
     async def test_service_with_minimal_config(self):
         """Test service with minimal configuration."""
         # Minimal config as dict
@@ -602,6 +665,7 @@ class TestConfigurationScenarios:
         await service.start()
         await service.stop()
 
+    @pytest.mark.timeout(300)
     async def test_service_with_custom_config(self):
         """Test service with custom configuration."""
         config = MagicMock()
@@ -628,6 +692,7 @@ class TestConfigurationScenarios:
 class TestValidationIntegration:
     """Test integration with validation components."""
 
+    @pytest.mark.timeout(300)
     async def test_order_validation_integration(self, mock_config):
         """Test integration between service and validation."""
         mock_factory = AsyncMock(spec=ExchangeFactory)

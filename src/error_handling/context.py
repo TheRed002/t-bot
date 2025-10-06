@@ -67,6 +67,11 @@ class ErrorContext:
     max_recovery_attempts: int = 3
     correlation_id: str | None = None
 
+    @property
+    def context(self) -> dict[str, Any]:
+        """Get error context (convenience property mapping to details)."""
+        return self.details
+
     def __post_init__(self):
         """Post-initialization processing."""
         # Store attributes for efficient access

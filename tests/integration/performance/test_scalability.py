@@ -15,22 +15,16 @@ from decimal import Decimal
 
 import psutil
 import pytest
-
 import pytest_asyncio
-from src.core.dependency_injection import DependencyContainer
+
 from src.core.types import (
     MarketData,
     OrderRequest,
     OrderSide,
-    OrderStatus,
     OrderType,
-    Signal,
     SignalDirection,
 )
-from src.execution.service import ExecutionService
 from src.exchanges.mock_exchange import MockExchange
-from src.exchanges.service import ExchangeService
-from src.state.state_service import StateService
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +44,14 @@ class TestPerformanceScalability:
         if not self.exchange_service:
             # Fallback to creating a new exchange service
             from src.exchanges.service import ExchangeService
+
             self.exchange_service = ExchangeService()
 
         self.execution_service = container.get_optional("ExecutionService")
         if not self.execution_service:
             # ExecutionService requires a repository, create a minimal mock
             from unittest.mock import MagicMock
+
             from src.execution.service import ExecutionService
 
             mock_repo = MagicMock()
@@ -88,6 +84,7 @@ class TestPerformanceScalability:
         except Exception:
             pass
 
+    @pytest.mark.timeout(300)
     async def test_concurrent_exchange_operations_real(self):
         """Test concurrent operations with REAL exchange service."""
         logger.info("Testing concurrent exchange operations with REAL services")
@@ -105,7 +102,7 @@ class TestPerformanceScalability:
                 latencies.append(latency)
 
                 assert ticker is not None
-                assert ticker['symbol'] == "BTC/USDT"  # ticker is a dict, not an object
+                assert ticker["symbol"] == "BTC/USDT"  # ticker is a dict, not an object
                 return True
 
             except Exception as e:
@@ -132,6 +129,7 @@ class TestPerformanceScalability:
         logger.info(f"Average latency: {avg_latency:.3f}s")
         logger.info(f"Error rate: {errors / total_operations:.1%}")
 
+    @pytest.mark.timeout(300)
     async def test_high_frequency_order_processing_real(self):
         """Test high-frequency order processing with REAL execution service."""
         logger.info("Testing high-frequency order processing with REAL services")
@@ -198,6 +196,7 @@ class TestPerformanceScalability:
         logger.info(f"Success rate: {success_rate:.1%}")
         logger.info(f"Average latency: {avg_latency:.3f}s")
 
+    @pytest.mark.timeout(300)
     async def test_memory_usage_under_load_real(self):
         """Test memory usage with REAL services under load."""
         logger.info("Testing memory usage under load with REAL services")
@@ -270,6 +269,7 @@ class TestPerformanceScalability:
         logger.info(f"Memory growth: {memory_growth:.1f} MB")
         logger.info(f"Peak memory: {max_memory:.1f} MB")
 
+    @pytest.mark.timeout(300)
     async def test_scalable_strategy_execution_real(self):
         """Test strategy execution scalability with REAL services."""
         logger.info("Testing scalable strategy execution with REAL services")
@@ -334,6 +334,7 @@ class TestPerformanceScalability:
         logger.info(f"Signals generated: {signals_generated}")
         logger.info(f"Average execution time: {avg_execution_time:.3f}s")
 
+    @pytest.mark.timeout(300)
     async def test_database_connection_pool_performance_real(self):
         """Test database connection pool with REAL database operations."""
         logger.info("Testing database connection pool performance with REAL database")
@@ -377,7 +378,9 @@ class TestPerformanceScalability:
 
         # Performance assertions
         assert success_rate >= 0.95  # 95% success rate
-        assert avg_execution_time < 1.0  # Under 1 second average (realistic for concurrent database operations)
+        assert (
+            avg_execution_time < 1.0
+        )  # Under 1 second average (realistic for concurrent database operations)
 
         logger.info(f"Total operations: {total_operations}")
         logger.info(f"Success rate: {success_rate:.1%}")
@@ -385,6 +388,7 @@ class TestPerformanceScalability:
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_comprehensive_performance_scalability_real(container):
     """Main test entry point for comprehensive performance/scalability with REAL services."""
     logger.info("Starting comprehensive performance and scalability tests with REAL services")
@@ -399,12 +403,15 @@ async def test_comprehensive_performance_scalability_real(container):
     test_instance.exchange_service = container.get_optional("exchange_service")
     if not test_instance.exchange_service:
         from src.exchanges.service import ExchangeService
+
         test_instance.exchange_service = ExchangeService()
 
     test_instance.execution_service = container.get_optional("ExecutionService")
     if not test_instance.execution_service:
         from unittest.mock import MagicMock
+
         from src.execution.service import ExecutionService
+
         mock_repo = MagicMock()
         test_instance.execution_service = ExecutionService(repository_service=mock_repo)
 

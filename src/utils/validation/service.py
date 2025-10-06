@@ -428,6 +428,7 @@ class StringValidationRule(ValidationRule):
                     "enum_check",
                     expected=f"One of: {self.allowed_values}",
                     actual=value,
+                    suggestion=f"Use one of the valid values: {', '.join(self.allowed_values)}",
                 )
 
         return result
@@ -797,6 +798,18 @@ class ValidationService(BaseService):
         self, order_data: dict[str, Any], result: ValidationResult
     ) -> None:
         """Validate required order fields."""
+        # Handle None input
+        if order_data is None:
+            result.add_error(
+                "order_data",
+                "Order data cannot be None",
+                "required_data",
+                expected="dict",
+                actual="None",
+                severity=ValidationLevel.CRITICAL,
+            )
+            return
+
         required_fields = ["symbol", "side", "type", "quantity"]
         for field in required_fields:
             if field not in order_data:
@@ -808,9 +821,23 @@ class ValidationService(BaseService):
                     actual="missing",
                     severity=ValidationLevel.CRITICAL,
                 )
+            elif not order_data[field] or (isinstance(order_data[field], str) and not order_data[field].strip()):
+                # Empty or whitespace-only required fields are also critical
+                result.add_error(
+                    field,
+                    f"Required field '{field}' cannot be empty",
+                    "required_field",
+                    expected="non-empty value",
+                    actual="empty",
+                    severity=ValidationLevel.CRITICAL,
+                )
 
     def _setup_field_validations(self, order_data: dict[str, Any]) -> list[tuple[str, str, Any]]:
         """Setup field validations based on order type."""
+        # Handle None input
+        if order_data is None:
+            return []  # No validations for None data
+
         field_validations = [
             ("symbol", "symbol", order_data.get("symbol")),
             ("side", "order_side", order_data.get("side")),
@@ -819,9 +846,12 @@ class ValidationService(BaseService):
         ]
 
         # Add price validation for limit orders
-        order_type = order_data.get("type", "").upper()
-        if order_type in ["LIMIT", "STOP_LIMIT"]:
-            field_validations.append(("price", "price", order_data.get("price")))
+        order_type_value = order_data.get("type", "")
+        # Handle malformed data gracefully
+        if isinstance(order_type_value, str):
+            order_type = order_type_value.upper()
+            if order_type in ["LIMIT", "STOP_LIMIT"]:
+                field_validations.append(("price", "price", order_data.get("price")))
 
         return field_validations
 
@@ -829,7 +859,16 @@ class ValidationService(BaseService):
         self, order_data: dict[str, Any], result: ValidationResult
     ) -> None:
         """Validate price requirement for limit orders."""
-        order_type = order_data.get("type", "").upper()
+        # Handle None input
+        if order_data is None:
+            return  # Already handled in _validate_required_order_fields
+
+        order_type_value = order_data.get("type", "")
+        # Handle malformed data gracefully
+        if not isinstance(order_type_value, str):
+            return  # Type validation will catch this error
+
+        order_type = order_type_value.upper()
         if order_type in ["LIMIT", "STOP_LIMIT"] and "price" not in order_data:
             result.add_error(
                 "price",
@@ -846,7 +885,8 @@ class ValidationService(BaseService):
     ) -> None:
         """Execute individual field validations."""
         for field_name, rule_name, value in field_validations:
-            if value is not None:
+            # Skip None values and empty strings (already handled in required field validation)
+            if value is not None and not (isinstance(value, str) and not value.strip()):
                 field_result = await self._validate_with_rule(rule_name, value, context)
                 if not field_result.is_valid:
                     for error in field_result.errors:
@@ -901,19 +941,17 @@ class ValidationService(BaseService):
 
         # Check required fields
         self._validate_required_order_fields(order_data, result)
-        if not result.is_valid:
-            return result  # Early return for missing required fields
 
+        # Continue validation even if required fields are empty to collect all errors
         # Validate price requirement for limit orders
         self._validate_price_requirement(order_data, result)
 
-        # Setup and execute field validations
+        # Setup and execute field validations (skip fields that are empty/missing)
         field_validations = self._setup_field_validations(order_data)
         await self._execute_field_validations(field_validations, result, context)
 
         # Business logic validations
-        if result.is_valid:
-            await self._validate_order_business_logic(order_data, result, context)
+        await self._validate_order_business_logic(order_data, result, context)
 
         result.execution_time_ms = (time.time() - start_time) * 1000
         return result
@@ -982,7 +1020,10 @@ class ValidationService(BaseService):
         # Risk per trade validation
         if "risk_per_trade" in risk_data:
             risk_per_trade = risk_data["risk_per_trade"]
-            if risk_per_trade > 0.1:  # 10% max
+            # Convert string to Decimal for comparison
+            if isinstance(risk_per_trade, str):
+                risk_per_trade = Decimal(risk_per_trade)
+            if risk_per_trade > Decimal("0.1"):  # 10% max
                 result.add_error(
                     "risk_per_trade",
                     "Risk per trade must be at most 0.1 (10%)",
@@ -1004,6 +1045,9 @@ class ValidationService(BaseService):
         # Stop loss validation
         if "stop_loss" in risk_data:
             stop_loss = risk_data["stop_loss"]
+            # Convert string to Decimal for comparison
+            if isinstance(stop_loss, str):
+                stop_loss = Decimal(stop_loss)
             if stop_loss <= 0 or stop_loss >= 1:
                 result.add_error(
                     "stop_loss",
@@ -1017,6 +1061,9 @@ class ValidationService(BaseService):
         # Take profit validation
         if "take_profit" in risk_data:
             take_profit = risk_data["take_profit"]
+            # Convert string to Decimal for comparison
+            if isinstance(take_profit, str):
+                take_profit = Decimal(take_profit)
             if take_profit <= 0:
                 result.add_error(
                     "take_profit",
@@ -1030,6 +1077,9 @@ class ValidationService(BaseService):
         # Max position size validation
         if "max_position_size" in risk_data:
             max_position_size = risk_data["max_position_size"]
+            # Convert string to Decimal for comparison
+            if isinstance(max_position_size, str):
+                max_position_size = Decimal(max_position_size)
             if max_position_size <= 0:
                 result.add_error(
                     "max_position_size",
@@ -1445,11 +1495,22 @@ class ValidationService(BaseService):
                 try:
                     # Check if we're already in an async context
                     loop = asyncio.get_running_loop()
-                    # We're in an async context - should use async version
+                    # We're in an async context - use fallback validation
                     self.logger.warning(
                         "validate_price called from async context - use async version"
                     )
-                    return False
+                    # Use fallback sync validation instead of returning False
+                    from decimal import InvalidOperation
+
+                    from src.utils.decimal_utils import ZERO, to_decimal
+
+                    try:
+                        price_decimal = to_decimal(price)
+                        if not price_decimal.is_finite():
+                            return False
+                        return price_decimal > ZERO and price_decimal <= Decimal("1000000")
+                    except (TypeError, ValueError, InvalidOperation):
+                        return False
                 except RuntimeError:
                     # No running loop, safe to use run_until_complete
                     loop = asyncio.new_event_loop()
@@ -1457,7 +1518,7 @@ class ValidationService(BaseService):
                         result = loop.run_until_complete(rule.validate(price))
                     finally:
                         loop.close()
-                return result.is_valid
+                    return result.is_valid
             else:
                 # Fallback validation
                 from decimal import InvalidOperation
@@ -1484,11 +1545,22 @@ class ValidationService(BaseService):
                 try:
                     # Check if we're already in an async context
                     loop = asyncio.get_running_loop()
-                    # We're in an async context - should use async version
+                    # We're in an async context - use fallback validation
                     self.logger.warning(
                         "validate_quantity called from async context - use async version"
                     )
-                    return False
+                    # Use fallback sync validation instead of returning False
+                    from decimal import InvalidOperation
+
+                    from src.utils.decimal_utils import ZERO, to_decimal
+
+                    try:
+                        qty_decimal = to_decimal(quantity)
+                        if not qty_decimal.is_finite():
+                            return False
+                        return qty_decimal > ZERO
+                    except (TypeError, ValueError, InvalidOperation):
+                        return False
                 except RuntimeError:
                     # No running loop, safe to use run_until_complete
                     loop = asyncio.new_event_loop()
@@ -1496,7 +1568,7 @@ class ValidationService(BaseService):
                         result = loop.run_until_complete(rule.validate(quantity))
                     finally:
                         loop.close()
-                return result.is_valid
+                    return result.is_valid
             else:
                 # Fallback validation
                 from decimal import InvalidOperation
@@ -1523,11 +1595,15 @@ class ValidationService(BaseService):
                 try:
                     # Check if we're already in an async context
                     loop = asyncio.get_running_loop()
-                    # We're in an async context - should use async version
+                    # We're in an async context - use fallback validation
                     self.logger.warning(
                         "validate_symbol called from async context - use async version"
                     )
-                    return False
+                    # Use fallback sync validation instead of returning False
+                    if not isinstance(symbol, str):
+                        return False
+                    symbol = symbol.strip().upper()
+                    return len(symbol) >= 2 and symbol.replace("/", "").replace("_", "").isalnum()
                 except RuntimeError:
                     # No running loop, safe to use run_until_complete
                     loop = asyncio.new_event_loop()
@@ -1535,7 +1611,7 @@ class ValidationService(BaseService):
                         result = loop.run_until_complete(rule.validate(symbol))
                     finally:
                         loop.close()
-                return result.is_valid
+                    return result.is_valid
             else:
                 # Fallback validation
                 import re
@@ -1572,10 +1648,16 @@ class ValidationService(BaseService):
         from src.core.exceptions import ValidationError
 
         if isinstance(value, Decimal):
+            if not value.is_finite():
+                raise ValidationError(f"Invalid decimal value: {value} (not finite)")
             return value
 
         try:
-            return Decimal(str(value))
+            result = Decimal(str(value))
+            # Check for NaN, Infinity, etc
+            if not result.is_finite():
+                raise ValidationError(f"Invalid decimal value: {value} (not finite)")
+            return result
         except (InvalidOperation, ValueError, TypeError) as e:
             raise ValidationError(f"Invalid decimal value: {value}") from e
 

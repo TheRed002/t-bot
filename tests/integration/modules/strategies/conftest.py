@@ -18,22 +18,19 @@ from decimal import Decimal
 import pytest
 import pytest_asyncio
 
-# Import base fixtures from main conftest
-from tests.conftest import clean_database
-
 # Import core components
 from src.core.config import Config
 from src.core.types import StrategyConfig, StrategyType
-from src.strategies.factory import StrategyFactory
 from src.strategies.dependencies import create_strategy_service_container
+from src.strategies.factory import StrategyFactory
 from src.strategies.service import StrategyService
 
+# Import base fixtures from main conftest
 # Import strategy-specific fixtures
 from tests.integration.modules.strategies.fixtures.market_data_generators import (
     MarketDataGenerator,
     create_test_market_data_suite,
 )
-
 from tests.integration.modules.strategies.helpers.indicator_validators import (
     IndicatorValidator,
     PerformanceBenchmarker,
@@ -367,13 +364,15 @@ async def strategy_test_environment(integrated_strategy_environment):
     environment = integrated_strategy_environment.copy()
 
     # Add additional test utilities
-    environment.update({
-        "market_data_generator": MarketDataGenerator(seed=42),
-        "test_data_suite": create_test_market_data_suite(),
-        "indicator_validator": IndicatorValidator(),
-        "performance_benchmarker": PerformanceBenchmarker(),
-        "known_test_cases": create_known_test_cases(),
-    })
+    environment.update(
+        {
+            "market_data_generator": MarketDataGenerator(seed=42),
+            "test_data_suite": create_test_market_data_suite(),
+            "indicator_validator": IndicatorValidator(),
+            "performance_benchmarker": PerformanceBenchmarker(),
+            "known_test_cases": create_known_test_cases(),
+        }
+    )
 
     yield environment
 
@@ -426,8 +425,9 @@ def test_data_config():
 @pytest.fixture
 def strategy_config_templates():
     """Provide strategy configuration templates for testing."""
-    from src.core.types import StrategyType
     from decimal import Decimal
+
+    from src.core.types import StrategyType
 
     return {
         "trend_following": {
@@ -483,10 +483,10 @@ def strategy_config_templates():
 @pytest.fixture
 def error_test_scenarios():
     """Provide error scenarios for testing error handling."""
-    from src.core.types import StrategyType, SignalDirection
-    from src.core.types import Signal
-    from decimal import Decimal
     from datetime import datetime, timezone
+    from decimal import Decimal
+
+    from src.core.types import Signal, SignalDirection, StrategyType
 
     return {
         "invalid_strategy_config": {
@@ -551,7 +551,7 @@ async def di_container():
     Uses master DI registration to ensure all dependencies are properly configured
     in the correct order without circular dependency issues.
     """
-    from tests.integration.conftest import register_all_services_for_testing, cleanup_di_container
+    from tests.integration.conftest import cleanup_di_container, register_all_services_for_testing
 
     container = register_all_services_for_testing()
     yield container

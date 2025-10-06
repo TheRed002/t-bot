@@ -17,15 +17,13 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
+from src.database.models import Bot, Position, Strategy, User
 from src.database.service import DatabaseService
-from src.database.models import User, Bot, Strategy, Position
-from src.database.redis_client import RedisClient
-from src.core.config import get_config
-from tests.integration.infrastructure.conftest import clean_database
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_simple_database_crud_operations(clean_database):
     """Test basic CRUD operations with real database."""
     db_service = DatabaseService(clean_database)
@@ -41,15 +39,13 @@ async def test_simple_database_crud_operations(clean_database):
                 username=f"simple_test_user_{unique_id}",
                 email=f"simple_{unique_id}@test.com",
                 password_hash="hashed_password_test",
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(user)
             await session.commit()
 
             # READ - Query the user back
-            result = await session.execute(
-                select(User).where(User.id == user_id)
-            )
+            result = await session.execute(select(User).where(User.id == user_id))
             retrieved_user = result.scalar_one()
             assert retrieved_user.username == f"simple_test_user_{unique_id}"
             assert retrieved_user.email == f"simple_{unique_id}@test.com"
@@ -59,9 +55,7 @@ async def test_simple_database_crud_operations(clean_database):
             await session.commit()
 
             # Verify update
-            updated_result = await session.execute(
-                select(User).where(User.id == user_id)
-            )
+            updated_result = await session.execute(select(User).where(User.id == user_id))
             updated_user = updated_result.scalar_one()
             assert updated_user.email == "updated@test.com"
 
@@ -70,9 +64,7 @@ async def test_simple_database_crud_operations(clean_database):
             await session.commit()
 
             # Verify deletion
-            deleted_result = await session.execute(
-                select(User).where(User.id == user_id)
-            )
+            deleted_result = await session.execute(select(User).where(User.id == user_id))
             deleted_user = deleted_result.scalar_one_or_none()
             assert deleted_user is None
 
@@ -82,6 +74,7 @@ async def test_simple_database_crud_operations(clean_database):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_simple_redis_cache_operations(clean_database):
     """Test basic Redis cache operations."""
     # Use the Redis client from the clean database connection manager
@@ -114,6 +107,7 @@ async def test_simple_redis_cache_operations(clean_database):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_simple_database_health_check(clean_database):
     """Test simple database health checks."""
     db_service = DatabaseService(clean_database)
@@ -136,6 +130,7 @@ async def test_simple_database_health_check(clean_database):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_simple_model_validation(clean_database):
     """Test basic model validation with real database."""
     db_service = DatabaseService(clean_database)
@@ -149,7 +144,7 @@ async def test_simple_model_validation(clean_database):
                 name="Simple Test Bot",
                 exchange="binance",
                 status="running",
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(bot)
             await session.flush()
@@ -163,7 +158,7 @@ async def test_simple_model_validation(clean_database):
                 bot_id=bot.id,
                 max_position_size=Decimal("1000.0"),
                 risk_per_trade=Decimal("0.02"),
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(strategy)
             await session.flush()
@@ -181,15 +176,13 @@ async def test_simple_model_validation(clean_database):
                 entry_price=Decimal("50000.0"),
                 current_price=Decimal("50000.0"),
                 unrealized_pnl=Decimal("0.0"),
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(position)
             await session.commit()
 
             # Verify position was saved
-            result = await session.execute(
-                select(Position).where(Position.id == position.id)
-            )
+            result = await session.execute(select(Position).where(Position.id == position.id))
             saved_position = result.scalar_one()
             assert saved_position.symbol == "BTC/USDT"
             assert saved_position.quantity == Decimal("1.0")
@@ -200,6 +193,7 @@ async def test_simple_model_validation(clean_database):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_simple_session_management(clean_database):
     """Test basic database session management."""
     db_service = DatabaseService(clean_database)
@@ -210,7 +204,7 @@ async def test_simple_session_management(clean_database):
         async with db_service.get_session() as session:
             # Session should be active and available
             assert session is not None
-            assert hasattr(session, 'execute')  # Verify it's a valid session
+            assert hasattr(session, "execute")  # Verify it's a valid session
 
             # Simple query to verify session works
             result = await session.execute(select(1))

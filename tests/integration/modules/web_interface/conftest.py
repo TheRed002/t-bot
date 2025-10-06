@@ -5,10 +5,7 @@ Provides REAL services for integration testing - NO MOCKS for internal services.
 Uses real PostgreSQL, Redis, and all internal services.
 """
 
-import asyncio
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -29,13 +26,14 @@ def test_config():
     config.debug = True
 
     # Ensure security config exists
-    if not hasattr(config, 'security') or config.security is None:
+    if not hasattr(config, "security") or config.security is None:
         from src.core.config import SecurityConfig
+
         config.security = SecurityConfig(
             secret_key="test_jwt_secret_key_for_integration_tests",
             jwt_algorithm="HS256",
             jwt_expire_minutes=15,
-            refresh_token_expire_days=7
+            refresh_token_expire_days=7,
         )
 
     return config
@@ -50,8 +48,9 @@ def real_app(test_config):
     Using direct FastAPI creation without lifespan for testing.
     """
     from fastapi import FastAPI
-    from src.web_interface.app import _register_routes, _setup_monitoring
     from fastapi.middleware.cors import CORSMiddleware
+
+    from src.web_interface.app import _register_routes, _setup_monitoring
 
     # Create minimal FastAPI app for testing
     app = FastAPI(
@@ -60,7 +59,7 @@ def real_app(test_config):
         version="1.0.0-test",
         docs_url="/docs",
         redoc_url="/redoc",
-        debug=True
+        debug=True,
     )
 
     # Configure CORS
@@ -75,6 +74,7 @@ def real_app(test_config):
     # Add security middleware
     try:
         from src.web_interface.middleware.security import SecurityMiddleware
+
         app.add_middleware(SecurityMiddleware, enable_csp=True, enable_input_validation=False)
     except Exception as e:
         logger.warning(f"Security middleware setup failed: {e}")
@@ -82,6 +82,7 @@ def real_app(test_config):
     # Add versioning middleware
     try:
         from src.web_interface.versioning import VersioningMiddleware
+
         app.add_middleware(VersioningMiddleware)
     except Exception as e:
         logger.warning(f"Versioning middleware setup failed: {e}")
@@ -118,10 +119,7 @@ async def authenticated_client(test_client, test_user):
     # Login to get real JWT token
     response = test_client.post(
         "/api/auth/login",
-        json={
-            "username": test_user["username"],
-            "password": test_user["password"]
-        }
+        json={"username": test_user["username"], "password": test_user["password"]},
     )
 
     if response.status_code == 200:
@@ -129,23 +127,17 @@ async def authenticated_client(test_client, test_user):
         token = token_data.get("access_token")
     else:
         # Fallback: create user and try again
-        from src.web_interface.services.auth_service import AuthService
         from src.core.dependency_injection import injector
 
         auth_service = injector.resolve("AuthService")
         user_result = await auth_service.create_user(
-            username=test_user["username"],
-            email=test_user["email"],
-            password=test_user["password"]
+            username=test_user["username"], email=test_user["email"], password=test_user["password"]
         )
 
         # Login again
         response = test_client.post(
             "/api/auth/login",
-            json={
-                "username": test_user["username"],
-                "password": test_user["password"]
-            }
+            json={"username": test_user["username"], "password": test_user["password"]},
         )
         token_data = response.json()
         token = token_data.get("access_token")
@@ -162,10 +154,7 @@ async def admin_client(test_client, admin_user):
     # Login to get real JWT token
     response = test_client.post(
         "/api/auth/login",
-        json={
-            "username": admin_user["username"],
-            "password": admin_user["password"]
-        }
+        json={"username": admin_user["username"], "password": admin_user["password"]},
     )
 
     if response.status_code == 200:
@@ -173,7 +162,6 @@ async def admin_client(test_client, admin_user):
         token = token_data.get("access_token")
     else:
         # Fallback: create admin user
-        from src.web_interface.services.auth_service import AuthService
         from src.core.dependency_injection import injector
 
         auth_service = injector.resolve("AuthService")
@@ -181,16 +169,13 @@ async def admin_client(test_client, admin_user):
             username=admin_user["username"],
             email=admin_user["email"],
             password=admin_user["password"],
-            role="admin"
+            role="admin",
         )
 
         # Login again
         response = test_client.post(
             "/api/auth/login",
-            json={
-                "username": admin_user["username"],
-                "password": admin_user["password"]
-            }
+            json={"username": admin_user["username"], "password": admin_user["password"]},
         )
         token_data = response.json()
         token = token_data.get("access_token")
@@ -208,7 +193,7 @@ def test_user():
         "username": "testuser",
         "email": "testuser@example.com",
         "password": "TestPassword123!",
-        "role": "user"
+        "role": "user",
     }
 
 
@@ -219,7 +204,7 @@ def admin_user():
         "username": "admin",
         "email": "admin@example.com",
         "password": "AdminPassword123!",
-        "role": "admin"
+        "role": "admin",
     }
 
 
@@ -314,11 +299,7 @@ def sample_bot_config():
         "exchanges": ["binance"],
         "capital_allocation": "1000.00",
         "risk_profile": "medium",
-        "parameters": {
-            "lookback_period": 14,
-            "threshold": 0.02,
-            "max_position_size": 0.1
-        }
+        "parameters": {"lookback_period": 14, "threshold": 0.02, "max_position_size": 0.1},
     }
 
 
@@ -332,7 +313,7 @@ def sample_order_request():
         "quantity": "0.001",
         "price": "45000.00",
         "exchange": "binance",
-        "time_in_force": "GTC"
+        "time_in_force": "GTC",
     }
 
 
@@ -347,19 +328,19 @@ def sample_portfolio_data():
                 "quantity": Decimal("1.5"),
                 "average_price": Decimal("45000.00"),
                 "current_price": Decimal("47000.00"),
-                "unrealized_pnl": Decimal("3000.00")
+                "unrealized_pnl": Decimal("3000.00"),
             },
             {
                 "symbol": "ETH/USDT",
                 "quantity": Decimal("20.0"),
                 "average_price": Decimal("2800.00"),
                 "current_price": Decimal("3000.00"),
-                "unrealized_pnl": Decimal("4000.00")
-            }
+                "unrealized_pnl": Decimal("4000.00"),
+            },
         ],
         "cash_balance": Decimal("30000.00"),
         "daily_pnl": Decimal("1500.00"),
-        "total_pnl": Decimal("7000.00")
+        "total_pnl": Decimal("7000.00"),
     }
 
 
@@ -372,11 +353,8 @@ def sample_risk_metrics():
         "max_drawdown": Decimal("0.15"),
         "sharpe_ratio": Decimal("1.85"),
         "total_risk_score": 6.5,
-        "position_concentrations": {
-            "BTC/USDT": 0.45,
-            "ETH/USDT": 0.35
-        },
-        "risk_limits_status": "within_limits"
+        "position_concentrations": {"BTC/USDT": 0.45, "ETH/USDT": 0.35},
+        "risk_limits_status": "within_limits",
     }
 
 
@@ -400,44 +378,41 @@ async def websocket_test_context(real_app):
 def api_endpoints():
     """List of API endpoints for testing."""
     return {
-        "health": {
-            "basic": "/health",
-            "detailed": "/api/health/detailed"
-        },
+        "health": {"basic": "/health", "detailed": "/api/health/detailed"},
         "auth": {
             "login": "/api/auth/login",
             "logout": "/api/auth/logout",
             "refresh": "/api/auth/refresh",
-            "register": "/api/auth/register"
+            "register": "/api/auth/register",
         },
         "bot": {
             "list": "/api/bot",
             "create": "/api/bot",
             "get": "/api/bot/{bot_id}",
             "start": "/api/bot/{bot_id}/start",
-            "stop": "/api/bot/{bot_id}/stop"
+            "stop": "/api/bot/{bot_id}/stop",
         },
         "trading": {
             "orders": "/api/trading/orders",
             "create_order": "/api/trading/orders",
             "positions": "/api/trading/positions",
-            "trades": "/api/trading/trades"
+            "trades": "/api/trading/trades",
         },
         "portfolio": {
             "summary": "/api/portfolio",
             "positions": "/api/portfolio/positions",
-            "performance": "/api/portfolio/performance"
+            "performance": "/api/portfolio/performance",
         },
         "risk": {
             "metrics": "/api/risk/metrics",
             "limits": "/api/risk/limits",
-            "alerts": "/api/risk/alerts"
+            "alerts": "/api/risk/alerts",
         },
         "strategies": {
             "list": "/api/strategies",
             "get": "/api/strategies/{strategy_id}",
-            "backtest": "/api/strategies/{strategy_id}/backtest"
-        }
+            "backtest": "/api/strategies/{strategy_id}/backtest",
+        },
     }
 
 
@@ -450,7 +425,7 @@ def expected_response_schemas():
         "bot_detail": ["id", "name", "status", "strategy"],
         "order": ["id", "symbol", "side", "type", "status"],
         "portfolio": ["total_value", "positions", "cash_balance"],
-        "risk_metrics": ["portfolio_var_1d", "total_risk_score"]
+        "risk_metrics": ["portfolio_var_1d", "total_risk_score"],
     }
 
 
@@ -482,7 +457,7 @@ async def di_container():
     Uses master DI registration to ensure all dependencies are properly configured
     in the correct order without circular dependency issues.
     """
-    from tests.integration.conftest import register_all_services_for_testing, cleanup_di_container
+    from tests.integration.conftest import cleanup_di_container, register_all_services_for_testing
 
     container = register_all_services_for_testing()
     yield container

@@ -201,7 +201,7 @@ class TestBaseExchangeReal:
     """Test BaseExchange implementation with real patterns."""
 
     @pytest.fixture
-    async def exchange(self):
+    def exchange(self):
         """Create test exchange instance."""
         return TestConcreteExchange()
 

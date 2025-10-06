@@ -13,8 +13,8 @@ import asyncio
 from decimal import Decimal
 
 import pytest
-
 import pytest_asyncio
+
 from src.core.dependency_injection import injector
 from src.core.types import ValidationLevel
 from src.utils.interfaces import (
@@ -37,6 +37,7 @@ def setup_utils_services():
 
     # Reset the registration flag to allow re-registration
     import src.utils.service_registry as registry_module
+
     registry_module._services_registered = False
 
     register_util_services()
@@ -59,6 +60,7 @@ class TestValidationServiceContract:
         await service.shutdown()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_validate_order_contract(self, validation_service):
         """Test validate_order method contract."""
         # Valid order data
@@ -93,6 +95,7 @@ class TestValidationServiceContract:
         assert isinstance(result.cache_hit, bool)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_validate_order_with_context_contract(self, validation_service):
         """Test validate_order with context parameter."""
         order_data = {"symbol": "BTC/USDT", "side": "BUY", "type": "MARKET", "quantity": "0.1"}
@@ -110,6 +113,7 @@ class TestValidationServiceContract:
         assert result.context.strategy_type == "momentum"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_validate_order_error_contract(self, validation_service):
         """Test validate_order error handling contract."""
         # Invalid order data
@@ -138,6 +142,7 @@ class TestValidationServiceContract:
             assert isinstance(error.severity, ValidationLevel)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_validate_risk_parameters_contract(self, validation_service):
         """Test validate_risk_parameters method contract."""
         risk_data = {
@@ -153,6 +158,7 @@ class TestValidationServiceContract:
         assert result.validation_type == ValidationType.RISK
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_validate_strategy_config_contract(self, validation_service):
         """Test validate_strategy_config method contract."""
         strategy_data = {
@@ -167,6 +173,7 @@ class TestValidationServiceContract:
         assert result.validation_type == ValidationType.STRATEGY
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_validate_market_data_contract(self, validation_service):
         """Test validate_market_data method contract."""
         market_data = {
@@ -186,6 +193,7 @@ class TestValidationServiceContract:
         assert result.validation_type == ValidationType.MARKET_DATA
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_validate_batch_contract(self, validation_service):
         """Test validate_batch method contract."""
         validations = [
@@ -216,6 +224,7 @@ class TestValidationServiceContract:
             assert isinstance(validation_name, str)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backward_compatibility_contract(self, validation_service):
         """Test backward compatibility methods contract."""
         # Test legacy boolean methods
@@ -229,6 +238,7 @@ class TestValidationServiceContract:
         assert isinstance(validation_service.validate_symbol("BTC/USDT"), bool)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_lifecycle_contract(self, validation_service):
         """Test service lifecycle method contracts."""
         # Service should be initialized from fixture
@@ -330,6 +340,7 @@ class TestDataValidationContracts:
         await service.shutdown()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_decimal_precision_contract(self, validation_service):
         """Test decimal precision is maintained in validation results."""
         order_data = {
@@ -351,6 +362,7 @@ class TestDataValidationContracts:
                 assert str(normalized_qty) == "0.12345678"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_validation_context_contract(self, validation_service):
         """Test validation context is properly handled."""
         order_data = {"symbol": "BTC/USDT", "side": "BUY", "type": "MARKET", "quantity": "0.1"}
@@ -378,6 +390,7 @@ class TestDataValidationContracts:
         assert result2.context.additional_context["test"] == "value"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_severity_contract(self, validation_service):
         """Test error severity levels are properly assigned."""
         # Create order with various severity issues
@@ -415,6 +428,7 @@ class TestPerformanceContracts:
         await service.shutdown()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_validation_timing_contract(self, validation_service):
         """Test that validation operations complete within reasonable time."""
         order_data = {
@@ -440,6 +454,7 @@ class TestPerformanceContracts:
         assert result.execution_time_ms < 1000  # < 1 second in milliseconds
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_batch_validation_efficiency_contract(self, validation_service):
         """Test that batch validation is more efficient than individual validations."""
         # Create multiple validation requests with different types to avoid key collision
@@ -447,7 +462,18 @@ class TestPerformanceContracts:
             ("order", {"symbol": "BTC/USDT", "side": "BUY", "type": "MARKET", "quantity": "0.1"}),
             ("risk", {"max_position_size": "0.05", "stop_loss_percentage": "0.02"}),
             ("strategy", {"name": "momentum_strategy", "parameters": {"lookback_period": 20}}),
-            ("market_data", {"symbol": "ETH/USDT", "timestamp": 1234567890, "open": "3000.0", "high": "3100.0", "low": "2900.0", "close": "3050.0", "volume": "50.0"}),
+            (
+                "market_data",
+                {
+                    "symbol": "ETH/USDT",
+                    "timestamp": 1234567890,
+                    "open": "3000.0",
+                    "high": "3100.0",
+                    "low": "2900.0",
+                    "close": "3050.0",
+                    "volume": "50.0",
+                },
+            ),
         ]
 
         # Time batch validation
@@ -481,7 +507,9 @@ class TestPerformanceContracts:
 
         # Verify all validations completed successfully (functional correctness)
         assert len(batch_results) == 4, f"Expected 4 batch results, got {len(batch_results)}"
-        assert len(individual_results) == 4, f"Expected 4 individual results, got {len(individual_results)}"
+        assert len(individual_results) == 4, (
+            f"Expected 4 individual results, got {len(individual_results)}"
+        )
 
         # Performance note: For small batches (≤10 items), batch processing overhead
         # may make it slower than individual calls. The benefit comes with larger datasets.
@@ -490,6 +518,7 @@ class TestPerformanceContracts:
         assert individual_time < 0.01, f"Individual validations too slow: {individual_time}s"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_concurrent_validation_contract(self, validation_service):
         """Test that concurrent validations work correctly."""
         order_template = {"symbol": "BTC/USDT", "side": "BUY", "type": "LIMIT", "price": "50000.0"}
@@ -525,6 +554,7 @@ class TestErrorContractConsistency:
         await service.shutdown()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_message_contract(self, validation_service):
         """Test error messages follow consistent format."""
         invalid_order = {
@@ -554,6 +584,7 @@ class TestErrorContractConsistency:
             assert isinstance(error.validation_type, str)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_exception_handling_contract(self, validation_service):
         """Test that validation service handles exceptions gracefully."""
         # Test with malformed data that might cause internal errors
@@ -572,6 +603,7 @@ class TestErrorContractConsistency:
         assert len(result.errors) > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_suggestion_contract(self, validation_service):
         """Test that validation errors include helpful suggestions."""
         invalid_order = {

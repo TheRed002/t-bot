@@ -4,7 +4,6 @@ Database Integration Tests - Real Services (Fixed)
 Tests that work with real Docker services with proper setup.
 """
 
-import asyncio
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -12,36 +11,39 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select, text
 
-from src.database.models import User, Bot, Strategy, Position, Order
-from tests.integration.infrastructure.conftest import clean_database
+from src.database.models import Bot, Order, Position, Strategy, User
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_real_database_connections_basic(clean_database):
     """Test basic database connections and table creation."""
     # Initialize real database service with clean database
     from src.database.service import DatabaseService
+
     db_service = DatabaseService(clean_database)
     await db_service.start()
 
     try:
         # Verify tables exist in the test schema
-        test_schema = getattr(clean_database, '_test_schema', 'test_unknown')
+        test_schema = getattr(clean_database, "_test_schema", "test_unknown")
 
         async with db_service.get_session() as session:
             # Check that tables exist
-            result = await session.execute(text(f"""
+            result = await session.execute(
+                text(f"""
                 SELECT table_name
                 FROM information_schema.tables
                 WHERE table_schema = '{test_schema}'
                 ORDER BY table_name
-            """))
+            """)
+            )
             tables = [row[0] for row in result.fetchall()]
 
             print(f"Tables in schema {test_schema}: {tables}")
-            assert 'users' in tables, f"Users table not found in {test_schema}. Available: {tables}"
-            assert 'bots' in tables, f"Bots table not found in {test_schema}. Available: {tables}"
+            assert "users" in tables, f"Users table not found in {test_schema}. Available: {tables}"
+            assert "bots" in tables, f"Bots table not found in {test_schema}. Available: {tables}"
 
             # Test basic insertion
             unique_id = uuid.uuid4().hex[:8]
@@ -50,16 +52,14 @@ async def test_real_database_connections_basic(clean_database):
                 username=f"test_user_{unique_id}",
                 email=f"test_{unique_id}@example.com",
                 password_hash="hashed_password",
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(user)
             await session.commit()
 
         # Verify the user was inserted in a new session
         async with db_service.get_session() as session:
-            result = await session.execute(
-                select(User).where(User.id == user.id)
-            )
+            result = await session.execute(select(User).where(User.id == user.id))
             retrieved_user = result.scalar_one()
             assert retrieved_user.username == user.username
 
@@ -69,10 +69,12 @@ async def test_real_database_connections_basic(clean_database):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_real_model_relationships(clean_database):
     """Test model relationships with real database."""
     # Initialize real database service with clean database
     from src.database.service import DatabaseService
+
     db_service = DatabaseService(clean_database)
     await db_service.start()
 
@@ -84,7 +86,7 @@ async def test_real_model_relationships(clean_database):
                 username=f"trader_{uuid.uuid4().hex[:8]}",
                 email=f"trader_{uuid.uuid4().hex[:8]}@test.com",
                 password_hash="hashed",
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(user)
             await session.flush()
@@ -97,7 +99,7 @@ async def test_real_model_relationships(clean_database):
                 status="running",
                 allocated_capital=Decimal("10000.00"),
                 current_balance=Decimal("10000.00"),
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(bot)
             await session.flush()
@@ -112,7 +114,7 @@ async def test_real_model_relationships(clean_database):
                 params={"param": "value"},
                 max_position_size=Decimal("1000.0"),
                 risk_per_trade=Decimal("0.02"),
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(strategy)
             await session.flush()
@@ -128,7 +130,7 @@ async def test_real_model_relationships(clean_database):
                 quantity=Decimal("1.0"),
                 entry_price=Decimal("50000.00"),
                 status="OPEN",
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(position)
             await session.flush()
@@ -148,7 +150,7 @@ async def test_real_model_relationships(clean_database):
                 status="filled",
                 filled_quantity=Decimal("1.0"),
                 average_price=Decimal("50000.00"),
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(order)
 
@@ -156,16 +158,12 @@ async def test_real_model_relationships(clean_database):
 
         # Test relationships in a new session
         async with db_service.get_session() as session:
-            result = await session.execute(
-                select(Position).where(Position.id == position.id)
-            )
+            result = await session.execute(select(Position).where(Position.id == position.id))
             retrieved_position = result.scalar_one()
             assert retrieved_position.bot_id == bot.id
             assert retrieved_position.strategy_id == strategy.id
 
-            result = await session.execute(
-                select(Order).where(Order.position_id == position.id)
-            )
+            result = await session.execute(select(Order).where(Order.position_id == position.id))
             retrieved_order = result.scalar_one()
             assert retrieved_order.bot_id == bot.id
 
@@ -175,10 +173,12 @@ async def test_real_model_relationships(clean_database):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_real_transactions_and_rollback(clean_database):
     """Test database transactions with rollback."""
     # Initialize real database service with clean database
     from src.database.service import DatabaseService
+
     db_service = DatabaseService(clean_database)
     await db_service.start()
 
@@ -196,7 +196,7 @@ async def test_real_transactions_and_rollback(clean_database):
                 status="running",
                 allocated_capital=Decimal("10000.00"),
                 current_balance=Decimal("10000.00"),
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(bot)
             await session.flush()
@@ -212,7 +212,7 @@ async def test_real_transactions_and_rollback(clean_database):
                 params={"test": "value"},
                 max_position_size=Decimal("1000.0"),
                 risk_per_trade=Decimal("0.02"),
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(strategy)
             await session.flush()
@@ -232,7 +232,7 @@ async def test_real_transactions_and_rollback(clean_database):
                 quantity=Decimal("1.0"),
                 entry_price=Decimal("50000.00"),
                 status="OPEN",
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             session.add(position1)
             await session.commit()
@@ -256,7 +256,7 @@ async def test_real_transactions_and_rollback(clean_database):
                     quantity=Decimal("10.0"),
                     entry_price=Decimal("3000.00"),
                     status="OPEN",
-                    created_at=datetime.now(timezone.utc)
+                    created_at=datetime.now(timezone.utc),
                 )
                 session.add(position2)
                 await session.flush()
@@ -280,6 +280,7 @@ async def test_real_transactions_and_rollback(clean_database):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_real_redis_operations(clean_database):
     """Test Redis operations if available."""
     try:
@@ -287,6 +288,7 @@ async def test_real_redis_operations(clean_database):
 
         # Generate unique test keys to avoid conflicts
         import time
+
         test_run_id = f"test_{int(time.time())}"
         test_key = f"{test_run_id}_key"
         expiring_key = f"{test_run_id}_expiring"
@@ -296,13 +298,13 @@ async def test_real_redis_operations(clean_database):
         await redis_client.set(test_key, "test_value")
         value = await redis_client.get(test_key)
         # Handle both bytes and string return types
-        assert (value.decode('utf-8') if isinstance(value, bytes) else value) == "test_value"
+        assert (value.decode("utf-8") if isinstance(value, bytes) else value) == "test_value"
 
         # Test expiration
         await redis_client.setex(expiring_key, 60, "expires_later")
         value = await redis_client.get(expiring_key)
         # Handle both bytes and string return types
-        assert (value.decode('utf-8') if isinstance(value, bytes) else value) == "expires_later"
+        assert (value.decode("utf-8") if isinstance(value, bytes) else value) == "expires_later"
 
         # Test hash operations
         await redis_client.hset(hash_key, "field1", "value1")
@@ -310,7 +312,9 @@ async def test_real_redis_operations(clean_database):
 
         field1_value = await redis_client.hget(hash_key, "field1")
         # Handle both bytes and string return types
-        assert (field1_value.decode('utf-8') if isinstance(field1_value, bytes) else field1_value) == "value1"
+        assert (
+            field1_value.decode("utf-8") if isinstance(field1_value, bytes) else field1_value
+        ) == "value1"
 
         # Test cleanup
         await redis_client.delete(test_key, expiring_key, hash_key)
@@ -322,10 +326,12 @@ async def test_real_redis_operations(clean_database):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_complex_queries(clean_database):
     """Test complex database queries."""
     # Initialize real database service with clean database
     from src.database.service import DatabaseService
+
     db_service = DatabaseService(clean_database)
     await db_service.start()
 
@@ -342,7 +348,7 @@ async def test_complex_queries(clean_database):
                     status="running",
                     allocated_capital=Decimal("10000.00"),
                     current_balance=Decimal(f"{10000 + i * 1000}.00"),
-                    created_at=datetime.now(timezone.utc)
+                    created_at=datetime.now(timezone.utc),
                 )
                 bots.append(bot)
                 session.add(bot)
@@ -360,7 +366,7 @@ async def test_complex_queries(clean_database):
                     params={"param": f"value{i}"},
                     max_position_size=Decimal("1000.0"),
                     risk_per_trade=Decimal("0.02"),
-                    created_at=datetime.now(timezone.utc)
+                    created_at=datetime.now(timezone.utc),
                 )
                 strategies.append(strategy)
                 session.add(strategy)
@@ -381,7 +387,7 @@ async def test_complex_queries(clean_database):
                         quantity=Decimal("1.0"),
                         entry_price=Decimal(f"{50000 + i * 1000}.00"),
                         status="OPEN" if j == 0 else "CLOSED",
-                        created_at=datetime.now(timezone.utc)
+                        created_at=datetime.now(timezone.utc),
                     )
                     session.add(position)
 
@@ -390,23 +396,17 @@ async def test_complex_queries(clean_database):
         # Test complex queries in a new session
         async with db_service.get_session() as session:
             # Query bots by exchange
-            result = await session.execute(
-                select(Bot).where(Bot.exchange == "binance")
-            )
+            result = await session.execute(select(Bot).where(Bot.exchange == "binance"))
             binance_bots = result.scalars().all()
             assert len(binance_bots) == 2
 
             # Query open positions
-            result = await session.execute(
-                select(Position).where(Position.status == "OPEN")
-            )
+            result = await session.execute(select(Position).where(Position.status == "OPEN"))
             open_positions = result.scalars().all()
             assert len(open_positions) == 3
 
             # Query positions for specific bot
-            result = await session.execute(
-                select(Position).where(Position.bot_id == bots[0].id)
-            )
+            result = await session.execute(select(Position).where(Position.bot_id == bots[0].id))
             bot_positions = result.scalars().all()
             assert len(bot_positions) == 2
 

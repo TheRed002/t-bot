@@ -158,6 +158,7 @@ class TestDataFlowConsistency:
         assert "timestamp" in results["price"]
         assert "timestamp" in results["invalid_price"]
 
+    @pytest.mark.timeout(300)
     async def test_messaging_pattern_consistency(self):
         """Test that messaging patterns are consistent between pub/sub and req/reply."""
         coordinator = MessagingCoordinator("test")
@@ -198,6 +199,7 @@ class TestDataFlowConsistency:
         assert "timestamp" in captured_message
         assert "correlation_id" in captured_message
 
+    @pytest.mark.timeout(300)
     async def test_data_transformation_handler(self):
         """Test that data transformation handler works consistently."""
         handler = DataTransformationHandler()

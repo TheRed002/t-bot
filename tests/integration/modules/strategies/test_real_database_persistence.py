@@ -8,24 +8,21 @@ CRITICAL: All financial data must use DECIMAL(20,8) precision in database.
 """
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 import pytest
-
 import pytest_asyncio
+
 from src.core.types import (
-    MarketData,
     Signal,
     SignalDirection,
     StrategyConfig,
-    StrategyStatus,
-    StrategyType,
     StrategyMetrics,
+    StrategyType,
 )
-from src.database.models import Strategy as StrategyModel, Signal as SignalModel
-from src.database.repository import StrategyRepository, SignalRepository
+from src.database.repository import SignalRepository, StrategyRepository
 from src.strategies.service import StrategyService
 
 from .fixtures.real_service_fixtures import generate_realistic_market_data_sequence
@@ -49,6 +46,7 @@ class TestRealStrategyConfigurationPersistence:
         await repository.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_config_crud_operations(self, strategy_repository):
         """Test complete CRUD operations for strategy configurations."""
         # Create strategy configuration with Decimal precision
@@ -121,6 +119,7 @@ class TestRealStrategyConfigurationPersistence:
         assert deleted_config is None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_config_validation_constraints(self, strategy_repository):
         """Test database constraints and validation for strategy configurations."""
         # Test unique constraint violation
@@ -165,7 +164,9 @@ class TestRealStrategyConfigurationPersistence:
         await strategy_repository.save_strategy_config(config_with_precision)
 
         # Retrieve and verify precision preservation
-        retrieved_precision_config = await strategy_repository.get_strategy_config("precision_test_001")
+        retrieved_precision_config = await strategy_repository.get_strategy_config(
+            "precision_test_001"
+        )
         assert isinstance(retrieved_precision_config.min_confidence, Decimal)
         assert isinstance(retrieved_precision_config.position_size_pct, Decimal)
         assert isinstance(retrieved_precision_config.parameters["entry_threshold"], Decimal)
@@ -174,6 +175,7 @@ class TestRealStrategyConfigurationPersistence:
         assert str(retrieved_precision_config.min_confidence)[:10] == "0.12345678"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_config_batch_operations(self, strategy_repository):
         """Test batch operations for strategy configurations."""
         # Create multiple configurations
@@ -254,7 +256,7 @@ class TestRealSignalPersistence:
         direction: SignalDirection = SignalDirection.BUY,
         confidence: Decimal = Decimal("0.75"),
         strength: Decimal = Decimal("0.80"),
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: dict[str, Any] | None = None,
     ) -> Signal:
         """Create test signal with Decimal precision."""
         return Signal(
@@ -266,7 +268,8 @@ class TestRealSignalPersistence:
             source="test_strategy",
             timestamp=datetime.now(timezone.utc),
             strategy_name="test_strategy",
-            metadata=metadata or {
+            metadata=metadata
+            or {
                 "indicator_value": Decimal("2.5"),
                 "volume_ratio": Decimal("1.8"),
                 "atr": Decimal("150.25"),
@@ -274,6 +277,7 @@ class TestRealSignalPersistence:
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_signal_crud_operations(self, signal_repository):
         """Test complete CRUD operations for signals."""
         # CREATE: Save signal to database
@@ -286,7 +290,7 @@ class TestRealSignalPersistence:
                 "macd": Decimal("150.75"),
                 "volume_ratio": Decimal("2.3"),
                 "z_score": Decimal("-2.8"),
-            }
+            },
         )
 
         signal_id = await signal_repository.save_signal(signal)
@@ -333,6 +337,7 @@ class TestRealSignalPersistence:
         assert deleted_signal is None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_signal_history_and_querying(self, signal_repository):
         """Test signal history storage and complex querying."""
         # Create signals across different time periods
@@ -346,7 +351,7 @@ class TestRealSignalPersistence:
                 symbol="BTC/USDT",
                 direction=SignalDirection.BUY if i % 2 == 0 else SignalDirection.SELL,
                 confidence=Decimal(f"0.{60 + i % 25}"),  # 0.60 to 0.84
-                strength=Decimal(f"0.{70 + i % 20}"),    # 0.70 to 0.89
+                strength=Decimal(f"0.{70 + i % 20}"),  # 0.70 to 0.89
                 source="history_test_strategy",
                 timestamp=base_time - timedelta(hours=i),
                 strategy_name="history_test_strategy",
@@ -374,7 +379,7 @@ class TestRealSignalPersistence:
         time_range_signals = await signal_repository.get_signals_by_time_range(
             start_time=base_time - timedelta(hours=10),
             end_time=base_time - timedelta(hours=5),
-            strategy_id="history_test_001"
+            strategy_id="history_test_001",
         )
         assert len(time_range_signals) == 6  # Hours 5-10
 
@@ -390,9 +395,7 @@ class TestRealSignalPersistence:
 
         # Query signals by confidence range
         high_confidence_signals = await signal_repository.get_signals_by_confidence_range(
-            "history_test_001",
-            min_confidence=Decimal("0.75"),
-            max_confidence=Decimal("1.0")
+            "history_test_001", min_confidence=Decimal("0.75"), max_confidence=Decimal("1.0")
         )
         assert all(s.confidence >= Decimal("0.75") for s in high_confidence_signals)
 
@@ -409,6 +412,7 @@ class TestRealSignalPersistence:
         assert page_1[0].signal_id != page_2[0].signal_id  # Different signals
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_signal_aggregation_and_analytics(self, signal_repository):
         """Test signal aggregation and analytics queries."""
         # Create signals for analytics testing
@@ -491,11 +495,12 @@ class TestRealSignalPersistence:
         daily_signal_counts = await signal_repository.get_daily_signal_counts(
             strategy_id,
             start_date=base_time.date() - timedelta(days=1),
-            end_date=base_time.date() + timedelta(days=1)
+            end_date=base_time.date() + timedelta(days=1),
         )
         assert len(daily_signal_counts) >= 1
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_signal_performance_tracking(self, signal_repository):
         """Test signal performance tracking and outcome linking."""
         strategy_id = "performance_test_001"
@@ -543,15 +548,11 @@ class TestRealSignalPersistence:
 
         # Get performance by confidence bucket
         high_confidence_performance = await signal_repository.get_performance_by_confidence(
-            strategy_id,
-            min_confidence=Decimal("0.8"),
-            max_confidence=Decimal("1.0")
+            strategy_id, min_confidence=Decimal("0.8"), max_confidence=Decimal("1.0")
         )
 
         low_confidence_performance = await signal_repository.get_performance_by_confidence(
-            strategy_id,
-            min_confidence=Decimal("0.5"),
-            max_confidence=Decimal("0.8")
+            strategy_id, min_confidence=Decimal("0.5"), max_confidence=Decimal("0.8")
         )
 
         # Verify performance tracking
@@ -559,8 +560,9 @@ class TestRealSignalPersistence:
         assert isinstance(low_confidence_performance, dict)
 
         # High confidence signals should generally perform better
-        if (high_confidence_performance.get("win_rate") and
-            low_confidence_performance.get("win_rate")):
+        if high_confidence_performance.get("win_rate") and low_confidence_performance.get(
+            "win_rate"
+        ):
             # This is an expectation but may not always hold in small samples
             pass
 
@@ -581,6 +583,7 @@ class TestRealStrategyServiceDatabaseIntegration:
         await service.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_end_to_end_strategy_lifecycle_with_persistence(self, real_strategy_service):
         """Test complete strategy lifecycle with database persistence."""
         # Create strategy configuration
@@ -594,16 +597,14 @@ class TestRealStrategyServiceDatabaseIntegration:
             parameters={
                 "lookback_period": 20,
                 "entry_threshold": Decimal("2.0"),
-            }
+            },
         )
 
         # Register and persist strategy
         await real_strategy_service.register_strategy_config(config)
 
         # Verify persistence
-        retrieved_config = await real_strategy_service.get_strategy_config(
-            "e2e_lifecycle_test_001"
-        )
+        retrieved_config = await real_strategy_service.get_strategy_config("e2e_lifecycle_test_001")
         assert retrieved_config is not None
         assert retrieved_config.strategy_id == config.strategy_id
 
@@ -619,7 +620,9 @@ class TestRealStrategyServiceDatabaseIntegration:
         generated_signals = []
         for market_data in market_data_sequence:
             # Store market data
-            await real_strategy_service.store_market_data(market_data, exchange=market_data.exchange)
+            await real_strategy_service.store_market_data(
+                market_data, exchange=market_data.exchange
+            )
 
             # Generate signals
             signals = await strategy.generate_signals(market_data)
@@ -631,8 +634,7 @@ class TestRealStrategyServiceDatabaseIntegration:
 
         # Retrieve and verify signal history
         signal_history = await real_strategy_service.get_signal_history(
-            strategy_id="e2e_lifecycle_test_001",
-            limit=100
+            strategy_id="e2e_lifecycle_test_001", limit=100
         )
 
         assert len(signal_history) == len(generated_signals)
@@ -643,9 +645,7 @@ class TestRealStrategyServiceDatabaseIntegration:
             assert isinstance(signal.strength, Decimal)
 
         # Generate strategy metrics
-        metrics = await real_strategy_service.calculate_strategy_metrics(
-            "e2e_lifecycle_test_001"
-        )
+        metrics = await real_strategy_service.calculate_strategy_metrics("e2e_lifecycle_test_001")
 
         assert isinstance(metrics, StrategyMetrics)
         assert isinstance(metrics.total_signals, int)
@@ -658,9 +658,7 @@ class TestRealStrategyServiceDatabaseIntegration:
         await real_strategy_service.update_strategy_config(updated_config)
 
         # Verify update persistence
-        final_config = await real_strategy_service.get_strategy_config(
-            "e2e_lifecycle_test_001"
-        )
+        final_config = await real_strategy_service.get_strategy_config("e2e_lifecycle_test_001")
         assert final_config.min_confidence == Decimal("0.75")
 
         # Cleanup
@@ -668,6 +666,7 @@ class TestRealStrategyServiceDatabaseIntegration:
         await real_strategy_service.unregister_strategy_config("e2e_lifecycle_test_001")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_concurrent_strategy_persistence(self, real_strategy_service):
         """Test concurrent strategy operations with database persistence."""
         # Create multiple strategy configurations
@@ -680,21 +679,19 @@ class TestRealStrategyServiceDatabaseIntegration:
                 symbol="BTC/USDT",
                 timeframe="1h",
                 min_confidence=Decimal(f"0.{60 + i * 5}"),
-                parameters={"lookback_period": 20 + i}
+                parameters={"lookback_period": 20 + i},
             )
             configs.append(config)
 
         # Concurrent registration
         registration_tasks = [
-            real_strategy_service.register_strategy_config(config)
-            for config in configs
+            real_strategy_service.register_strategy_config(config) for config in configs
         ]
         await asyncio.gather(*registration_tasks)
 
         # Concurrent retrieval
         retrieval_tasks = [
-            real_strategy_service.get_strategy_config(f"concurrent_test_{i:03d}")
-            for i in range(5)
+            real_strategy_service.get_strategy_config(f"concurrent_test_{i:03d}") for i in range(5)
         ]
         retrieved_configs = await asyncio.gather(*retrieval_tasks)
 
@@ -710,15 +707,13 @@ class TestRealStrategyServiceDatabaseIntegration:
             config.enabled = False
 
         update_tasks = [
-            real_strategy_service.update_strategy_config(config)
-            for config in retrieved_configs
+            real_strategy_service.update_strategy_config(config) for config in retrieved_configs
         ]
         await asyncio.gather(*update_tasks)
 
         # Verify concurrent updates
         final_retrieval_tasks = [
-            real_strategy_service.get_strategy_config(f"concurrent_test_{i:03d}")
-            for i in range(5)
+            real_strategy_service.get_strategy_config(f"concurrent_test_{i:03d}") for i in range(5)
         ]
         final_configs = await asyncio.gather(*final_retrieval_tasks)
 

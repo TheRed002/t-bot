@@ -13,8 +13,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
-
 import pytest_asyncio
+
 from src.database.models.bot import Bot, Strategy
 from src.database.models.market_data import MarketDataRecord
 from src.database.models.trading import Order
@@ -50,6 +50,7 @@ class TestDatabasePerformanceIntegration:
             "position": PositionRepository(async_session),
         }
 
+    @pytest.mark.timeout(300)
     async def test_bulk_market_data_insertion(self, repositories):
         """Test inserting large amounts of market data efficiently."""
         # Create 100 market data records
@@ -122,7 +123,7 @@ class TestDatabasePerformanceIntegration:
         # Batch deletions into groups of 10 to avoid connection pool exhaustion
         batch_size = 10
         record_ids = [record.id for record in records]
-        batches = [record_ids[i:i + batch_size] for i in range(0, len(record_ids), batch_size)]
+        batches = [record_ids[i : i + batch_size] for i in range(0, len(record_ids), batch_size)]
 
         cleanup_tasks = [delete_batch(batch) for batch in batches]
         await asyncio.gather(*cleanup_tasks)
@@ -130,6 +131,7 @@ class TestDatabasePerformanceIntegration:
         cleanup_time = time.time() - start_time
         assert cleanup_time < 5.0, f"Bulk cleanup took {cleanup_time:.2f} seconds, expected < 5.0"
 
+    @pytest.mark.timeout(300)
     async def test_concurrent_bot_operations(self, clean_database):
         """Test concurrent bot creation and updates using proper session management."""
         from src.database.connection import get_async_session
@@ -196,7 +198,9 @@ class TestDatabasePerformanceIntegration:
         assert update_time < 2.0, f"Concurrent updates took {update_time:.2f} seconds"
         # Filter out None values (bots that weren't found)
         successful_updates = [bot for bot in updated_bots if bot is not None]
-        assert len(successful_updates) >= 18, f"Expected at least 18 successful updates, got {len(successful_updates)}"
+        assert len(successful_updates) >= 18, (
+            f"Expected at least 18 successful updates, got {len(successful_updates)}"
+        )
 
         # Test concurrent reads - each with its own session
         async def read_bot(bot_id: uuid.UUID):
@@ -224,6 +228,7 @@ class TestDatabasePerformanceIntegration:
                     # Bot might already be deleted, continue
                     pass
 
+    @pytest.mark.timeout(300)
     async def test_complex_query_performance(self, clean_database):
         """Test performance of complex queries with filtering and ordering."""
         # Use clean database to ensure no data from previous tests
@@ -368,13 +373,17 @@ class TestDatabasePerformanceIntegration:
 
             # Delete orders in batches
             order_ids = [order.id for order in orders]
-            order_batches = [order_ids[i:i + batch_size] for i in range(0, len(order_ids), batch_size)]
+            order_batches = [
+                order_ids[i : i + batch_size] for i in range(0, len(order_ids), batch_size)
+            ]
             for batch in order_batches:
                 await delete_batch("order", batch)
 
             # Delete strategies in batches
             strategy_ids = [strategy.id for strategy in strategies]
-            strategy_batches = [strategy_ids[i:i + batch_size] for i in range(0, len(strategy_ids), batch_size)]
+            strategy_batches = [
+                strategy_ids[i : i + batch_size] for i in range(0, len(strategy_ids), batch_size)
+            ]
             for batch in strategy_batches:
                 await delete_batch("strategy", batch)
 
@@ -385,6 +394,7 @@ class TestDatabasePerformanceIntegration:
             cleanup_time = time.time() - cleanup_start
             assert cleanup_time < 10.0, f"Cleanup took {cleanup_time:.2f} seconds"
 
+    @pytest.mark.timeout(300)
     async def test_memory_usage_under_load(self, repositories):
         """Test memory usage doesn't grow excessively under load."""
         import os
@@ -436,7 +446,9 @@ class TestDatabasePerformanceIntegration:
             # Batch deletions into groups of 10
             record_ids = [record.id for record in records]
             batch_size = 10
-            batches = [record_ids[i:i + batch_size] for i in range(0, len(record_ids), batch_size)]
+            batches = [
+                record_ids[i : i + batch_size] for i in range(0, len(record_ids), batch_size)
+            ]
 
             delete_tasks = [delete_batch(batch) for batch in batches]
             await asyncio.gather(*delete_tasks)
@@ -453,6 +465,7 @@ class TestDatabasePerformanceIntegration:
         # Memory growth should be reasonable (less than 50MB for this test)
         assert memory_growth < 50, f"Memory grew by {memory_growth:.2f}MB, expected < 50MB"
 
+    @pytest.mark.timeout(300)
     async def test_repository_cache_performance(self, repositories):
         """Test repository caching mechanisms if implemented."""
         # Create a bot that we'll query multiple times

@@ -18,7 +18,6 @@ import random
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Generator, List
 
 from src.core.types import MarketData
 
@@ -58,7 +57,7 @@ class MarketDataGenerator:
         periods: int = 100,
         trend_strength: float = 0.001,  # 0.1% per period
         direction: int = 1,  # 1 for up, -1 for down
-    ) -> List[MarketData]:
+    ) -> list[MarketData]:
         """
         Generate trending market data with realistic price action.
 
@@ -157,7 +156,7 @@ class MarketDataGenerator:
         symbol: str = "BTC/USDT",
         periods: int = 100,
         range_pct: float = 0.02,  # 2% trading range
-    ) -> List[MarketData]:
+    ) -> list[MarketData]:
         """
         Generate consolidating (sideways) market data.
 
@@ -204,8 +203,12 @@ class MarketDataGenerator:
             # Generate realistic OHLC within the range
             intraperiod_range = center_price * Decimal("0.005")  # 0.5% intraperiod range
 
-            high_price = max(open_price, close_price) + intraperiod_range * Decimal(str(random.random()))
-            low_price = min(open_price, close_price) - intraperiod_range * Decimal(str(random.random()))
+            high_price = max(open_price, close_price) + intraperiod_range * Decimal(
+                str(random.random())
+            )
+            low_price = min(open_price, close_price) - intraperiod_range * Decimal(
+                str(random.random())
+            )
 
             # Ensure bounds are respected
             high_price = min(high_price, upper_bound * Decimal("1.001"))
@@ -239,7 +242,7 @@ class MarketDataGenerator:
         breakout_periods: int = 20,
         breakout_strength: float = 0.05,  # 5% breakout move
         direction: int = 1,  # 1 for up, -1 for down
-    ) -> List[MarketData]:
+    ) -> list[MarketData]:
         """
         Generate breakout pattern: consolidation followed by breakout.
 
@@ -257,7 +260,7 @@ class MarketDataGenerator:
         consolidation_data = self.generate_consolidating_data(
             symbol=symbol,
             periods=consolidation_periods,
-            range_pct=0.015  # Tight 1.5% range
+            range_pct=0.015,  # Tight 1.5% range
         )
 
         # Get the breakout level (upper or lower bound of consolidation)
@@ -306,7 +309,7 @@ class MarketDataGenerator:
                 close=close_price,
                 volume=volume,
                 exchange="binance",
-                timestamp=current_time + timedelta(hours=i+1),
+                timestamp=current_time + timedelta(hours=i + 1),
                 bid_price=close_price - Decimal("0.50"),
                 ask_price=close_price + Decimal("0.50"),
             )
@@ -321,7 +324,7 @@ class MarketDataGenerator:
         symbol: str = "BTC/USDT",
         periods: int = 100,
         target_rsi: float = 70.0,  # Target RSI level to reach
-    ) -> List[MarketData]:
+    ) -> list[MarketData]:
         """
         Generate market data designed to test RSI calculations.
 
@@ -423,7 +426,7 @@ class MarketDataGenerator:
         return data
 
 
-def create_test_market_data_suite() -> dict[str, List[MarketData]]:
+def create_test_market_data_suite() -> dict[str, list[MarketData]]:
     """
     Create a comprehensive suite of test market data for various scenarios.
 
@@ -442,27 +445,17 @@ def create_test_market_data_suite() -> dict[str, List[MarketData]]:
         "uptrend_weak": generator.generate_trending_data(
             periods=100, trend_strength=0.0005, direction=1
         ),
-        "consolidation_tight": generator.generate_consolidating_data(
-            periods=100, range_pct=0.01
-        ),
-        "consolidation_wide": generator.generate_consolidating_data(
-            periods=100, range_pct=0.03
-        ),
+        "consolidation_tight": generator.generate_consolidating_data(periods=100, range_pct=0.01),
+        "consolidation_wide": generator.generate_consolidating_data(periods=100, range_pct=0.03),
         "breakout_up": generator.generate_breakout_data(
             consolidation_periods=50, breakout_periods=20, direction=1
         ),
         "breakout_down": generator.generate_breakout_data(
             consolidation_periods=50, breakout_periods=20, direction=-1
         ),
-        "rsi_overbought": generator.generate_rsi_test_data(
-            periods=50, target_rsi=75.0
-        ),
-        "rsi_oversold": generator.generate_rsi_test_data(
-            periods=50, target_rsi=25.0
-        ),
-        "rsi_neutral": generator.generate_rsi_test_data(
-            periods=50, target_rsi=50.0
-        ),
+        "rsi_overbought": generator.generate_rsi_test_data(periods=50, target_rsi=75.0),
+        "rsi_oversold": generator.generate_rsi_test_data(periods=50, target_rsi=25.0),
+        "rsi_neutral": generator.generate_rsi_test_data(periods=50, target_rsi=50.0),
     }
 
     return suite

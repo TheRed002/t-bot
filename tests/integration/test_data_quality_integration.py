@@ -118,6 +118,7 @@ class TestDataQualityIntegration:
         return signals
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_end_to_end_data_quality_pipeline(
         self, data_quality_system, sample_market_data: list[MarketData]
     ):
@@ -164,6 +165,7 @@ class TestDataQualityIntegration:
         assert 0.7 <= avg_quality_score <= 1.0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_data_quality_with_outliers(self, data_quality_system):
         """Test data quality pipeline with outlier detection"""
         validator, cleaner, monitor = data_quality_system
@@ -227,6 +229,7 @@ class TestDataQualityIntegration:
         # (adjusted_count > 0)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_data_quality_with_missing_data(self, data_quality_system):
         """Test data quality pipeline with missing data imputation"""
         validator, cleaner, monitor = data_quality_system
@@ -252,6 +255,7 @@ class TestDataQualityIntegration:
         # The key indicators are validation issues and imputation count
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_cross_source_consistency(self, data_quality_system):
         """Test cross-source data consistency validation"""
         validator, cleaner, monitor = data_quality_system
@@ -298,6 +302,7 @@ class TestDataQualityIntegration:
         assert len(consistency_issues_inconsistent) > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_signal_quality_pipeline(self, data_quality_system, sample_signals: list[Signal]):
         """Test signal quality pipeline"""
         validator, cleaner, monitor = data_quality_system
@@ -325,6 +330,7 @@ class TestDataQualityIntegration:
         assert valid_count == len(sample_signals)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_data_drift_detection(self, data_quality_system):
         """Test data drift detection across the pipeline"""
         validator, cleaner, monitor = data_quality_system
@@ -372,6 +378,7 @@ class TestDataQualityIntegration:
         assert drift_detected
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_quality_reporting_integration(
         self, data_quality_system, sample_market_data: list[MarketData]
     ):
@@ -398,6 +405,7 @@ class TestDataQualityIntegration:
         assert "recommendations" in quality_report
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_handling_integration(self, data_quality_system):
         """Test error handling across the pipeline"""
         validator, cleaner, monitor = data_quality_system
@@ -433,6 +441,7 @@ class TestDataQualityIntegration:
         assert quality_score_malformed < 0.5  # Low quality score for malformed data
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_performance_integration(self, data_quality_system):
         """Test performance of integrated data quality pipeline"""
         validator, cleaner, monitor = data_quality_system
@@ -470,6 +479,7 @@ class TestDataQualityIntegration:
         assert avg_time < 0.05
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_memory_usage_integration(self, data_quality_system):
         """Test memory usage of integrated system"""
         validator, cleaner, monitor = data_quality_system
@@ -501,6 +511,7 @@ class TestDataQualityIntegration:
         assert memory_increase < 100.0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_concurrent_processing(self, data_quality_system):
         """Test concurrent processing of data quality pipeline"""
         validator, cleaner, monitor = data_quality_system
@@ -548,6 +559,7 @@ class TestDataQualityRealWorldScenarios:
     """Test real-world data quality scenarios"""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_market_crash_scenario(self):
         """Test data quality during market crash scenario"""
         validator_config = {
@@ -623,6 +635,7 @@ class TestDataQualityRealWorldScenarios:
         # drift alerts
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_data_source_failure_scenario(self):
         """Test data quality during data source failure"""
         validator_config = {

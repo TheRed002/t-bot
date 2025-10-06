@@ -32,6 +32,7 @@ class TestStatepersistence(BaseIntegrationTest):
     """Test state persistence and recovery mechanisms."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_portfolio_state_persistence(self):
         """Test persistence and recovery of portfolio state."""
 
@@ -141,6 +142,7 @@ class TestStatepersistence(BaseIntegrationTest):
         os.rmdir(temp_dir)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_incremental_state_updates(self):
         """Test incremental state updates and delta persistence."""
 
@@ -289,6 +291,7 @@ class TestStatepersistence(BaseIntegrationTest):
         os.rmdir(temp_dir)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_state_corruption_detection_and_repair(self):
         """Test detection and repair of corrupted state data."""
 
@@ -497,6 +500,7 @@ class TestCheckpointManagement(BaseIntegrationTest):
 
     @pytest.mark.asyncio
     @performance_test(max_duration=20.0)
+    @pytest.mark.timeout(300)
     async def test_periodic_checkpoint_creation(self, performance_monitor):
         """Test automatic periodic checkpoint creation."""
 
@@ -596,6 +600,7 @@ class TestCheckpointManagement(BaseIntegrationTest):
         os.rmdir(temp_dir)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_checkpoint_recovery_scenarios(self):
         """Test recovery from different checkpoint scenarios."""
 
@@ -701,6 +706,7 @@ class TestCheckpointManagement(BaseIntegrationTest):
         assert default_state["total_trades"] == 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_checkpoint_integrity_validation(self):
         """Test checkpoint integrity validation and verification."""
 
@@ -840,6 +846,7 @@ class TestStateSynchronization(BaseIntegrationTest):
     """Test state synchronization across system components."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_multi_component_state_sync(self):
         """Test state synchronization between multiple system components."""
 
@@ -957,6 +964,7 @@ class TestStateSynchronization(BaseIntegrationTest):
         logger.info(f"Broadcast sync completed: {components_synced} components updated")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_conflict_resolution_in_state_sync(self):
         """Test conflict resolution when state updates conflict."""
 

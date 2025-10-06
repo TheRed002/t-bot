@@ -9,17 +9,18 @@ This test suite validates proper integration patterns:
 5. Async lifecycle is properly implemented
 """
 
-import pytest
-from unittest.mock import Mock, AsyncMock
 from decimal import Decimal
+from unittest.mock import AsyncMock, Mock
+
+import pytest
 
 from src.core.dependency_injection import DependencyInjector
-from src.core.exceptions import ServiceError, ValidationError
+from src.core.exceptions import ServiceError
 from src.web_interface.di_registration import register_web_interface_services
-from src.web_interface.factory import WebInterfaceFactory
 from src.web_interface.facade.api_facade import APIFacade
-from src.web_interface.services.trading_service import WebTradingService
+from src.web_interface.factory import WebInterfaceFactory
 from src.web_interface.services.analytics_service import WebAnalyticsService
+from src.web_interface.services.trading_service import WebTradingService
 
 
 class TestWebInterfaceDependencyInjection:
@@ -74,8 +75,8 @@ class TestWebInterfaceDependencyInjection:
     def test_service_locator_pattern(self, injector):
         """Test service locator functions work correctly."""
         from src.web_interface.di_registration import (
+            get_api_facade_service,
             get_web_trading_service,
-            get_api_facade_service
         )
 
         # Register services first
@@ -107,12 +108,14 @@ class TestServiceLayerIntegration:
         return WebAnalyticsService(analytics_service=mock_analytics)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_initialization(self, trading_service):
         """Test service initialization patterns."""
         await trading_service.initialize()
         # Should not raise errors
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_cleanup(self, trading_service):
         """Test service cleanup patterns."""
         await trading_service.initialize()
@@ -120,6 +123,7 @@ class TestServiceLayerIntegration:
         # Should not raise errors
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_handling_consistency(self, analytics_service):
         """Test that services use consistent error handling."""
         # Mock the analytics service to raise an exception
@@ -133,6 +137,7 @@ class TestServiceLayerIntegration:
         assert "Failed to retrieve portfolio metrics" in str(exc_info.value)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_business_logic_in_service_layer(self, trading_service):
         """Test that business logic is properly in service layer."""
         # Test order validation (business logic should be in service)
@@ -141,7 +146,7 @@ class TestServiceLayerIntegration:
             side="buy",
             order_type="limit",
             quantity=Decimal("1.0"),
-            price=Decimal("50000.0")
+            price=Decimal("50000.0"),
         )
 
         assert "valid" in result
@@ -160,9 +165,9 @@ class TestModuleBoundaryValidation:
         analytics_source = analytics_module.__file__
         trading_source = trading_module.__file__
 
-        with open(analytics_source, 'r') as f:
+        with open(analytics_source) as f:
             analytics_content = f.read()
-        with open(trading_source, 'r') as f:
+        with open(trading_source) as f:
             trading_content = f.read()
 
         # Should not have direct repository imports
@@ -173,7 +178,7 @@ class TestModuleBoundaryValidation:
         """Test that services use proper core exceptions."""
         import src.web_interface.services.analytics_service as analytics_module
 
-        with open(analytics_module.__file__, 'r') as f:
+        with open(analytics_module.__file__) as f:
             content = f.read()
 
         # Should import from core.exceptions
@@ -195,12 +200,10 @@ class TestAPIFacadeIntegration:
         """Create API facade with mock services."""
         mock_trading = Mock()
         mock_bot = Mock()
-        return APIFacade(
-            trading_service=mock_trading,
-            bot_service=mock_bot
-        )
+        return APIFacade(trading_service=mock_trading, bot_service=mock_bot)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_facade_initialization(self, api_facade):
         """Test facade properly initializes services."""
         # Mock service initialization
@@ -214,6 +217,7 @@ class TestAPIFacadeIntegration:
         api_facade._bot_service.initialize.assert_called_once()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_facade_dependency_configuration(self):
         """Test facade can configure dependencies from injector."""
         injector = DependencyInjector()
@@ -239,6 +243,7 @@ class TestAsyncLifecycleIntegration:
     """Test async lifecycle integration patterns."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_lifecycle_coordination(self):
         """Test that services coordinate lifecycle properly."""
         injector = DependencyInjector()
@@ -260,6 +265,7 @@ class TestErrorPropagationIntegration:
     """Test error propagation across service boundaries."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_error_propagation(self):
         """Test errors propagate correctly between service layers."""
         # Create service with failing dependency
@@ -273,6 +279,7 @@ class TestErrorPropagationIntegration:
             await service.get_portfolio_metrics()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_validation_error_propagation(self):
         """Test validation errors propagate correctly."""
         trading_service = WebTradingService()
@@ -283,7 +290,7 @@ class TestErrorPropagationIntegration:
             side="buy",
             order_type="limit",
             quantity=Decimal("0"),  # Invalid quantity
-            price=Decimal("50000.0")
+            price=Decimal("50000.0"),
         )
 
         assert not result["valid"]

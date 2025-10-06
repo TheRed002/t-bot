@@ -10,26 +10,25 @@ Tests error handling functionality with real services:
 NO MOCKS - All operations use actual services and dependencies.
 """
 
-import asyncio
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
 
-from src.error_handling.service import ErrorHandlingService
+from src.core.config import Config
+from src.core.exceptions import ServiceError, ValidationError
+from src.error_handling.connection_manager import ConnectionManager
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.global_handler import GlobalErrorHandler
 from src.error_handling.pattern_analytics import ErrorPatternAnalytics
-from src.error_handling.recovery_scenarios import RecoveryScenario, PartialFillRecovery, NetworkDisconnectionRecovery
-from src.error_handling.connection_manager import ConnectionManager
-from src.core.config import Config
-from src.core.exceptions import ServiceError, ValidationError
-from tests.integration.infrastructure.conftest import clean_database
+from src.error_handling.recovery_scenarios import NetworkDisconnectionRecovery, PartialFillRecovery
+from src.error_handling.service import ErrorHandlingService
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_real_error_handling_service_initialization():
     """Test error handling service initializes with real dependencies."""
     config = Config()
@@ -55,7 +54,10 @@ async def test_real_error_handling_service_initialization():
 
         # Test health check with real services
         health_result = await service.health_check()
-        assert health_result.status.value in ["healthy", "degraded"]  # May be degraded due to missing state monitor
+        assert health_result.status.value in [
+            "healthy",
+            "degraded",
+        ]  # May be degraded due to missing state monitor
         assert "components" in health_result.details
 
     finally:
@@ -64,6 +66,7 @@ async def test_real_error_handling_service_initialization():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_real_error_handler_error_processing():
     """Test error handler processes errors with real error context creation."""
     from src.core.dependency_injection import DependencyInjector
@@ -80,11 +83,7 @@ async def test_real_error_handler_error_processing():
     rate_limiter = injector.resolve("SecurityRateLimiter")
 
     # Create error handler with properly injected dependencies
-    error_handler = ErrorHandler(
-        config=config,
-        sanitizer=sanitizer,
-        rate_limiter=rate_limiter
-    )
+    error_handler = ErrorHandler(config=config, sanitizer=sanitizer, rate_limiter=rate_limiter)
 
     # Create a real error
     test_error = ValueError("Real test error")
@@ -96,7 +95,7 @@ async def test_real_error_handler_error_processing():
         error=test_error,
         component=component,
         operation=operation,
-        context={"test_key": "test_value"}
+        context={"test_key": "test_value"},
     )
 
     assert error_context is not None
@@ -116,6 +115,7 @@ async def test_real_error_handler_error_processing():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_real_pattern_analytics_error_tracking():
     """Test pattern analytics tracks errors with real data storage."""
     config = Config()
@@ -130,14 +130,14 @@ async def test_real_pattern_analytics_error_tracking():
                 "error_type": "NetworkError",
                 "component": "exchange_client",
                 "timestamp": datetime.now(timezone.utc),
-                "severity": "high"
+                "severity": "high",
             },
             {
                 "error_type": "ValidationError",
                 "component": "order_validator",
                 "timestamp": datetime.now(timezone.utc),
-                "severity": "medium"
-            }
+                "severity": "medium",
+            },
         ]
 
         for event in error_events:
@@ -158,12 +158,13 @@ async def test_real_pattern_analytics_error_tracking():
 
     finally:
         # Clean up manually since HistoryWrapper doesn't have clear()
-        if hasattr(pattern_analytics, '_error_history_list'):
+        if hasattr(pattern_analytics, "_error_history_list"):
             pattern_analytics._error_history_list.clear()
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_real_recovery_scenarios_execution():
     """Test recovery scenarios execute with real recovery logic."""
     config = Config()
@@ -183,7 +184,7 @@ async def test_real_recovery_scenarios_execution():
                     "quantity": Decimal("1.0"),
                     "filled_quantity": Decimal("0.5"),
                     "remaining_quantity": Decimal("0.5"),
-                    "exchange": "test_exchange"
+                    "exchange": "test_exchange",
                 }
             }
         )
@@ -192,11 +193,7 @@ async def test_real_recovery_scenarios_execution():
 
         # Test network disconnection recovery
         recovery_result = await network_recovery.execute_recovery(
-            context={
-                "component": "exchange_client",
-                "exchange": "binance",
-                "reconnect_attempts": 0
-            }
+            context={"component": "exchange_client", "exchange": "binance", "reconnect_attempts": 0}
         )
 
         assert recovery_result is not None
@@ -208,6 +205,7 @@ async def test_real_recovery_scenarios_execution():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_real_connection_manager_operations():
     """Test connection manager with real connection handling."""
     config = Config()
@@ -224,7 +222,7 @@ async def test_real_connection_manager_operations():
         connection_result = await connection_manager.establish_connection(
             connection_id="test-conn-123",
             connection_type="websocket",
-            connect_func=mock_connect_func
+            connect_func=mock_connect_func,
         )
 
         # Connection may fail but should return boolean result
@@ -232,8 +230,7 @@ async def test_real_connection_manager_operations():
 
         # Test message queuing functionality
         await connection_manager.queue_message(
-            connection_id="test-conn-123",
-            message={"type": "ping", "data": "test"}
+            connection_id="test-conn-123", message={"type": "ping", "data": "test"}
         )
 
         # Verify message was queued (this doesn't throw an exception if successful)
@@ -244,6 +241,7 @@ async def test_real_connection_manager_operations():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_real_error_handling_end_to_end_flow():
     """Test complete error handling flow with real services."""
     config = Config()
@@ -271,7 +269,7 @@ async def test_real_error_handling_end_to_end_flow():
             error=test_error,
             component="integration_test",
             operation="end_to_end_test",
-            context={"test_run": str(uuid.uuid4())}
+            context={"test_run": str(uuid.uuid4())},
         )
 
         assert result is not None
@@ -290,6 +288,7 @@ async def test_real_error_handling_end_to_end_flow():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_real_error_context_transformation_and_validation():
     """Test error context transformation with real validation."""
     config = Config()
@@ -304,7 +303,7 @@ async def test_real_error_context_transformation_and_validation():
             "symbol": "BTC/USDT",
             "price": "50000.50",
             "quantity": "1.0",
-            "exchange": "binance"
+            "exchange": "binance",
         }
 
         test_error = ValidationError("Invalid order parameters")
@@ -313,7 +312,7 @@ async def test_real_error_context_transformation_and_validation():
             error=test_error,
             component="order_processor",
             operation="validate_order",
-            context=original_context
+            context=original_context,
         )
 
         # Verify real transformation occurred
@@ -332,6 +331,7 @@ async def test_real_error_context_transformation_and_validation():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_real_circuit_breaker_functionality():
     """Test circuit breaker with real failure tracking."""
     from src.error_handling.decorators import with_circuit_breaker
@@ -361,10 +361,12 @@ async def test_real_circuit_breaker_functionality():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_real_retry_mechanism_with_backoff():
     """Test retry mechanism with real backoff timing."""
-    from src.error_handling.decorators import with_retry
     import time
+
+    from src.error_handling.decorators import with_retry
 
     call_count = 0
     start_time = time.time()

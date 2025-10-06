@@ -64,6 +64,7 @@ class FallbackConfig:
 # Simple global state for circuit breakers and metrics
 _circuit_breakers: dict[str, Any] = {}
 _error_counts: dict[str, int] = {}
+_last_failure_times: dict[str, float] = {}
 _active_handlers: set[str] = set()
 
 
@@ -87,7 +88,12 @@ def error_handler(
 
             # Check circuit breaker
             if circuit_breaker_config and _should_circuit_break(func_name, circuit_breaker_config):
-                return _handle_fallback(fallback_config)
+                if fallback_config:
+                    return _handle_fallback(fallback_config)
+                else:
+                    # Raise exception if circuit is open and no fallback
+                    from src.core.exceptions import TradingBotError
+                    raise TradingBotError(f"Circuit breaker is OPEN for {func_name}")
 
             last_error = None
             max_attempts = retry_config.max_attempts if retry_config else 1
@@ -106,6 +112,7 @@ def error_handler(
                 except Exception as e:
                     last_error = e
                     _error_counts[func_name] = _error_counts.get(func_name, 0) + 1
+                    _last_failure_times[func_name] = time.time()
 
                     if enable_logging:
                         logger.warning(f"Error in {func_name} (attempt {attempt + 1}): {e}")
@@ -135,7 +142,12 @@ def error_handler(
 
             # Check circuit breaker
             if circuit_breaker_config and _should_circuit_break(func_name, circuit_breaker_config):
-                return _handle_fallback(fallback_config)
+                if fallback_config:
+                    return _handle_fallback(fallback_config)
+                else:
+                    # Raise exception if circuit is open and no fallback
+                    from src.core.exceptions import TradingBotError
+                    raise TradingBotError(f"Circuit breaker is OPEN for {func_name}")
 
             last_error = None
             max_attempts = retry_config.max_attempts if retry_config else 1
@@ -151,6 +163,7 @@ def error_handler(
                 except Exception as e:
                     last_error = e
                     _error_counts[func_name] = _error_counts.get(func_name, 0) + 1
+                    _last_failure_times[func_name] = time.time()
 
                     if enable_logging:
                         logger.warning(f"Error in {func_name} (attempt {attempt + 1}): {e}")
@@ -183,7 +196,17 @@ def error_handler(
 def _should_circuit_break(func_name: str, config: CircuitBreakerConfig) -> bool:
     """Check if circuit breaker should be open."""
     error_count = _error_counts.get(func_name, 0)
-    return error_count >= config.failure_threshold
+    last_failure_time = _last_failure_times.get(func_name, 0)
+
+    if error_count >= config.failure_threshold:
+        # Check if recovery timeout has elapsed
+        if time.time() - last_failure_time < config.recovery_timeout:
+            return True
+        else:
+            # Reset circuit after recovery timeout
+            _error_counts[func_name] = 0
+            return False
+    return False
 
 
 def _should_retry(

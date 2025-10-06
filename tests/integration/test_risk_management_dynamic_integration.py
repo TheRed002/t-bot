@@ -178,6 +178,7 @@ class TestDynamicRiskManagementIntegration:
         return market_data
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_integration_regime_detection_and_adaptive_sizing(
         self, adaptive_risk_manager, sample_signal, high_volatility_market_data
     ):
@@ -205,6 +206,7 @@ class TestDynamicRiskManagementIntegration:
         assert position_size >= portfolio_value * Decimal("0.001")  # Min 0.1%
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_integration_regime_detection_and_adaptive_stop_loss(
         self, adaptive_risk_manager, sample_signal, high_volatility_market_data
     ):
@@ -225,6 +227,7 @@ class TestDynamicRiskManagementIntegration:
         assert stop_loss < base_stop_loss  # Wider stop (lower price for buy)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_integration_regime_detection_and_adaptive_take_profit(
         self, adaptive_risk_manager, sample_signal, high_volatility_market_data
     ):
@@ -245,6 +248,7 @@ class TestDynamicRiskManagementIntegration:
         assert take_profit > base_take_profit  # Higher target
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_integration_regime_detection_and_portfolio_limits(
         self, adaptive_risk_manager, high_volatility_market_data
     ):
@@ -278,6 +282,7 @@ class TestDynamicRiskManagementIntegration:
             )
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_integration_low_volatility_scenario(
         self, adaptive_risk_manager, sample_signal, low_volatility_market_data
     ):
@@ -312,6 +317,7 @@ class TestDynamicRiskManagementIntegration:
         assert stop_loss > base_stop_loss
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_integration_regime_change_detection(
         self, adaptive_risk_manager, sample_market_data
     ):
@@ -335,6 +341,7 @@ class TestDynamicRiskManagementIntegration:
         assert history[0].to_regime == new_regime
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_integration_stress_testing_with_regime_detection(
         self, adaptive_risk_manager, sample_portfolio_positions, high_volatility_market_data
     ):
@@ -361,6 +368,7 @@ class TestDynamicRiskManagementIntegration:
         assert current_regime == regime  # Should not change due to stress test
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_integration_adaptive_parameters_consistency(self, adaptive_risk_manager):
         """Test consistency of adaptive parameters across different regimes."""
         regimes = [
@@ -387,6 +395,7 @@ class TestDynamicRiskManagementIntegration:
             assert 0 < params["max_positions_multiplier"] <= 2
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_integration_error_handling(self, adaptive_risk_manager):
         """Test error handling in integrated system."""
         # Test with empty market data (should return default regime)
@@ -409,6 +418,7 @@ class TestDynamicRiskManagementIntegration:
             )
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_integration_performance_monitoring(self, adaptive_risk_manager, sample_signal):
         """Test performance monitoring integration."""
         # Test that performance decorators are working
@@ -430,6 +440,7 @@ class TestDynamicRiskManagementIntegration:
         assert stop_loss > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_integration_configuration_validation(self):
         """Test configuration validation in integrated system."""
         # Test with minimal configuration
@@ -457,6 +468,7 @@ class TestDynamicRiskManagementIntegration:
         assert position_size > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_integration_regime_statistics(self, adaptive_risk_manager):
         """Test regime statistics integration."""
         # Get initial statistics
@@ -479,6 +491,7 @@ class TestDynamicRiskManagementIntegration:
         assert updated_stats["last_change"] is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_integration_stress_test_scenarios(
         self, adaptive_risk_manager, sample_portfolio_positions
     ):
@@ -498,6 +511,7 @@ class TestDynamicRiskManagementIntegration:
             assert results["positions_affected"] == 2
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_integration_regime_detector_update(self, adaptive_risk_manager):
         """Test updating regime detector reference."""
         # Create new regime detector

@@ -14,16 +14,13 @@ Key Features:
 """
 
 import asyncio
-from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List
 
 import pytest
-
 import pytest_asyncio
-from src.core.exceptions import ServiceError, StrategyError, ValidationError
+
+from src.core.exceptions import ValidationError
 from src.core.types import (
-    MarketData,
     Signal,
     SignalDirection,
     StrategyConfig,
@@ -34,22 +31,11 @@ from src.core.types import (
 # Import market data generators
 from tests.integration.modules.strategies.fixtures.market_data_generators import (
     MarketDataGenerator,
-    create_test_market_data_suite,
 )
 
 # Import validation helpers
-from tests.integration.modules.strategies.helpers.indicator_validators import (
-    IndicatorValidator,
-    PerformanceBenchmarker,
-    validate_all_indicators,
-    create_known_test_cases,
-)
 
 # Import performance benchmarks
-from tests.integration.modules.strategies.performance.benchmarks import (
-    StrategyPerformanceBenchmarker,
-    run_comprehensive_benchmarks,
-)
 
 
 class TestRealStrategyFrameworkIntegration:
@@ -86,6 +72,7 @@ class TestRealStrategyFrameworkIntegration:
         # No cleanup needed after - next test will clean before it runs
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_technical_indicators_accuracy(
         self, real_data_service, real_mean_reversion_strategy
     ):
@@ -137,6 +124,7 @@ class TestRealStrategyFrameworkIntegration:
         assert atr_result >= Decimal("0")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_strategy_service_lifecycle(
         self, real_strategy_service, real_database_service, strategy_factory
     ):
@@ -189,7 +177,9 @@ class TestRealStrategyFrameworkIntegration:
         assert saved_config.strategy_type == StrategyType.TREND_FOLLOWING
 
         # Test strategy status updates
-        await real_strategy_service.update_strategy_status("test_real_trend_001", StrategyStatus.RUNNING)
+        await real_strategy_service.update_strategy_status(
+            "test_real_trend_001", StrategyStatus.RUNNING
+        )
 
         strategy_status = await real_strategy_service.get_strategy_status("test_real_trend_001")
         assert strategy_status == StrategyStatus.RUNNING
@@ -202,6 +192,7 @@ class TestRealStrategyFrameworkIntegration:
         assert "test_real_trend_001" not in final_strategies
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_signal_generation_with_risk_validation(
         self, real_trend_following_strategy, real_risk_service, real_data_service
     ):
@@ -253,6 +244,7 @@ class TestRealStrategyFrameworkIntegration:
                 assert position_size > Decimal("0")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_strategy_types_comparison(
         self,
         real_mean_reversion_strategy,
@@ -299,6 +291,7 @@ class TestRealStrategyFrameworkIntegration:
         assert isinstance(signals_by_strategy["trend_following"], list)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_portfolio_risk_integration(
         self, real_risk_service, real_mean_reversion_strategy, real_data_service
     ):
@@ -338,6 +331,7 @@ class TestRealStrategyFrameworkIntegration:
                 assert position_value <= max_position_value
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_database_persistence_comprehensive(
         self, real_strategy_service, real_database_service, real_data_service
     ):
@@ -386,6 +380,7 @@ class TestRealStrategyFrameworkIntegration:
         assert all(config is not None for config in retrieved_configs)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_performance_benchmarks(
         self, real_mean_reversion_strategy, real_data_service
     ):
@@ -419,6 +414,7 @@ class TestRealStrategyFrameworkIntegration:
         assert indicator_time < 2.0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_error_handling_and_recovery(
         self, real_strategy_service, real_database_service
     ):
@@ -473,6 +469,7 @@ class TestRealStrategyFrameworkIntegration:
         assert retrieved.strategy_id == "error_recovery_test"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_concurrent_strategy_operations(
         self, real_strategy_service, real_data_service
     ):

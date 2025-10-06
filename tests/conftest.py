@@ -378,22 +378,22 @@ def config():
     """Provide application configuration for tests."""
     from src.core.config import DatabaseConfig
 
-    # Create DatabaseConfig separately
+    # Create DatabaseConfig separately - use environment variables
     db_config = DatabaseConfig(
         postgresql_host="localhost",
         postgresql_port=5432,
-        postgresql_database="trading_bot_test",
-        postgresql_username="trading_bot_test",
-        postgresql_password="test_password",
+        postgresql_database=f"{os.getenv('DB_NAME', 'tbot_dev')}_test",
+        postgresql_username=f"{os.getenv('DB_USER', 'tbot')}_test",
+        postgresql_password=os.getenv("DB_PASSWORD", "tbot_password"),
         redis_host="localhost",
         redis_port=6379,
         redis_db=1,  # Use different DB to avoid conflicts
-        redis_password="redis_password",  # Password from docker-compose
+        redis_password=os.getenv("REDIS_PASSWORD", "redis_dev_password"),
         influxdb_host="localhost",
         influxdb_port=8086,
         influxdb_bucket="trading_data_test",
-        influxdb_org="trading_bot_dev",
-        influxdb_token="trading_bot_token",
+        influxdb_org=os.getenv("INFLUXDB_ORG", "tbot_dev"),
+        influxdb_token=os.getenv("INFLUXDB_TOKEN", "tbot_dev_token"),
     )
 
     # Create Config instance
@@ -412,17 +412,17 @@ def test_db_config():
         "postgresql": {
             "host": "localhost",
             "port": 5432,
-            "database": "trading_bot_test",
-            "username": "trading_bot_test",
-            "password": "test_password",
+            "database": f"{os.getenv('DB_NAME', 'tbot_dev')}_test",
+            "username": f"{os.getenv('DB_USER', 'tbot')}_test",
+            "password": os.getenv("DB_PASSWORD", "tbot_password"),
         },
         "redis": {"host": "localhost", "port": 6379, "db": 1},
         "influxdb": {
             "host": "localhost",
             "port": 8086,
             "bucket": "trading_data_test",
-            "org": "test-org",
-            "token": "test-token",
+            "org": os.getenv("INFLUXDB_ORG", "tbot_dev"),
+            "token": os.getenv("INFLUXDB_TOKEN", "tbot_dev_token"),
         },
     }
 
@@ -438,14 +438,14 @@ def check_database_availability(config: Config) -> dict[str, bool]:
 
     status = {"postgresql": False, "redis": False, "influxdb": False}
 
-    # Check PostgreSQL - try to connect as trading_bot user first
+    # Check PostgreSQL - try to connect as configured user first
     try:
         conn = psycopg2.connect(
             host=config.database.postgresql_host,
             port=config.database.postgresql_port,
-            database="trading_bot",
-            user="trading_bot",  # Use trading_bot user for availability check
-            password="trading_bot_password",  # Default password from docker-compose
+            database=os.getenv("DB_NAME", "tbot_dev"),
+            user=os.getenv("DB_USER", "tbot"),
+            password=os.getenv("DB_PASSWORD", "tbot_password"),
         )
         conn.close()
         status["postgresql"] = True
@@ -497,9 +497,9 @@ def setup_test_databases(config: Config) -> None:
         conn = psycopg2.connect(
             host=config.database.postgresql_host,
             port=config.database.postgresql_port,
-            database="trading_bot",
-            user="trading_bot",  # Use trading_bot user
-            password="trading_bot_password",  # Default password from docker-compose
+            database=os.getenv("DB_NAME", "tbot_dev"),
+            user=os.getenv("DB_USER", "tbot"),
+            password=os.getenv("DB_PASSWORD", "tbot_password"),
         )
         conn.autocommit = True
         cursor = conn.cursor()
@@ -607,9 +607,9 @@ def cleanup_test_databases(config: Config) -> None:
         conn = psycopg2.connect(
             host=config.database.postgresql_host,
             port=config.database.postgresql_port,
-            database="trading_bot",
-            user="trading_bot",
-            password="trading_bot_password",
+            database=os.getenv("DB_NAME", "tbot_dev"),
+            user=os.getenv("DB_USER", "tbot"),
+            password=os.getenv("DB_PASSWORD", "tbot_password"),
         )
         conn.autocommit = True
         cursor = conn.cursor()

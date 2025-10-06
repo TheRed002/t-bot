@@ -240,7 +240,7 @@ def _register_all_modules(registrar: DependencyRegistrar, config: Config) -> Non
         registrar, DependencyLevel.BOT_MANAGEMENT, register_bot_management_module
     )
 
-    # Level 6: Error Handling (Full)
+    # Level 2: Error Handling (Basic) - Must be before exchanges to provide SecurityRateLimiter
     def register_error_handling_module(injector: DependencyInjector) -> None:
         """Register error handling services."""
         try:
@@ -252,7 +252,7 @@ def _register_all_modules(registrar: DependencyRegistrar, config: Config) -> Non
             logger.warning(f"Error handling registration failed: {e}")
 
     register_module_at_level(
-        registrar, DependencyLevel.ERROR_HANDLING_FULL, register_error_handling_module
+        registrar, DependencyLevel.ERROR_HANDLING_BASIC, register_error_handling_module
     )
 
     # Level 7: Analytics

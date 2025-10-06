@@ -7,9 +7,6 @@ API endpoints, and WebSocket functionality.
 Uses REAL services - NO MOCKS for internal services.
 """
 
-import pytest
-from fastapi.testclient import TestClient
-
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)

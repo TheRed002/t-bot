@@ -15,8 +15,8 @@ from decimal import Decimal
 
 import psutil
 import pytest
-
 import pytest_asyncio
+
 from src.core.types import OrderRequest, OrderSide, OrderStatus, OrderType, TimeInForce
 from src.core.types.market import MarketData
 from src.exchanges.mock_exchange import MockExchange
@@ -117,6 +117,7 @@ class TestHighFrequencyTradingLoad:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    @pytest.mark.timeout(300)
     async def test_burst_order_processing_real_services(self):
         """Test system handling of burst order processing with REAL execution service."""
         logger.info("Testing burst order processing with REAL services")
@@ -140,14 +141,16 @@ class TestHighFrequencyTradingLoad:
 
                 # Place order through REAL exchange service (correct API)
                 order_response = await self.exchange_service.place_order(
-                    exchange_name="mock",
-                    order=order_request
+                    exchange_name="mock", order=order_request
                 )
 
                 duration = time.time() - order_start
                 self.load_metrics.add_request_time(duration)
 
-                if order_response and order_response.status in [OrderStatus.FILLED, OrderStatus.NEW]:
+                if order_response and order_response.status in [
+                    OrderStatus.FILLED,
+                    OrderStatus.NEW,
+                ]:
                     self.load_metrics.add_success()
                     return True
                 else:
@@ -191,6 +194,7 @@ class TestHighFrequencyTradingLoad:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    @pytest.mark.timeout(300)
     async def test_concurrent_market_data_processing_real(self):
         """Test concurrent market data processing with REAL data service."""
         logger.info("Testing concurrent market data processing with REAL services")
@@ -203,7 +207,13 @@ class TestHighFrequencyTradingLoad:
             logger.warning(f"Could not resolve data_service: {e}, will use state service")
             data_service = None
 
-        symbols = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "ADA/USDT", "DOT/USDT"]  # Standard format with slashes
+        symbols = [
+            "BTC/USDT",
+            "ETH/USDT",
+            "BNB/USDT",
+            "ADA/USDT",
+            "DOT/USDT",
+        ]  # Standard format with slashes
         messages_per_symbol = 50  # Reduced for real database operations
 
         async def process_market_data_stream_real(symbol: str):
@@ -298,6 +308,7 @@ class TestMemoryAndResourceLoad:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    @pytest.mark.timeout(300)
     async def test_memory_usage_under_load_real(self):
         """Test memory usage patterns under sustained load with REAL services."""
         logger.info("Testing memory usage under sustained load with REAL services")
@@ -329,8 +340,7 @@ class TestMemoryAndResourceLoad:
 
                     # Place through REAL exchange service (correct API)
                     task = self.exchange_service.place_order(
-                        exchange_name="mock",
-                        order=order_request
+                        exchange_name="mock", order=order_request
                     )
                     order_tasks.append(task)
 
@@ -367,12 +377,8 @@ class TestMemoryAndResourceLoad:
         avg_memory = statistics.mean(self.memory_snapshots)
 
         # Memory assertions (more lenient for real operations)
-        assert memory_growth < 1000, (
-            f"Memory growth {memory_growth:.1f}MB exceeds threshold"
-        )
-        assert max_memory < initial_memory + 1500, (
-            f"Peak memory {max_memory:.1f}MB too high"
-        )
+        assert memory_growth < 1000, f"Memory growth {memory_growth:.1f}MB exceeds threshold"
+        assert max_memory < initial_memory + 1500, f"Peak memory {max_memory:.1f}MB too high"
 
         logger.info(
             f"Memory test completed: Growth {memory_growth:.1f}MB, Peak {max_memory:.1f}MB, Avg {avg_memory:.1f}MB"
@@ -406,6 +412,7 @@ class TestSystemIntegrationLoad:
 
     @pytest.mark.asyncio
     @pytest.mark.integration
+    @pytest.mark.timeout(300)
     async def test_end_to_end_system_load_real(self):
         """Test complete system under realistic production load with REAL services."""
         logger.info("Testing end-to-end system under load with REAL services")
@@ -440,8 +447,7 @@ class TestSystemIntegrationLoad:
                     # Process through REAL exchange service (correct API)
                     start_time = time.time()
                     order_response = await self.exchange_service.place_order(
-                        exchange_name="mock",
-                        order=order_request
+                        exchange_name="mock", order=order_request
                     )
                     duration = time.time() - start_time
 

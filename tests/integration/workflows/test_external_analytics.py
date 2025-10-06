@@ -53,6 +53,7 @@ class TestExternalAnalyticsUsage:
         service = Mock()
         return service
 
+    @pytest.mark.timeout(300)
     async def test_execution_service_analytics_integration(
         self, mock_analytics_service, mock_database_service, mock_validation_service
     ):
@@ -139,6 +140,7 @@ class TestExternalAnalyticsUsage:
             strategy_name="test-strategy", event_type="trade_executed", success=True
         )
 
+    @pytest.mark.timeout(300)
     async def test_risk_management_analytics_integration(self, mock_analytics_service):
         """Test that risk management properly uses analytics data."""
         # This would test RiskManager integration with analytics
@@ -152,6 +154,7 @@ class TestExternalAnalyticsUsage:
         mock_analytics_service.get_portfolio_metrics.assert_called_once()
         mock_analytics_service.get_risk_metrics.assert_called_once()
 
+    @pytest.mark.timeout(300)
     async def test_web_interface_analytics_integration(self, mock_analytics_service):
         """Test that web interface properly consumes analytics data."""
         # Test basic analytics service integration patterns
@@ -171,6 +174,7 @@ class TestExternalAnalyticsUsage:
             strategy_name="web-interface-test", event_type="data_request", success=True
         )
 
+    @pytest.mark.timeout(300)
     async def test_strategy_analytics_integration(self, mock_analytics_service):
         """Test that trading strategies properly report to analytics."""
         # Simulate strategy reporting events to analytics
@@ -183,6 +187,7 @@ class TestExternalAnalyticsUsage:
             strategy_name="test-strategy", event_type="signal_generated", success=True
         )
 
+    @pytest.mark.timeout(300)
     async def test_error_handling_analytics_integration(self, mock_analytics_service):
         """Test that error handling system reports to analytics."""
         # Simulate error reporting to analytics
@@ -199,6 +204,7 @@ class TestExternalAnalyticsUsage:
             error_message="Invalid order parameters",
         )
 
+    @pytest.mark.timeout(300)
     async def test_analytics_service_contract_compliance(self):
         """Test that analytics service implements expected contracts."""
         from src.analytics.service import AnalyticsService
@@ -213,6 +219,7 @@ class TestExternalAnalyticsUsage:
         assert hasattr(AnalyticsService, "get_portfolio_metrics")
         assert hasattr(AnalyticsService, "get_risk_metrics")
 
+    @pytest.mark.timeout(300)
     async def test_dependency_injection_patterns(self):
         """Test that analytics is properly injected into dependent services."""
         from src.analytics.di_registration import register_analytics_services
@@ -236,6 +243,7 @@ class TestExternalAnalyticsUsage:
         assert injector.has_service("RiskService")
         assert injector.has_service("ReportingService")
 
+    @pytest.mark.timeout(300)
     async def test_service_layer_boundaries(self):
         """Test that modules respect service layer boundaries."""
         # This test ensures that external modules:
@@ -264,6 +272,7 @@ class TestExternalAnalyticsUsage:
         for method in protocol_methods:
             assert hasattr(AnalyticsServiceProtocol, method)
 
+    @pytest.mark.timeout(300)
     async def test_analytics_error_isolation(self, mock_analytics_service):
         """Test that analytics failures don't break dependent services."""
         # Test that when analytics service fails, it doesn't crash the system

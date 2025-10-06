@@ -58,6 +58,7 @@ class DatabaseConnectionManager:
         self._health_check_task: Task[None] | None = None
         self._connection_healthy = True
         self._test_schema: str | None = None  # For test isolation
+        self._test_schema_listeners_registered = False  # Track listener registration
 
     def set_test_schema(self, schema: str) -> None:
         """
@@ -72,6 +73,61 @@ class DatabaseConnectionManager:
         self._test_schema = schema
         logger.debug(f"Test schema set to: {schema}")
 
+        # If engine already exists, set up listeners immediately
+        if self.async_engine:
+            self._setup_test_schema_listeners()
+
+    def _setup_test_schema_listeners(self) -> None:
+        """
+        Set up SQLAlchemy event listeners to ensure all sessions use test schema.
+
+        This is critical for test isolation - ensures EVERY new session/connection
+        automatically sets the search_path to the test schema.
+        """
+        from sqlalchemy import event
+
+        if not self._test_schema or self._test_schema_listeners_registered:
+            return
+
+        test_schema = self._test_schema
+
+        # Set up listeners for async engine (using sync_engine from AsyncEngine)
+        if self.async_engine:
+            @event.listens_for(self.async_engine.sync_engine, "connect")
+            def set_async_search_path_on_connect(dbapi_conn, connection_record):
+                """Set search path when a new async connection is created."""
+                cursor = dbapi_conn.cursor()
+                cursor.execute(f"SET search_path TO {test_schema}, public")
+                cursor.close()
+                logger.debug(f"Set search_path to {test_schema} on new async connection")
+
+            @event.listens_for(self.async_engine.sync_engine, "checkout")
+            def set_async_search_path_on_checkout(dbapi_conn, connection_record, connection_proxy):
+                """Ensure search path is set when async connection is checked out from pool."""
+                cursor = dbapi_conn.cursor()
+                cursor.execute(f"SET search_path TO {test_schema}, public")
+                cursor.close()
+
+        # Set up listeners for sync engine
+        if self.sync_engine:
+            @event.listens_for(self.sync_engine, "connect")
+            def set_sync_search_path_on_connect(dbapi_conn, connection_record):
+                """Set search path when a new sync connection is created."""
+                cursor = dbapi_conn.cursor()
+                cursor.execute(f"SET search_path TO {test_schema}, public")
+                cursor.close()
+                logger.debug(f"Set search_path to {test_schema} on new sync connection")
+
+            @event.listens_for(self.sync_engine, "checkout")
+            def set_sync_search_path_on_checkout(dbapi_conn, connection_record, connection_proxy):
+                """Ensure search path is set when sync connection is checked out from pool."""
+                cursor = dbapi_conn.cursor()
+                cursor.execute(f"SET search_path TO {test_schema}, public")
+                cursor.close()
+
+        self._test_schema_listeners_registered = True
+        logger.info(f"Test schema event listeners configured for schema: {test_schema}")
+
     @time_execution
     @with_retry(max_attempts=3)
     @with_circuit_breaker(failure_threshold=3, recovery_timeout=30)
@@ -83,6 +139,9 @@ class DatabaseConnectionManager:
             await self._setup_redis()
             await self._setup_influxdb()
             self._start_health_monitoring()
+            # Set up test schema event listeners if test schema is configured
+            if self._test_schema:
+                self._setup_test_schema_listeners()
             logger.info("Database connections initialized successfully")
 
     def _start_health_monitoring(self) -> None:
@@ -279,6 +338,11 @@ class DatabaseConnectionManager:
 
         async with async_session() as session:
             try:
+                # Set test schema search path if configured
+                if self._test_schema:
+                    from sqlalchemy import text
+                    await session.execute(text(f"SET search_path TO {self._test_schema}, public"))
+
                 yield session
                 await session.commit()
             except Exception as e:
@@ -564,6 +628,20 @@ def is_database_healthy() -> bool:
     if not _connection_manager:
         return False
     return _connection_manager.is_healthy()
+
+
+def set_connection_manager(manager: DatabaseConnectionManager) -> None:
+    """
+    Set the global connection manager.
+
+    This is primarily used for testing to inject a pre-configured
+    connection manager (e.g., with test schema).
+
+    Args:
+        manager: DatabaseConnectionManager instance to set as global
+    """
+    global _connection_manager
+    _connection_manager = manager
 
 
 # Database utility functions

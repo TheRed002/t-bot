@@ -15,23 +15,21 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 import pytest_asyncio
+
 from src.core.base.interfaces import HealthStatus
 from src.core.config.service import ConfigService
 from src.core.dependency_injection import DependencyInjector
 from src.core.exceptions import DataError, ServiceError
-from src.database.di_registration import configure_database_dependencies
-from src.database.interfaces import DatabaseServiceInterface
 from src.database.models import MarketDataRecord
 from src.database.service import DatabaseService
 from src.execution.service import ExecutionService
 from src.risk_management.service import RiskService
 from src.utils.validation.service import ValidationService
-from tests.integration.infrastructure.service_factory import RealServiceFactory
+
 # Import the correct fixtures from infrastructure
 from tests.integration.infrastructure.conftest import clean_database, real_test_config  # noqa: F401
-
+from tests.integration.infrastructure.service_factory import RealServiceFactory
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +39,11 @@ def mock_config_service():
     """Mock config service for testing."""
     config_service = MagicMock(spec=ConfigService)
     config_service.get_config.return_value = {
-        "database": {"url": "postgresql://localhost:5432/tbot_dev", "pool_size": 10, "max_overflow": 20},
+        "database": {
+            "url": "postgresql://localhost:5432/tbot_dev",
+            "pool_size": 10,
+            "max_overflow": 20,
+        },
         "redis": {"host": "localhost", "port": 6379, "db": 1},
         "database_service": {
             "cache_enabled": False,  # Disable cache for tests
@@ -94,12 +96,18 @@ async def real_dependency_injector(clean_database, mock_config_service, mock_val
         injector = DependencyInjector()
 
         # Register real database services (already started and healthy)
-        injector.register_service("DatabaseService", lambda: service_factory.database_service, singleton=True)
-        injector.register_service("DatabaseServiceInterface", lambda: service_factory.database_service, singleton=True)
+        injector.register_service(
+            "DatabaseService", lambda: service_factory.database_service, singleton=True
+        )
+        injector.register_service(
+            "DatabaseServiceInterface", lambda: service_factory.database_service, singleton=True
+        )
 
         # Register mock services for dependencies
         injector.register_service("ConfigService", lambda: mock_config_service, singleton=True)
-        injector.register_service("ValidationService", lambda: mock_validation_service, singleton=True)
+        injector.register_service(
+            "ValidationService", lambda: mock_validation_service, singleton=True
+        )
 
         # DON'T call configure_database_dependencies here as it would overwrite our started services
         # The started services from service_factory are what we want to test
@@ -114,21 +122,19 @@ class TestDatabaseServiceIntegration:
     """Test database service integration with other modules using real services."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_execution_service_uses_real_database_service(self, real_database_service):
         """Test that ExecutionService properly uses real DatabaseService."""
         unique_id = str(uuid.uuid4())[:8]
 
         # Create a mock repository service that uses the real database service
-        from unittest.mock import AsyncMock
         mock_repository = AsyncMock()
 
         # Mock the list_orders method to return an empty list
         mock_repository.list_orders.return_value = []
 
         # Create ExecutionService with repository service
-        execution_service = ExecutionService(
-            repository_service=mock_repository
-        )
+        execution_service = ExecutionService(repository_service=mock_repository)
 
         # Verify execution service is properly initialized
         assert execution_service.repository_service is mock_repository
@@ -142,9 +148,10 @@ class TestDatabaseServiceIntegration:
 
         await execution_service.stop()
 
-        logger.info(f"✅ ExecutionService real database integration verified")
+        logger.info("✅ ExecutionService real database integration verified")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_risk_service_uses_real_database_service(self, real_database_service):
         """Test that RiskService properly uses real DatabaseService."""
         unique_id = str(uuid.uuid4())[:8]
@@ -159,9 +166,10 @@ class TestDatabaseServiceIntegration:
         health_status = await real_database_service.get_health_status()
         assert health_status == HealthStatus.HEALTHY
 
-        logger.info(f"✅ RiskService real database integration verified")
+        logger.info("✅ RiskService real database integration verified")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_database_service_error_propagation(self, clean_database):
         """Test that database service errors propagate correctly using real database."""
         service_factory = RealServiceFactory()
@@ -187,6 +195,7 @@ class TestDatabaseServiceIntegration:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_dependency_injection_integration(self, real_dependency_injector):
         """Test that dependency injection correctly provides real database service."""
         injector, service_factory = real_dependency_injector
@@ -208,15 +217,13 @@ class TestDatabaseServiceIntegration:
         logger.info("✅ Real dependency injection integration verified")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_lifecycle_integration(self, real_database_service):
         """Test service lifecycle integration with real database."""
         # Create a mock repository service that uses the real database service
-        from unittest.mock import AsyncMock
         mock_repository = AsyncMock()
 
-        execution_service = ExecutionService(
-            repository_service=mock_repository
-        )
+        execution_service = ExecutionService(repository_service=mock_repository)
 
         # Test start lifecycle with real database
         await execution_service.start()
@@ -231,6 +238,7 @@ class TestDatabaseServiceIntegration:
         logger.info("✅ Service lifecycle with real database verified")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_data_service_real_database_integration(self, real_database_service):
         """Test DataService integration with real DatabaseService."""
         unique_id = str(uuid.uuid4())[:8]
@@ -265,6 +273,7 @@ class TestDatabaseServiceIntegration:
             logger.info(f"DataService integration test: {e}")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_database_service_interface_compliance(self, real_dependency_injector):
         """Test that real DatabaseService implements required interfaces."""
         injector, service_factory = real_dependency_injector
@@ -293,17 +302,15 @@ class TestDatabaseServiceIntegration:
         logger.info("✅ Real DatabaseService interface compliance verified")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_transaction_integration(self, real_database_service):
         """Test transaction context manager integration with real database."""
         unique_id = str(uuid.uuid4())[:8]
 
         # Create a mock repository service that uses the real database service
-        from unittest.mock import AsyncMock
         mock_repository = AsyncMock()
 
-        execution_service = ExecutionService(
-            repository_service=mock_repository
-        )
+        execution_service = ExecutionService(repository_service=mock_repository)
 
         await execution_service.start()
 
@@ -312,6 +319,7 @@ class TestDatabaseServiceIntegration:
             async with real_database_service.transaction() as session:
                 # Test real database transaction
                 from sqlalchemy import text
+
                 result = await session.execute(text("SELECT 1 as test"))
                 test_value = result.scalar()
                 assert test_value == 1
@@ -324,15 +332,13 @@ class TestDatabaseServiceIntegration:
             await execution_service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_health_check_integration(self, real_database_service):
         """Test health check integration across services using real database."""
         # Create a mock repository service that uses the real database service
-        from unittest.mock import AsyncMock
         mock_repository = AsyncMock()
 
-        execution_service = ExecutionService(
-            repository_service=mock_repository
-        )
+        execution_service = ExecutionService(repository_service=mock_repository)
 
         await execution_service.start()
 
@@ -349,6 +355,7 @@ class TestDatabaseServiceIntegration:
         logger.info("✅ Real database health check integration verified")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_web_interface_real_database_integration(self, real_database_service):
         """Test web interface uses real DatabaseService correctly."""
         from src.core.config import Config
@@ -358,7 +365,7 @@ class TestDatabaseServiceIntegration:
         config = Config()
 
         # Mock the dependency injection to return our real database service
-        with patch('src.database.di_registration.get_database_service') as mock_get_db:
+        with patch("src.database.di_registration.get_database_service") as mock_get_db:
             mock_get_db.return_value = real_database_service
 
             health = await check_database_health(config)
@@ -409,6 +416,7 @@ class TestDatabaseServiceDependencyInjection:
     """Test dependency injection patterns for database service with real services."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_database_services_registered(self, real_dependency_injector):
         """Test that all database services are registered with real implementations."""
         injector, service_factory = real_dependency_injector
@@ -425,6 +433,7 @@ class TestDatabaseServiceDependencyInjection:
         logger.info("✅ Real database services registration verified")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_database_service_singleton_behavior(self, real_dependency_injector):
         """Test that real DatabaseService is properly managed as singleton."""
         injector, service_factory = real_dependency_injector
@@ -442,6 +451,7 @@ class TestDatabaseServiceDependencyInjection:
         logger.info("✅ Real DatabaseService singleton behavior verified")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_repository_factory_integration(self, real_dependency_injector):
         """Test repository factory integration with real services."""
         injector, service_factory = real_dependency_injector
@@ -455,6 +465,7 @@ class TestDatabaseServiceDependencyInjection:
             logger.info(f"Repository factory test: {e}")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_unit_of_work_factory_integration(self, real_dependency_injector):
         """Test unit of work factory integration with real services."""
         injector, service_factory = real_dependency_injector
@@ -473,6 +484,7 @@ class TestRealDatabaseOperations:
     """Test real database operations with service integration."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_crud_operations_through_service(self, real_database_service):
         """Test CRUD operations through real database service."""
         unique_id = str(uuid.uuid4())[:8]
@@ -513,6 +525,7 @@ class TestRealDatabaseOperations:
             logger.info(f"CRUD operations test: {e}")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_transaction_rollback(self, real_database_service):
         """Test transaction rollback with real database."""
         unique_id = str(uuid.uuid4())[:8]
@@ -542,12 +555,15 @@ class TestRealDatabaseOperations:
             pass
 
         # Verify user was not created (transaction was rolled back)
-        users = await real_database_service.list_entities(User, filters={"username": f"rollback_user_{unique_id}"})
+        users = await real_database_service.list_entities(
+            User, filters={"username": f"rollback_user_{unique_id}"}
+        )
         assert len(users) == 0
 
         logger.info("✅ Real database transaction rollback verified")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_financial_precision_operations(self, real_database_service):
         """Test financial precision through real database operations."""
         unique_id = str(uuid.uuid4())[:8]
@@ -565,10 +581,7 @@ class TestRealDatabaseOperations:
 
         # Create bot
         bot_data = Bot(
-            id=uuid.uuid4(),
-            name=f"precision_bot_{unique_id}",
-            exchange="binance",
-            status="running"
+            id=uuid.uuid4(), name=f"precision_bot_{unique_id}", exchange="binance", status="running"
         )
         created_bot = await real_database_service.create_entity(bot_data)
 
@@ -580,7 +593,7 @@ class TestRealDatabaseOperations:
             status="active",
             bot_id=created_bot.id,
             max_position_size=Decimal("1000.0"),
-            risk_per_trade=Decimal("0.02")
+            risk_per_trade=Decimal("0.02"),
         )
         created_strategy = await real_database_service.create_entity(strategy_data)
 
@@ -597,7 +610,8 @@ class TestRealDatabaseOperations:
             entry_price=high_precision_entry_price,
             current_price=high_precision_exit_price,
             unrealized_pnl=Decimal("0.0"),
-            realized_pnl=(high_precision_exit_price - high_precision_entry_price) * high_precision_quantity
+            realized_pnl=(high_precision_exit_price - high_precision_entry_price)
+            * high_precision_quantity,
         )
         created_position = await real_database_service.create_entity(position_data)
 
@@ -609,7 +623,7 @@ class TestRealDatabaseOperations:
             symbol="BTC/USDT",
             side="buy",
             entry_order_id=None,  # Optional field
-            exit_order_id=None,   # Optional field
+            exit_order_id=None,  # Optional field
             position_id=created_position.id,  # Required field
             quantity=high_precision_quantity,
             entry_price=high_precision_entry_price,
@@ -637,8 +651,12 @@ class TestRealDatabaseOperations:
             assert retrieved_trade.exit_price == high_precision_exit_price
 
             # Test calculations maintain precision
-            calculated_pnl = (retrieved_trade.exit_price - retrieved_trade.entry_price) * retrieved_trade.quantity
-            expected_pnl = (high_precision_exit_price - high_precision_entry_price) * high_precision_quantity
+            calculated_pnl = (
+                retrieved_trade.exit_price - retrieved_trade.entry_price
+            ) * retrieved_trade.quantity
+            expected_pnl = (
+                high_precision_exit_price - high_precision_entry_price
+            ) * high_precision_quantity
             assert calculated_pnl == expected_pnl
             assert retrieved_trade.pnl == expected_pnl
 
@@ -648,12 +666,15 @@ class TestRealDatabaseOperations:
             await real_database_service.delete_entity(Strategy, created_strategy.id)
             await real_database_service.delete_entity(Bot, created_bot.id)
 
-            logger.info(f"✅ Real database financial precision verified: PnL calculation {calculated_pnl} = {expected_pnl}")
+            logger.info(
+                f"✅ Real database financial precision verified: PnL calculation {calculated_pnl} = {expected_pnl}"
+            )
 
         except Exception as e:
             logger.info(f"Financial precision test: {e}")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_concurrent_operations(self, real_database_service):
         """Test concurrent operations with real database."""
         unique_id = str(uuid.uuid4())[:8]
@@ -679,7 +700,7 @@ class TestRealDatabaseOperations:
             # Verify all users were created
             for user in created_users:
                 assert user is not None
-                assert f"concurrent_user_" in user.username
+                assert "concurrent_user_" in user.username
                 assert unique_id in user.username
 
             # Cleanup
@@ -689,7 +710,9 @@ class TestRealDatabaseOperations:
 
             await asyncio.gather(*cleanup_tasks)
 
-            logger.info(f"✅ Real database concurrent operations verified: {len(created_users)} users")
+            logger.info(
+                f"✅ Real database concurrent operations verified: {len(created_users)} users"
+            )
 
         except Exception as e:
             logger.info(f"Concurrent operations test: {e}")

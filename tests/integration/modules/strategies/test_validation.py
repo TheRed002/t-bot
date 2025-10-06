@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.core.exceptions import StrategyError, ValidationError
+from src.core.exceptions import ValidationError
 from src.core.types import (
     MarketData,
     Signal,
@@ -28,6 +28,7 @@ class TestStrategiesModuleDependencyInjection:
     """Test dependency injection patterns in strategies module."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_service_dependency_injection(self):
         """Test that StrategyService receives and uses injected dependencies properly."""
         from src.strategies.service import StrategyService
@@ -64,6 +65,7 @@ class TestStrategiesModuleDependencyInjection:
         await strategy_service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_factory_dependency_injection(self):
         """Test that StrategyFactory properly injects dependencies into created strategies."""
         from src.strategies.factory import StrategyFactory
@@ -139,6 +141,7 @@ class TestStrategiesModuleBoundaries:
     """Test that strategies module respects proper boundaries."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_service_uses_proper_repository_layer(self):
         """Test that StrategyService uses repository layer, not direct database access."""
         from src.strategies.service import StrategyService
@@ -157,6 +160,7 @@ class TestStrategiesModuleBoundaries:
         assert "src.database.connection" not in service_source
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_controller_delegates_to_service_layer(self):
         """Test that StrategyController properly delegates to service layer."""
         from src.strategies.controller import StrategyController
@@ -223,6 +227,7 @@ class TestStrategiesModuleIntegrationWithConsumers:
     """Test integration between strategies module and its consumers."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_web_interface_strategy_service_integration(self):
         """Test that web interface properly integrates with strategies module."""
         from src.strategies.factory import StrategyFactory
@@ -247,6 +252,7 @@ class TestStrategiesModuleIntegrationWithConsumers:
             assert isinstance(config, dict)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_bot_instance_strategy_integration(self):
         """Test that BotInstance properly integrates with strategies."""
         # This test would require significant mocking of BotInstance dependencies
@@ -262,6 +268,7 @@ class TestStrategiesModuleIntegrationWithConsumers:
             pytest.fail(f"BotInstance cannot import strategies modules: {e}")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtesting_engine_strategy_integration(self):
         """Test that BacktestingEngine properly integrates with strategies."""
         try:
@@ -278,6 +285,7 @@ class TestStrategiesErrorHandlingIntegration:
     """Test error handling integration across module boundaries."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_service_error_propagation(self):
         """Test that StrategyService properly propagates errors to consumers."""
         from src.strategies.controller import StrategyController
@@ -299,6 +307,7 @@ class TestStrategiesErrorHandlingIntegration:
         assert result["error_type"] in ["ValidationError", "ServiceError"]
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_factory_error_handling(self):
         """Test that StrategyFactory handles errors gracefully."""
         from src.strategies.factory import StrategyFactory
@@ -320,6 +329,7 @@ class TestStrategiesErrorHandlingIntegration:
             await factory.create_strategy(StrategyType.MEAN_REVERSION, valid_config)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_missing_dependencies_handling(self):
         """Test that services handle missing dependencies gracefully."""
         from src.strategies.service import StrategyService
@@ -339,6 +349,7 @@ class TestStrategiesDataFlowValidation:
     """Test data flow between strategies module and other components."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_market_data_processing_flow(self):
         """Test that market data flows correctly through strategies module."""
         from src.strategies.service import StrategyService
@@ -367,6 +378,7 @@ class TestStrategiesDataFlowValidation:
         await service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_signal_validation_flow(self):
         """Test that signal validation works across module boundaries."""
         from src.strategies.service import StrategyService
@@ -397,6 +409,7 @@ class TestStrategiesFullIntegrationWorkflow:
     """Test full integration workflow with strategies module."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_complete_strategy_lifecycle(self):
         """Test complete strategy lifecycle through proper integration."""
         from src.strategies.controller import StrategyController
@@ -429,6 +442,7 @@ class TestStrategiesFullIntegrationWorkflow:
             await service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_dependency_resolution_workflow(self):
         """Test that dependency resolution works in realistic scenarios."""
         from src.core.dependency_injection import DependencyContainer
@@ -465,13 +479,13 @@ class TestStrategiesFullIntegrationWorkflow:
         # Verify that services are resolvable (dependency injection working)
         # Note: The actual dependency injection may require manual wiring in this test context
         # For integration tests, we verify that the DI registration works and services can be created
-        assert hasattr(strategy_service, '_risk_manager')
-        assert hasattr(strategy_service, '_exchange_factory')
-        assert hasattr(strategy_service, '_data_service')
+        assert hasattr(strategy_service, "_risk_manager")
+        assert hasattr(strategy_service, "_exchange_factory")
+        assert hasattr(strategy_service, "_data_service")
 
-        assert hasattr(strategy_factory, '_risk_manager')
-        assert hasattr(strategy_factory, '_exchange_factory')
-        assert hasattr(strategy_factory, '_data_service')
+        assert hasattr(strategy_factory, "_risk_manager")
+        assert hasattr(strategy_factory, "_exchange_factory")
+        assert hasattr(strategy_factory, "_data_service")
 
 
 if __name__ == "__main__":

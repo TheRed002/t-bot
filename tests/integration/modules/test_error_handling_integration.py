@@ -7,35 +7,35 @@ This ensures error handling works properly in production scenarios.
 """
 
 import asyncio
-import pytest
-import pytest_asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict
-from unittest.mock import AsyncMock, Mock, MagicMock
+from typing import Any
+
+import pytest
+import pytest_asyncio
 
 from src.core.config import Config
 from src.core.dependency_injection import injector
-from src.core.exceptions import ValidationError, ServiceError, DependencyError
+from src.core.exceptions import DependencyError, ServiceError, ValidationError
 from src.error_handling.di_registration import register_error_handling_services
-from src.error_handling.service import ErrorHandlingService
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.global_handler import GlobalErrorHandler
 from src.error_handling.pattern_analytics import ErrorPatternAnalytics
+from src.error_handling.service import ErrorHandlingService
 from src.error_handling.state_monitor import StateMonitor
 
 
 class TestErrorHandlingModuleIntegration:
     """Integration tests for error_handling module with real service dependencies."""
 
-    def create_test_context(self, **kwargs) -> Dict[str, Any]:
+    def create_test_context(self, **kwargs) -> dict[str, Any]:
         """Create context dict with all required boundary fields."""
         context = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "source": "test_module",
             "processing_mode": "request_reply",
             "data_format": "json",
-            "message_pattern": "req_reply"
+            "message_pattern": "req_reply",
         }
         context.update(kwargs)
         return context
@@ -60,6 +60,7 @@ class TestErrorHandlingModuleIntegration:
         container.clear()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_handling_service_integration(self):
         """Test ErrorHandlingService with full DI integration."""
         # Resolve service from DI container
@@ -77,7 +78,7 @@ class TestErrorHandlingModuleIntegration:
             ValueError("Test validation error"),
             ServiceError("Test service error"),
             RuntimeError("Test runtime error"),
-            DependencyError("Test dependency error")
+            DependencyError("Test dependency error"),
         ]
 
         for test_error in test_errors:
@@ -85,7 +86,7 @@ class TestErrorHandlingModuleIntegration:
                 error=test_error,
                 component="test_component",
                 operation="test_operation",
-                context=self.create_test_context(test_context="integration_test")
+                context=self.create_test_context(test_context="integration_test"),
             )
 
             assert result is not None
@@ -94,6 +95,7 @@ class TestErrorHandlingModuleIntegration:
             assert "error_id" in result or "status" in result
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_handler_component_integration(self):
         """Test ErrorHandler component with real dependencies."""
         container = injector.get_container()
@@ -109,9 +111,7 @@ class TestErrorHandlingModuleIntegration:
 
         # Test error context creation
         context = error_handler.create_error_context(
-            test_error,
-            component="test_component",
-            operation="test_operation"
+            test_error, component="test_component", operation="test_operation"
         )
         assert context is not None
         assert context.error == test_error
@@ -119,6 +119,7 @@ class TestErrorHandlingModuleIntegration:
         assert context.operation == "test_operation"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_global_error_handler_integration(self):
         """Test GlobalErrorHandler with system-wide error handling."""
         container = injector.get_container()
@@ -135,11 +136,8 @@ class TestErrorHandlingModuleIntegration:
             # Simulate global error handling with correct API
             result = await global_handler.handle_error(
                 error=test_error,
-                context={
-                    "component": "system",
-                    "operation": "global_operation"
-                },
-                severity="error"
+                context={"component": "system", "operation": "global_operation"},
+                severity="error",
             )
             # Global handler should return some result
             assert result is not None
@@ -147,6 +145,7 @@ class TestErrorHandlingModuleIntegration:
             pytest.fail(f"Global error handler should not raise exceptions: {e}")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_pattern_analytics_integration(self):
         """Test ErrorPatternAnalytics for error pattern detection."""
         container = injector.get_container()
@@ -160,19 +159,21 @@ class TestErrorHandlingModuleIntegration:
             ValueError("Pattern test 1"),
             ValueError("Pattern test 2"),
             ServiceError("Different pattern"),
-            ValidationError("Validation pattern")
+            ValidationError("Validation pattern"),
         ]
 
         # Add multiple errors to detect patterns
         for error in test_errors:
-            pattern_analytics.add_error_event({
-                "error_type": type(error).__name__,
-                "error_message": str(error),
-                "component": "test_component",
-                "operation": "pattern_test",
-                "severity": "medium",
-                "metadata": {"test": "pattern_detection"}
-            })
+            pattern_analytics.add_error_event(
+                {
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                    "component": "test_component",
+                    "operation": "pattern_test",
+                    "severity": "medium",
+                    "metadata": {"test": "pattern_detection"},
+                }
+            )
 
         # Check if patterns were detected
         patterns = pattern_analytics.get_error_patterns()
@@ -180,6 +181,7 @@ class TestErrorHandlingModuleIntegration:
         assert isinstance(patterns, list)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_state_monitor_integration(self):
         """Test StateMonitor with system state validation."""
         container = injector.get_container()
@@ -197,9 +199,10 @@ class TestErrorHandlingModuleIntegration:
         validation_result = await state_monitor.validate_state_consistency()
         assert validation_result is not None
         # StateMonitor returns a StateValidationResult object, not a dict
-        assert hasattr(validation_result, 'is_consistent')
+        assert hasattr(validation_result, "is_consistent")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_handling_with_financial_context(self):
         """Test error handling with financial/trading context."""
         container = injector.get_container()
@@ -213,14 +216,14 @@ class TestErrorHandlingModuleIntegration:
             "order_id": "test_order_123",
             "user_id": "test_user",
             "amount": Decimal("1000.50"),
-            "price": Decimal("50000.00")
+            "price": Decimal("50000.00"),
         }
 
         # Test various financial errors
         test_errors = [
             ValidationError("Invalid order amount"),
             ServiceError("Exchange API error"),
-            ValueError("Invalid symbol format")
+            ValueError("Invalid symbol format"),
         ]
 
         for test_error in test_errors:
@@ -229,7 +232,7 @@ class TestErrorHandlingModuleIntegration:
                     error=test_error,
                     component="trading_engine",
                     operation="place_order",
-                    context=self.create_test_context(**financial_context)
+                    context=self.create_test_context(**financial_context),
                 )
 
                 if isinstance(test_error, ValidationError):
@@ -250,6 +253,7 @@ class TestErrorHandlingModuleIntegration:
                     pytest.fail(f"Unexpected exception re-raised: {e}")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_recovery_scenarios(self):
         """Test error recovery scenarios with real services."""
         container = injector.get_container()
@@ -264,7 +268,7 @@ class TestErrorHandlingModuleIntegration:
             error=recoverable_error,
             component="exchange_service",
             operation="get_balance",
-            context=self.create_test_context(retry_strategy="exponential_backoff")
+            context=self.create_test_context(retry_strategy="exponential_backoff"),
         )
 
         assert result is not None
@@ -272,6 +276,7 @@ class TestErrorHandlingModuleIntegration:
         assert isinstance(result, dict)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_circuit_breaker_integration(self):
         """Test circuit breaker functionality in error handling."""
         container = injector.get_container()
@@ -289,7 +294,7 @@ class TestErrorHandlingModuleIntegration:
                     error=persistent_error,
                     component="external_service",
                     operation=f"operation_{i}",
-                    context=self.create_test_context(failure_simulation=True)
+                    context=self.create_test_context(failure_simulation=True),
                 )
             except Exception:
                 # Circuit breaker may prevent further calls
@@ -299,6 +304,7 @@ class TestErrorHandlingModuleIntegration:
         # (Implementation depends on specific circuit breaker logic)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_propagation_across_modules(self):
         """Test error propagation between modules."""
         container = injector.get_container()
@@ -318,14 +324,15 @@ class TestErrorHandlingModuleIntegration:
                 context=self.create_test_context(
                     source_module="risk_management",
                     target_module="execution",
-                    propagation_test=True
-                )
+                    propagation_test=True,
+                ),
             )
 
         # Verify the error was properly propagated
         assert "Cross-module validation failed" in str(exc_info.value)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_concurrent_error_handling(self):
         """Test concurrent error handling capabilities."""
         container = injector.get_container()
@@ -339,13 +346,11 @@ class TestErrorHandlingModuleIntegration:
                 error=ServiceError(f"Concurrent error {error_id}"),
                 component="concurrent_service",
                 operation=f"concurrent_operation_{error_id}",
-                context=self.create_test_context(concurrent_test=True, error_id=error_id)
+                context=self.create_test_context(concurrent_test=True, error_id=error_id),
             )
 
         # Run multiple error handling operations concurrently
-        concurrent_tasks = [
-            handle_concurrent_error(i) for i in range(10)
-        ]
+        concurrent_tasks = [handle_concurrent_error(i) for i in range(10)]
 
         results = await asyncio.gather(*concurrent_tasks, return_exceptions=True)
 
@@ -357,6 +362,7 @@ class TestErrorHandlingModuleIntegration:
         assert len(successful_results) >= 5  # At least half should succeed
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_handling_performance(self):
         """Test error handling performance under load."""
         container = injector.get_container()
@@ -374,7 +380,7 @@ class TestErrorHandlingModuleIntegration:
                 error=ValueError(f"Performance test error {i}"),
                 component="performance_test",
                 operation=f"operation_{i}",
-                context=self.create_test_context(performance_test=True)
+                context=self.create_test_context(performance_test=True),
             )
 
         end_time = time.time()
@@ -384,6 +390,7 @@ class TestErrorHandlingModuleIntegration:
         assert execution_time < 5.0, f"Error handling too slow: {execution_time}s"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_context_preservation(self):
         """Test that error context is preserved across the error handling pipeline."""
         container = injector.get_container()
@@ -401,8 +408,8 @@ class TestErrorHandlingModuleIntegration:
             "operation_metadata": {
                 "start_time": "2025-01-01T00:00:00Z",
                 "attempt_number": 1,
-                "retry_policy": "exponential"
-            }
+                "retry_policy": "exponential",
+            },
         }
 
         # ValidationError should be re-raised (correct behavior for financial safety)
@@ -411,7 +418,7 @@ class TestErrorHandlingModuleIntegration:
                 error=ValidationError("Context preservation test"),
                 component="context_test",
                 operation="preserve_context",
-                context=self.create_test_context(**rich_context)
+                context=self.create_test_context(**rich_context),
             )
 
         # Verify the error was properly propagated with context preserved
@@ -421,19 +428,15 @@ class TestErrorHandlingModuleIntegration:
     def test_error_handling_module_imports(self):
         """Test that all error handling module components can be imported."""
         # Test core components
-        from src.error_handling.service import ErrorHandlingService
-        from src.error_handling.error_handler import ErrorHandler
-        from src.error_handling.global_handler import GlobalErrorHandler
-        from src.error_handling.pattern_analytics import ErrorPatternAnalytics
-        from src.error_handling.state_monitor import StateMonitor
-
-        # Test factory components
-        from src.error_handling.factory import ErrorHandlerFactory
-        from src.error_handling.context import ErrorContextFactory
 
         # Test utility components
-        from src.error_handling.decorators import error_handler, retry, circuit_breaker
-        from src.error_handling.interfaces import ErrorHandlingServiceInterface
+        from src.error_handling.error_handler import ErrorHandler
+
+        # Test factory components
+        from src.error_handling.global_handler import GlobalErrorHandler
+        from src.error_handling.pattern_analytics import ErrorPatternAnalytics
+        from src.error_handling.service import ErrorHandlingService
+        from src.error_handling.state_monitor import StateMonitor
 
         # All imports should succeed
         assert ErrorHandlingService is not None
@@ -443,6 +446,7 @@ class TestErrorHandlingModuleIntegration:
         assert StateMonitor is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_health_checks(self):
         """Test health check functionality of error handling services."""
         container = injector.get_container()
@@ -455,12 +459,13 @@ class TestErrorHandlingModuleIntegration:
         assert health_result is not None
 
         # Should indicate healthy service
-        if hasattr(health_result, 'is_healthy'):
+        if hasattr(health_result, "is_healthy"):
             assert health_result.is_healthy
         elif isinstance(health_result, dict):
-            assert health_result.get('status') in ['healthy', 'ok', True]
+            assert health_result.get("status") in ["healthy", "ok", True]
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_shutdown_cleanup(self):
         """Test proper service shutdown and resource cleanup."""
         container = injector.get_container()
@@ -470,7 +475,7 @@ class TestErrorHandlingModuleIntegration:
 
         # Check if service has running status - some services use _initialized instead
         # This is testing that the service can be properly shut down and cleaned up
-        if hasattr(error_service, 'is_running'):
+        if hasattr(error_service, "is_running"):
             # If service has is_running attribute, it should be True after initialization
             assert error_service.is_running
         else:
@@ -478,16 +483,17 @@ class TestErrorHandlingModuleIntegration:
             assert error_service._initialized
 
         # Test proper shutdown - check if service has shutdown method
-        if hasattr(error_service, 'shutdown'):
+        if hasattr(error_service, "shutdown"):
             await error_service.shutdown()
 
             # Verify cleanup
-            if hasattr(error_service, 'is_running'):
+            if hasattr(error_service, "is_running"):
                 assert not error_service.is_running
         else:
             # If no shutdown method, cleanup should still work via cleanup()
             await error_service.cleanup()
             # Service should be properly cleaned up (this test just ensures no exceptions)
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

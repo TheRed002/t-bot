@@ -150,6 +150,8 @@ def register_state_services(container: DependencyContainer) -> None:
             )
 
         container.register("StateService", state_service_factory, singleton=True)
+        # Register lowercase alias for backward compatibility
+        container.register("state_service", lambda: container.get("StateService"), singleton=True)
 
         # Register factory using proper dependency injection pattern
         def state_service_factory_factory() -> "StateServiceFactoryInterface":

@@ -10,7 +10,6 @@ from decimal import Decimal
 import pytest
 
 from src.core.types import OrderType
-
 from src.monitoring import (
     get_alert_manager,
     get_metrics_collector,
@@ -125,6 +124,7 @@ class TestMonitoringServiceIntegration:
         assert isinstance(metrics_output, str)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_alert_service_integration(self):
         """Test alert service integration with proper alert handling."""
         setup_monitoring_dependencies()
@@ -174,13 +174,17 @@ class TestMonitoringServiceIntegration:
 
         # Test market data processing recording
         performance_service.record_market_data_processing(
-            exchange="test_exchange", data_type="ticker", processing_time_ms=Decimal("2.5"), message_count=100
+            exchange="test_exchange",
+            data_type="ticker",
+            processing_time_ms=Decimal("2.5"),
+            message_count=100,
         )
 
         # These should complete without errors
         assert True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_monitoring_service_lifecycle(self):
         """Test monitoring service start/stop lifecycle."""
         monitoring_service = create_monitoring_service()
@@ -253,8 +257,7 @@ class TestMonitoringModuleUsagePatterns:
 
         # Initialize with custom injector
         monitoring_service = initialize_monitoring_service(
-            use_dependency_injection=True,
-            injector=custom_injector
+            use_dependency_injection=True, injector=custom_injector
         )
 
         assert isinstance(monitoring_service, MonitoringService)

@@ -5,26 +5,23 @@ This module provides fixtures for creating real service instances
 with proper dependency injection and database integration.
 """
 
-import asyncio
+from collections.abc import AsyncGenerator
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from datetime import datetime, timezone, timedelta
-from typing import Any, AsyncGenerator
 
 import pytest
-
 import pytest_asyncio
+
 from src.core.config import Config
 from src.core.types import MarketData, StrategyConfig, StrategyType
-from src.strategies.dependencies import StrategyServiceContainer, create_strategy_service_container
-from src.strategies.service import StrategyService
 from src.database.connection import DatabaseConnectionManager
 from src.database.models import Base
+from src.strategies.dependencies import StrategyServiceContainer, create_strategy_service_container
 
 
 @pytest_asyncio.fixture
 async def real_database_connection() -> AsyncGenerator[DatabaseConnectionManager, None]:
     """Create real database connection for testing."""
-    from tests.conftest import clean_database
 
     # Use the clean_database fixture approach that's working in other tests
     config = Config()
@@ -53,8 +50,7 @@ async def real_strategy_service_container(
 
     # Build container with real services
     container = await container_builder.build_container(
-        config=config,
-        database=real_database_connection
+        config=config, database=real_database_connection
     )
 
     # Verify container is ready
@@ -166,7 +162,7 @@ def generate_realistic_market_data_sequence(
     periods: int = 50,
     base_price: Decimal = Decimal("50000.00"),
     base_volume: Decimal = Decimal("1000.00"),
-    pattern: str = "mixed"
+    pattern: str = "mixed",
 ) -> list[MarketData]:
     """
     Generate realistic market data sequence for testing.
@@ -185,7 +181,7 @@ def generate_realistic_market_data_sequence(
     current_price = base_price
 
     for i in range(periods):
-        timestamp = datetime.now(timezone.utc) - timedelta(hours=periods-i)
+        timestamp = datetime.now(timezone.utc) - timedelta(hours=periods - i)
 
         # Generate price movement based on pattern
         if pattern == "uptrend":
@@ -245,29 +241,33 @@ def generate_mean_reversion_scenario() -> list[MarketData]:
     # Establish a mean price
     for i in range(20):
         price = base_price + Decimal(str((i % 5 - 2) * 100))  # Oscillate around mean
-        sequence.append(MarketData(
-            symbol="BTC/USDT",
-            open=price - Decimal("50"),
-            high=price + Decimal("75"),
-            low=price - Decimal("75"),
-            close=price,
-            volume=Decimal("2000.00"),
-            timestamp=datetime.now(timezone.utc) - timedelta(hours=25-i),
-            exchange="binance"
-        ))
+        sequence.append(
+            MarketData(
+                symbol="BTC/USDT",
+                open=price - Decimal("50"),
+                high=price + Decimal("75"),
+                low=price - Decimal("75"),
+                close=price,
+                volume=Decimal("2000.00"),
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=25 - i),
+                exchange="binance",
+            )
+        )
 
     # Add extreme deviation (should trigger mean reversion signal)
     extreme_price = base_price - Decimal("2500.00")  # Significant deviation
-    sequence.append(MarketData(
-        symbol="BTC/USDT",
-        open=base_price - Decimal("1000"),
-        high=base_price - Decimal("500"),
-        low=extreme_price - Decimal("100"),
-        close=extreme_price,
-        volume=Decimal("5000.00"),  # High volume for confirmation
-        timestamp=datetime.now(timezone.utc),
-        exchange="binance"
-    ))
+    sequence.append(
+        MarketData(
+            symbol="BTC/USDT",
+            open=base_price - Decimal("1000"),
+            high=base_price - Decimal("500"),
+            low=extreme_price - Decimal("100"),
+            close=extreme_price,
+            volume=Decimal("5000.00"),  # High volume for confirmation
+            timestamp=datetime.now(timezone.utc),
+            exchange="binance",
+        )
+    )
 
     return sequence
 
@@ -280,16 +280,18 @@ def generate_trend_following_scenario() -> list[MarketData]:
     # Build strong uptrend
     for i in range(25):
         trend_price = base_price + Decimal(str(i * 200))  # Strong upward trend
-        sequence.append(MarketData(
-            symbol="BTC/USDT",
-            open=trend_price - Decimal("50"),
-            high=trend_price + Decimal("150"),
-            low=trend_price - Decimal("100"),
-            close=trend_price,
-            volume=Decimal("3000.00") + Decimal(str(i * 50)),  # Increasing volume
-            timestamp=datetime.now(timezone.utc) - timedelta(hours=30-i),
-            exchange="binance"
-        ))
+        sequence.append(
+            MarketData(
+                symbol="BTC/USDT",
+                open=trend_price - Decimal("50"),
+                high=trend_price + Decimal("150"),
+                low=trend_price - Decimal("100"),
+                close=trend_price,
+                volume=Decimal("3000.00") + Decimal(str(i * 50)),  # Increasing volume
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=30 - i),
+                exchange="binance",
+            )
+        )
 
     return sequence
 
@@ -302,29 +304,33 @@ def generate_breakout_scenario() -> list[MarketData]:
     # Consolidation phase
     for i in range(20):
         consolidation_price = base_price + Decimal(str((i % 3 - 1) * 50))  # Tight range
-        sequence.append(MarketData(
-            symbol="BTC/USDT",
-            open=consolidation_price - Decimal("25"),
-            high=consolidation_price + Decimal("75"),
-            low=consolidation_price - Decimal("75"),
-            close=consolidation_price,
-            volume=Decimal("1500.00"),  # Lower volume during consolidation
-            timestamp=datetime.now(timezone.utc) - timedelta(hours=25-i),
-            exchange="binance"
-        ))
+        sequence.append(
+            MarketData(
+                symbol="BTC/USDT",
+                open=consolidation_price - Decimal("25"),
+                high=consolidation_price + Decimal("75"),
+                low=consolidation_price - Decimal("75"),
+                close=consolidation_price,
+                volume=Decimal("1500.00"),  # Lower volume during consolidation
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=25 - i),
+                exchange="binance",
+            )
+        )
 
     # Breakout
     breakout_price = base_price + Decimal("1500.00")  # Strong breakout
-    sequence.append(MarketData(
-        symbol="BTC/USDT",
-        open=base_price + Decimal("100"),
-        high=breakout_price + Decimal("200"),
-        low=base_price + Decimal("50"),
-        close=breakout_price,
-        volume=Decimal("6000.00"),  # High volume breakout
-        timestamp=datetime.now(timezone.utc),
-        exchange="binance"
-    ))
+    sequence.append(
+        MarketData(
+            symbol="BTC/USDT",
+            open=base_price + Decimal("100"),
+            high=breakout_price + Decimal("200"),
+            low=base_price + Decimal("50"),
+            close=breakout_price,
+            volume=Decimal("6000.00"),  # High volume breakout
+            timestamp=datetime.now(timezone.utc),
+            exchange="binance",
+        )
+    )
 
     return sequence
 

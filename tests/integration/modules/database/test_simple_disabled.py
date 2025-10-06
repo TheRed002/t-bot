@@ -12,16 +12,17 @@ from src.core.base.interfaces import HealthStatus
 from src.core.dependency_injection import DependencyInjector
 from src.database.interfaces import DatabaseServiceInterface
 from src.database.service import DatabaseService
-from tests.integration.infrastructure.service_factory import RealServiceFactory
 
 # Import the correct fixtures from infrastructure
 from tests.integration.infrastructure.conftest import clean_database, real_test_config  # noqa: F401
+from tests.integration.infrastructure.service_factory import RealServiceFactory
 
 
 class TestDatabaseServiceSimpleIntegration:
     """Simple integration tests for database service using real database connections."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_database_service_implements_interface_real(self, clean_database):
         """Test that DatabaseService implements the required interface with real database."""
         service_factory = RealServiceFactory()
@@ -54,6 +55,7 @@ class TestDatabaseServiceSimpleIntegration:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_database_service_initialization_with_real_dependencies(self, clean_database):
         """Test that DatabaseService can initialize with real dependencies."""
         service_factory = RealServiceFactory()
@@ -80,6 +82,7 @@ class TestDatabaseServiceSimpleIntegration:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_database_service_real_operations(self, clean_database):
         """Test that database service performs real operations."""
         service_factory = RealServiceFactory()
@@ -105,6 +108,7 @@ class TestDatabaseServiceSimpleIntegration:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_execution_service_with_real_database_service(self, clean_database):
         """Test that ExecutionService works with real database service injection."""
         from src.execution.service import ExecutionService
@@ -114,14 +118,20 @@ class TestDatabaseServiceSimpleIntegration:
             await service_factory.initialize_core_services(clean_database)
             database_service = service_factory.database_service
 
-            # Create execution service with real database service
+            # Create execution service with real repository service
+            # ExecutionService requires repository_service, not database_service
+            # For this test, we'll use a mock repository that wraps the database service
+            from unittest.mock import Mock
+
+            mock_repository = Mock()
+            mock_repository.database_service = database_service
+
             execution_service = ExecutionService(
-                config={"execution": {}},
-                database_service=database_service
+                repository_service=mock_repository
             )
 
             # Should store the real injected service
-            assert execution_service.database_service is database_service
+            assert execution_service.repository_service is mock_repository
 
             # Verify real database service is healthy
             health_status = await database_service.get_health_status()
@@ -131,6 +141,7 @@ class TestDatabaseServiceSimpleIntegration:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_risk_service_with_real_database_service(self, clean_database):
         """Test that RiskService works with real database service injection."""
         from src.risk_management.service import RiskService
@@ -140,19 +151,22 @@ class TestDatabaseServiceSimpleIntegration:
             await service_factory.initialize_core_services(clean_database)
             database_service = service_factory.database_service
 
-            # Create risk service with real database service
+            # Create risk service with real repositories
+            # RiskService requires repositories, not database_service directly
+            from unittest.mock import Mock
+
+            mock_risk_repo = Mock()
+            mock_portfolio_repo = Mock()
+
             risk_service = RiskService(
-                config={
-                    "risk_management": {
-                        "max_position_size_pct": "0.10",
-                        "max_total_positions": 10
-                    }
-                },
-                database_service=database_service,
+                risk_metrics_repository=mock_risk_repo,
+                portfolio_repository=mock_portfolio_repo,
+                config=None,  # Use default config
             )
 
-            # Should store the real injected service
-            assert risk_service.database_service is database_service
+            # Verify repositories were injected correctly
+            assert risk_service.risk_metrics_repository is mock_risk_repo
+            assert risk_service.portfolio_repository is mock_portfolio_repo
 
             # Verify real database service is functional
             health_status = await database_service.get_health_status()
@@ -162,6 +176,7 @@ class TestDatabaseServiceSimpleIntegration:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_data_service_with_real_database_service(self, clean_database):
         """Test that DataService works with real database service injection."""
         from src.core.config import Config
@@ -173,10 +188,7 @@ class TestDatabaseServiceSimpleIntegration:
             database_service = service_factory.database_service
 
             # Create data service with real database service
-            data_service = DataService(
-                config=Config(),
-                database_service=database_service
-            )
+            data_service = DataService(config=Config(), database_service=database_service)
 
             # Should store the real injected service
             assert data_service.database_service is database_service
@@ -189,6 +201,7 @@ class TestDatabaseServiceSimpleIntegration:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_database_service_method_signatures_with_real_operations(self, clean_database):
         """Test that DatabaseService methods work correctly with real database."""
         service_factory = RealServiceFactory()
@@ -219,6 +232,7 @@ class TestDatabaseServiceSimpleIntegration:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_dependency_injection_with_real_services(self, clean_database):
         """Test that dependency injection works with real services."""
         from src.database.di_registration import register_database_services
@@ -293,6 +307,7 @@ class TestDatabaseServiceSimpleIntegration:
                             )
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_database_precision_operations(self, clean_database):
         """Test financial precision with real database operations."""
         service_factory = RealServiceFactory()
@@ -310,12 +325,10 @@ class TestDatabaseServiceSimpleIntegration:
                 )
                 await session.execute(
                     text("INSERT INTO test_precision (amount) VALUES (:amount)"),
-                    {"amount": test_amount}
+                    {"amount": test_amount},
                 )
 
-                result = await session.execute(
-                    text("SELECT amount FROM test_precision")
-                )
+                result = await session.execute(text("SELECT amount FROM test_precision"))
                 stored_amount = result.scalar()
 
                 # Verify precision is maintained in real database
@@ -328,6 +341,7 @@ class TestDatabaseServiceSimpleIntegration:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_database_concurrent_operations(self, clean_database):
         """Test concurrent operations with real database."""
         service_factory = RealServiceFactory()

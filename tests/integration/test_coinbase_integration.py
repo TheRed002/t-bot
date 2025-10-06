@@ -8,10 +8,17 @@ CRITICAL: These tests ensure the Coinbase implementation works correctly
 in a real environment with proper error handling and recovery.
 """
 
-from src.exchanges.factory import ExchangeFactory
-from src.exchanges.coinbase_websocket import CoinbaseWebSocketHandler
-from src.exchanges.coinbase_orders import CoinbaseOrderManager
-from src.exchanges.coinbase import CoinbaseExchange
+import warnings
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from src.core.config import Config
+from src.core.exceptions import (
+    ExchangeConnectionError,
+    ExchangeError,
+)
 from src.core.types import (
     MarketData,
     OrderRequest,
@@ -21,16 +28,10 @@ from src.core.types import (
     OrderType,
     Ticker,
 )
-from src.core.exceptions import (
-    ExchangeConnectionError,
-    ExchangeError,
-)
-from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
-import warnings
-
-import pytest
-from src.core.config import Config
+from src.exchanges.coinbase import CoinbaseExchange
+from src.exchanges.coinbase_orders import CoinbaseOrderManager
+from src.exchanges.coinbase_websocket import CoinbaseWebSocketHandler
+from src.exchanges.factory import ExchangeFactory
 
 # Suppress unawaited coroutine RuntimeWarnings in this module-specific context
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -75,6 +76,7 @@ class TestCoinbaseIntegration:
         return CoinbaseOrderManager(config, "coinbase")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_exchange_factory_registration(self, exchange_factory):
         """Test that Coinbase exchange is properly registered with factory."""
         from unittest.mock import AsyncMock, patch
@@ -108,6 +110,7 @@ class TestCoinbaseIntegration:
             assert exchange.exchange_name == "coinbase"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_complete_workflow(self, coinbase_exchange, ws_handler, order_manager):
         """Test complete workflow from connection to order execution."""
         # Mock the Coinbase clients
@@ -248,6 +251,7 @@ class TestCoinbaseIntegration:
             assert ws_handler.connected is False
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_handling_and_recovery(self, coinbase_exchange):
         """Test error handling and recovery scenarios."""
         # Test connection failure
@@ -273,6 +277,7 @@ class TestCoinbaseIntegration:
             await coinbase_exchange.get_account_balance()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_rate_limiting_integration(self, coinbase_exchange):
         """Test rate limiting integration."""
         # Mock the rate limiter
@@ -298,6 +303,7 @@ class TestCoinbaseIntegration:
         # bucket approach
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_websocket_message_handling(self, ws_handler):
         """Test WebSocket message handling."""
         # Mock WebSocket client
@@ -332,6 +338,7 @@ class TestCoinbaseIntegration:
         assert ticker.last_price == Decimal("50000.00")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_order_manager_integration(self, order_manager):
         """Test order manager integration."""
         # Mock REST client
@@ -381,6 +388,7 @@ class TestCoinbaseIntegration:
             assert "fill_rate" in stats
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_multi_exchange_compatibility(self, exchange_factory, config):
         """Test that Coinbase works alongside other exchanges."""
         from unittest.mock import AsyncMock, patch
@@ -470,6 +478,7 @@ class TestCoinbaseIntegration:
             assert "coinbase" in active_exchanges
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_configuration_integration(self, config):
         """Test that Coinbase configuration is properly integrated."""
         # Test that Coinbase config is present
@@ -488,6 +497,7 @@ class TestCoinbaseIntegration:
         assert "websocket_connections" in coinbase_limits
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_recovery_scenarios(self, coinbase_exchange):
         """Test various error recovery scenarios."""
         # Test network disconnection recovery
@@ -515,6 +525,7 @@ class TestCoinbaseIntegration:
         assert "USD" in balances
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_data_consistency(self, coinbase_exchange):
         """Test data consistency across different API calls."""
         # Mock consistent data
@@ -544,6 +555,7 @@ class TestCoinbaseIntegration:
         assert ticker.ask == order_book.asks[0][0]  # Best ask should match
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_performance_metrics(self, coinbase_exchange):
         """Test performance metrics and monitoring."""
         import time

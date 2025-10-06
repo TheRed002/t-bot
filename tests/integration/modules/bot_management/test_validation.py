@@ -7,15 +7,14 @@ other modules and uses their APIs properly with REAL services.
 Phase 5: Real service-based tests - NO MOCKS allowed except for external APIs.
 """
 
-import pytest
-import pytest_asyncio
 from decimal import Decimal
 
-from tests.integration.infrastructure.service_factory import RealServiceFactory
+import pytest
+import pytest_asyncio
 
 from src.bot_management.service import BotService
-from src.core.types import BotConfiguration, BotStatus, BotPriority, BotType
-from src.core.exceptions import ServiceError, ValidationError
+from src.core.types import BotConfiguration, BotPriority, BotType
+from tests.integration.infrastructure.service_factory import RealServiceFactory
 
 
 @pytest_asyncio.fixture
@@ -53,6 +52,7 @@ class TestBotManagementIntegration:
     """Tests for bot management integration with other services."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_bot_service_dependency_injection(self, real_bot_services):
         """Test that BotService properly initializes with all dependencies."""
         bot_service = real_bot_services.container.get("BotService")
@@ -66,6 +66,7 @@ class TestBotManagementIntegration:
         assert bot_service._strategy_service is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_create_bot_integration_flow(
         self,
         real_bot_services,
@@ -90,6 +91,7 @@ class TestBotManagementIntegration:
         assert bot_id in bot_service._bots
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_start_bot_integration_flow(
         self,
         real_bot_services,
@@ -107,6 +109,7 @@ class TestBotManagementIntegration:
         assert result is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_stop_bot_integration_flow(
         self,
         real_bot_services,
@@ -125,6 +128,7 @@ class TestBotManagementIntegration:
         assert result is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_layer_not_bypassed(
         self,
         real_bot_services,
@@ -143,6 +147,7 @@ class TestBotManagementIntegration:
         assert isinstance(status, dict)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_health_check_integration(
         self,
         real_bot_services,
@@ -177,6 +182,7 @@ class TestBotManagementIntegration:
         assert "checks" in health
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_metrics_integration(
         self,
         real_bot_services,
@@ -194,9 +200,7 @@ class TestBotManagementIntegration:
             "win_rate": 0.8,
         }
 
-        result = await bot_service.update_bot_metrics(
-            sample_bot_config.bot_id, test_metrics
-        )
+        result = await bot_service.update_bot_metrics(sample_bot_config.bot_id, test_metrics)
         assert result is True
 
 
@@ -205,8 +209,9 @@ class TestBotManagementModuleBoundaries:
 
     def test_no_direct_database_imports(self):
         """Test that bot_management doesn't import database models directly."""
-        import src.bot_management.service as bot_service_module
         import inspect
+
+        import src.bot_management.service as bot_service_module
 
         # Get all imports in the bot service module
         source = inspect.getsource(bot_service_module)
@@ -223,8 +228,9 @@ class TestBotManagementModuleBoundaries:
 
     def test_no_direct_exchange_access(self):
         """Test that bot_management doesn't access exchanges directly."""
-        import src.bot_management.service as bot_service_module
         import inspect
+
+        import src.bot_management.service as bot_service_module
 
         source = inspect.getsource(bot_service_module)
 
@@ -240,7 +246,6 @@ class TestBotManagementModuleBoundaries:
 
     def test_proper_service_dependencies(self):
         """Test that bot_management only depends on service interfaces."""
-        from src.bot_management.service import BotService
         import inspect
 
         # Get constructor signature

@@ -13,8 +13,8 @@ import pytest
 import pytest_asyncio
 
 from src.core.config import Config
+
 # High performance websocket not implemented yet
-import pytest
 pytestmark = pytest.mark.skip(reason="HighPerformanceWebSocketManager not implemented yet")
 
 
@@ -51,6 +51,7 @@ class TestWebSocketConsolidation:
         await pool.close_all_connections()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_manager_initialization(self, mock_config):
         """Test that the consolidated manager initializes correctly."""
         manager = ConsolidatedWebSocketManager(mock_config)
@@ -68,6 +69,7 @@ class TestWebSocketConsolidation:
         assert manager._shutdown is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_resource_manager_initialization(self, mock_config):
         """Test that the resource manager initializes correctly."""
         manager = WebSocketResourceManager(mock_config)
@@ -84,6 +86,7 @@ class TestWebSocketConsolidation:
         assert manager._shutdown is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_connection_creation_limits(self, websocket_manager):
         """Test that connection limits are enforced."""
         # Mock exchange handler creation to avoid actual connections
@@ -109,6 +112,7 @@ class TestWebSocketConsolidation:
             assert extra_conn_id in connection_ids
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_subscription_delegation(self, websocket_manager):
         """Test that subscriptions are properly delegated to exchange handlers."""
         # Mock exchange handler
@@ -134,6 +138,7 @@ class TestWebSocketConsolidation:
             mock_handler.subscribe_to_ticker_stream.assert_called_once()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_resource_tracking(self, mock_config):
         """Test that resources are properly tracked."""
         manager = WebSocketResourceManager(mock_config)
@@ -165,6 +170,7 @@ class TestWebSocketConsolidation:
             await manager.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_resource_leak_detection(self, resource_manager):
         """Test that resource leaks are detected and cleaned up."""
         # Register connection without keeping reference
@@ -181,6 +187,7 @@ class TestWebSocketConsolidation:
         assert resource_manager.leak_detection_count > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_connection_status_monitoring(self, websocket_manager):
         """Test connection status monitoring."""
         # Create connection
@@ -200,6 +207,7 @@ class TestWebSocketConsolidation:
         assert status["total_connections"] >= 1
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_overall_status_reporting(self, websocket_manager):
         """Test overall status reporting."""
         # Get initial status
@@ -213,6 +221,7 @@ class TestWebSocketConsolidation:
         assert "message_rate" in status
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_graceful_shutdown(self, websocket_manager):
         """Test that shutdown properly cleans up all resources."""
         # Mock exchange handler
@@ -248,6 +257,7 @@ class TestWebSocketConsolidation:
             assert websocket_manager._shutdown is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_message_priority_handling(self, websocket_manager):
         """Test that message priorities are handled correctly."""
         # Mock exchange handler
@@ -271,6 +281,7 @@ class TestWebSocketConsolidation:
             assert result is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_force_cleanup(self, resource_manager):
         """Test force cleanup functionality."""
         # Register multiple connections
@@ -287,6 +298,7 @@ class TestWebSocketConsolidation:
         assert resource_manager.force_cleanup_count > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_connection_limits_enforcement(self, resource_manager):
         """Test that connection limits are properly enforced."""
         # Set low limit for testing
@@ -321,6 +333,7 @@ class TestWebSocketConsolidation:
         assert StreamType.USER_DATA.value == "user_data"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_message_batching_performance(self, websocket_manager):
         """Test that message batching improves performance."""
         # Create a connection to test batching
@@ -340,6 +353,7 @@ class TestWebSocketConsolidation:
             await websocket_manager.disconnect_all()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_resource_monitoring_overhead(self, websocket_manager):
         """Test that resource monitoring has minimal overhead."""
         # Test connection pool resource management

@@ -10,7 +10,7 @@ Tests cover:
 - Error recovery and resilience
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock
 
@@ -18,15 +18,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tests.integration.infrastructure.conftest import clean_database
-
 from src.backtesting.engine import BacktestConfig, BacktestEngine
 from src.backtesting.metrics import MetricsCalculator
 from src.core.types import MarketData, OrderSide, Position, Signal, SignalDirection
 from src.data.interfaces import DataServiceInterface
 from src.data.types import DataRequest
 from src.database.manager import DatabaseManager
-from src.database.connection import execute_query
 from src.strategies.base import BaseStrategy, StrategyType
 
 
@@ -193,7 +190,10 @@ class TestBacktestingIntegration:
 
             class MockMarketDataRecord:
                 """Mock market data record with expected attributes."""
-                def __init__(self, timestamp, open_price, high_price, low_price, close_price, volume):
+
+                def __init__(
+                    self, timestamp, open_price, high_price, low_price, close_price, volume
+                ):
                     self.data_timestamp = timestamp
                     self.open_price = Decimal(str(open_price))
                     self.high_price = Decimal(str(high_price))
@@ -229,6 +229,7 @@ class TestBacktestingIntegration:
         return db_manager
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_end_to_end_backtest_single_symbol(
         self, backtest_config, strategy, mock_db_manager
     ):
@@ -239,11 +240,7 @@ class TestBacktestingIntegration:
 
         # Create BacktestEngine with proper dependencies
         data_service = self._create_data_service_mock(mock_db_manager)
-        engine = BacktestEngine(
-            config=config,
-            strategy=strategy,
-            data_service=data_service
-        )
+        engine = BacktestEngine(config=config, strategy=strategy, data_service=data_service)
 
         result = await engine.run()
 
@@ -274,6 +271,7 @@ class TestBacktestingIntegration:
             assert trade["exit_time"] >= trade["entry_time"]
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_end_to_end_backtest_multi_symbol(
         self, backtest_config, strategy, mock_db_manager
     ):
@@ -281,9 +279,7 @@ class TestBacktestingIntegration:
         # Create BacktestEngine with proper dependencies
         data_service = self._create_data_service_mock(mock_db_manager)
         engine = BacktestEngine(
-            config=backtest_config,
-            strategy=strategy,
-            data_service=data_service
+            config=backtest_config, strategy=strategy, data_service=data_service
         )
 
         result = await engine.run()
@@ -297,6 +293,7 @@ class TestBacktestingIntegration:
         assert len(result.equity_curve) > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_with_risk_manager_integration(
         self, backtest_config, strategy, mock_db_manager
     ):
@@ -327,13 +324,18 @@ class TestBacktestingIntegration:
         assert len(result.equity_curve) > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_metrics_integration(self, backtest_config, strategy, mock_db_manager):
         """Test integration with metrics calculator."""
         # Create proper DataServiceInterface mock
         mock_data_service = AsyncMock(spec=DataServiceInterface)
+
         async def mock_get_market_data(request: DataRequest):
-            raw_data = await mock_db_manager.fetch_all("query", request.symbol, request.start_time, request.end_time)
+            raw_data = await mock_db_manager.fetch_all(
+                "query", request.symbol, request.start_time, request.end_time
+            )
             return raw_data
+
         mock_data_service.get_market_data = mock_get_market_data
 
         engine = BacktestEngine(
@@ -357,7 +359,9 @@ class TestBacktestingIntegration:
         assert len(additional_metrics) > 0
         assert isinstance(additional_metrics, dict)
         # The calculator returns metrics with different key names, verify some exist
-        assert any(key in additional_metrics for key in ['annual_return', 'max_drawdown', 'final_equity'])
+        assert any(
+            key in additional_metrics for key in ["annual_return", "max_drawdown", "final_equity"]
+        )
 
         # Cross-verify some metrics
         if result.equity_curve:
@@ -369,6 +373,7 @@ class TestBacktestingIntegration:
             assert abs(float(result.total_return_pct) - calculated_return) < 1.0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_error_recovery(self, backtest_config, strategy, mock_db_manager):
         """Test backtest error recovery and resilience."""
         # Modify strategy to occasionally fail
@@ -398,6 +403,7 @@ class TestBacktestingIntegration:
         assert len(result.equity_curve) > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_commission_slippage_accuracy(
         self, backtest_config, strategy, mock_db_manager
     ):
@@ -435,6 +441,7 @@ class TestBacktestingIntegration:
             )
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_position_management(self, backtest_config, strategy, mock_db_manager):
         """Test position management and limits."""
         backtest_config.max_open_positions = 2  # Limit positions
@@ -465,6 +472,7 @@ class TestBacktestingIntegration:
         assert max_concurrent <= backtest_config.max_open_positions
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_drawdown_limits(self, backtest_config, strategy, mock_db_manager):
         """Test drawdown limit enforcement."""
         # Create BacktestEngine with proper dependencies
@@ -500,6 +508,7 @@ class TestBacktestingIntegration:
 
     @pytest.mark.performance
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_performance_large_dataset(self, strategy, mock_db_manager):
         """Test backtest performance with large dataset."""
         # Large backtest configuration
@@ -513,12 +522,18 @@ class TestBacktestingIntegration:
 
         # Create proper DataServiceInterface mock
         mock_data_service = AsyncMock(spec=DataServiceInterface)
+
         async def mock_get_market_data(request: DataRequest):
-            raw_data = await mock_db_manager.fetch_all("query", request.symbol, request.start_time, request.end_time)
+            raw_data = await mock_db_manager.fetch_all(
+                "query", request.symbol, request.start_time, request.end_time
+            )
             return raw_data
+
         mock_data_service.get_market_data = mock_get_market_data
 
-        engine = BacktestEngine(config=large_config, strategy=strategy, data_service=mock_data_service)
+        engine = BacktestEngine(
+            config=large_config, strategy=strategy, data_service=mock_data_service
+        )
 
         import time
 
@@ -538,6 +553,7 @@ class TestBacktestingIntegration:
         assert len(result.daily_returns) >= 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_data_quality_handling(self, backtest_config, strategy):
         """Test handling of poor quality market data."""
         # Create mock DB manager with problematic data
@@ -576,7 +592,10 @@ class TestBacktestingIntegration:
 
                 class MockMarketDataRecord:
                     """Mock market data record with expected attributes."""
-                    def __init__(self, timestamp, open_price, high_price, low_price, close_price, volume):
+
+                    def __init__(
+                        self, timestamp, open_price, high_price, low_price, close_price, volume
+                    ):
                         self.data_timestamp = timestamp
                         self.open_price = Decimal(str(open_price))
                         self.high_price = Decimal(str(high_price))
@@ -601,7 +620,9 @@ class TestBacktestingIntegration:
 
         # Create BacktestEngine with proper dependencies
         data_service = self._create_data_service_mock(db_manager)
-        engine = BacktestEngine(config=backtest_config, strategy=strategy, data_service=data_service)
+        engine = BacktestEngine(
+            config=backtest_config, strategy=strategy, data_service=data_service
+        )
 
         # Should handle data quality issues gracefully
         result = await engine.run()
@@ -611,6 +632,7 @@ class TestBacktestingIntegration:
         # Results might be impacted by data quality but shouldn't crash
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_multiple_strategies_comparison(self, backtest_config, mock_db_manager):
         """Test running multiple strategies for comparison."""
         strategies = [
@@ -621,7 +643,7 @@ class TestBacktestingIntegration:
                 symbol="BTC/USD",
                 timeframe="1h",
                 short_period=5,
-                long_period=15
+                long_period=15,
             ),
             SimpleMovingAverageStrategy(
                 name="MA_Slow",
@@ -630,7 +652,7 @@ class TestBacktestingIntegration:
                 symbol="BTC/USD",
                 timeframe="1h",
                 short_period=15,
-                long_period=30
+                long_period=30,
             ),
         ]
 
@@ -665,6 +687,7 @@ class TestBacktestingDatabaseIntegration:
     """Test backtesting integration with real database components."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_database_connection_handling(self, clean_database):
         """Test proper database connection handling during backtest - Phase 2 Integration."""
         from src.database.service import DatabaseService
@@ -683,6 +706,7 @@ class TestBacktestingDatabaseIntegration:
                 assert session is not None
                 # Simple query to verify connection
                 from sqlalchemy import select
+
                 result = await session.execute(select(1))
                 assert result.scalar() == 1
 
@@ -693,6 +717,7 @@ class TestBacktestingDatabaseIntegration:
 # Stress tests
 @pytest.mark.stress
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_backtest_memory_usage():
     """Test backtest memory usage with large datasets."""
     import os
@@ -714,7 +739,7 @@ async def test_backtest_memory_usage():
         strategy_id="test-memory-strategy",
         strategy_type=StrategyType.TREND_FOLLOWING,
         symbol="BTC/USD",
-        timeframe="1h"
+        timeframe="1h",
     )
 
     # Mock large dataset
@@ -733,7 +758,9 @@ async def test_backtest_memory_usage():
 
             # Create mock object with the expected attributes
             class MockMarketRecord:
-                def __init__(self, timestamp, open_price, high_price, low_price, close_price, volume):
+                def __init__(
+                    self, timestamp, open_price, high_price, low_price, close_price, volume
+                ):
                     self.timestamp = timestamp
                     self.data_timestamp = timestamp  # Alternative timestamp field
                     self.open_price = open_price
@@ -742,14 +769,16 @@ async def test_backtest_memory_usage():
                     self.close_price = close_price
                     self.volume = volume
 
-            data.append(MockMarketRecord(
-                timestamp=date,
-                open_price=price,
-                high_price=price * 1.01,
-                low_price=price * 0.99,
-                close_price=price,
-                volume=1000,
-            ))
+            data.append(
+                MockMarketRecord(
+                    timestamp=date,
+                    open_price=price,
+                    high_price=price * 1.01,
+                    low_price=price * 0.99,
+                    close_price=price,
+                    volume=1000,
+                )
+            )
 
         return data
 
@@ -757,9 +786,13 @@ async def test_backtest_memory_usage():
 
     # Create proper DataServiceInterface mock
     mock_data_service = AsyncMock(spec=DataServiceInterface)
+
     async def mock_get_market_data(request: DataRequest):
-        raw_data = await db_manager.fetch_all("query", request.symbol, request.start_time, request.end_time)
+        raw_data = await db_manager.fetch_all(
+            "query", request.symbol, request.start_time, request.end_time
+        )
         return raw_data
+
     mock_data_service.get_market_data = mock_get_market_data
 
     engine = BacktestEngine(config=config, strategy=strategy, data_service=mock_data_service)

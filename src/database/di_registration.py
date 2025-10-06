@@ -238,8 +238,9 @@ def _register_database_interfaces(injector: DependencyInjector) -> None:
         """Register repository factory using dependency injection pattern."""
 
         def factory():
-            session_factory = injector.resolve("AsyncSession")
-            session = session_factory()
+            # AsyncSession is registered as a factory that returns an AsyncSession instance directly
+            # Don't call it again - it's already a session instance from the factory
+            session = injector.resolve("AsyncSession")
             return repository_class(session)
 
         return factory

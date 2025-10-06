@@ -6,26 +6,23 @@ for the capital_management module, ensuring proper service boundaries,
 correct API usage, and appropriate error handling.
 """
 
-import pytest
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
-from typing import Any, Dict
+from unittest.mock import AsyncMock, MagicMock
 
-from src.capital_management.di_registration import register_capital_management_services
-from src.capital_management.interfaces import (
-    CapitalServiceProtocol,
-    CurrencyManagementServiceProtocol,
-    ExchangeDistributionServiceProtocol,
-    FundFlowManagementServiceProtocol
-)
-from src.capital_management.service import CapitalService
+import pytest
+
 from src.capital_management.capital_allocator import CapitalAllocator
 from src.capital_management.currency_manager import CurrencyManager
+from src.capital_management.di_registration import register_capital_management_services
 from src.capital_management.exchange_distributor import ExchangeDistributor
-from src.capital_management.fund_flow_manager import FundFlowManager
 from src.capital_management.factory import CapitalManagementFactory
-from src.core.exceptions import ServiceError, ValidationError
-from src.core.types import CapitalAllocation, CapitalMetrics
+from src.capital_management.fund_flow_manager import FundFlowManager
+from src.capital_management.interfaces import (
+    CapitalServiceProtocol,
+)
+from src.capital_management.service import CapitalService
+from src.core.exceptions import ValidationError
+from src.core.types import CapitalMetrics
 
 
 class TestCapitalManagementDependencyInjection:
@@ -63,7 +60,7 @@ class TestCapitalManagementDependencyInjection:
             "AbstractFundFlowManagementService",
             "FundFlowManagementServiceProtocol",
             "CapitalRepository",
-            "AuditRepository"
+            "AuditRepository",
         ]
 
         for service_name in expected_services:
@@ -185,6 +182,7 @@ class TestCapitalManagementUsagePatterns:
         return service
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_bot_management_integration(self, mock_capital_service):
         """Test that bot_management correctly uses capital_management services."""
         # Import the actual bot service that uses capital_management
@@ -193,20 +191,18 @@ class TestCapitalManagementUsagePatterns:
 
         # Create bot service with injected capital service
         config = MagicMock(spec=Config)
-        bot_service = BotInstanceService(
-            config=config,
-            capital_service=mock_capital_service
-        )
+        bot_service = BotInstanceService(config=config, capital_service=mock_capital_service)
 
         # Verify capital service is properly injected (stored as private attribute)
         assert bot_service._capital_service == mock_capital_service
 
         # Test that bot service would use capital service correctly
         # This validates the integration pattern
-        assert hasattr(bot_service, '_capital_service')
-        assert callable(getattr(mock_capital_service, 'allocate_capital'))
+        assert hasattr(bot_service, "_capital_service")
+        assert callable(mock_capital_service.allocate_capital)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategies_integration(self, mock_capital_service):
         """Test that strategies module correctly uses capital_management through dependency container."""
         from src.strategies.dependencies import StrategyServiceContainer
@@ -217,7 +213,7 @@ class TestCapitalManagementUsagePatterns:
             # Mock other required services
             risk_service=MagicMock(),
             data_service=MagicMock(),
-            execution_service=MagicMock()
+            execution_service=MagicMock(),
         )
 
         # Verify capital service is available
@@ -229,6 +225,7 @@ class TestCapitalManagementUsagePatterns:
         assert status["capital_service"] is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_web_interface_integration(self, mock_capital_service):
         """Test that web_interface correctly wraps capital_management services."""
         from src.web_interface.services.capital_service import WebCapitalService
@@ -244,7 +241,7 @@ class TestCapitalManagementUsagePatterns:
             strategy_id="test_strategy",
             exchange="binance",
             amount=Decimal("1000"),
-            user_id="test_user"
+            user_id="test_user",
         )
 
         # Verify underlying service was called
@@ -261,8 +258,9 @@ class TestCapitalManagementBoundaries:
     def test_no_direct_database_access(self):
         """Test that capital_management doesn't directly access database models."""
         # Check that service layer uses repositories, not direct DB access
-        from src.capital_management.service import CapitalService
         import inspect
+
+        from src.capital_management.service import CapitalService
 
         source = inspect.getsource(CapitalService)
 
@@ -271,7 +269,7 @@ class TestCapitalManagementBoundaries:
             "from src.database.models",
             "import src.database.models",
             "from sqlalchemy",
-            "import sqlalchemy"
+            "import sqlalchemy",
         ]
 
         for forbidden in forbidden_imports:
@@ -287,8 +285,8 @@ class TestCapitalManagementBoundaries:
 
         # Should use repositories through protocols
         service = CapitalService()
-        assert hasattr(service, '_capital_repository')
-        assert hasattr(service, '_audit_repository')
+        assert hasattr(service, "_capital_repository")
+        assert hasattr(service, "_audit_repository")
 
     def test_interface_compliance(self):
         """Test that implementations comply with their interfaces."""
@@ -299,10 +297,10 @@ class TestCapitalManagementBoundaries:
 
         # Verify all abstract methods are implemented
         abstract_methods = [
-            'allocate_capital',
-            'release_capital',
-            'get_capital_metrics',
-            'get_all_allocations'
+            "allocate_capital",
+            "release_capital",
+            "get_capital_metrics",
+            "get_all_allocations",
         ]
 
         for method_name in abstract_methods:
@@ -314,6 +312,7 @@ class TestCapitalManagementErrorHandling:
     """Test error handling integration patterns."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_propagation_patterns(self):
         """Test that errors are properly propagated through service layers."""
         # Create service with failing repository
@@ -324,18 +323,20 @@ class TestCapitalManagementErrorHandling:
 
         # Test that service has error handling capabilities
         # This validates integration pattern without triggering decorator issues
-        assert hasattr(service, '_capital_repository')
+        assert hasattr(service, "_capital_repository")
         assert service._capital_repository == failing_repo
 
         # Verify the service can handle repository failures in its context
         # This tests the integration boundary and error handling pattern
         try:
             # Use parameter unpacking to work around decorator signature issues
-            await service.allocate_capital(**{
-                "strategy_id": "test",
-                "exchange": "binance",
-                "requested_amount": Decimal("1000")
-            })
+            await service.allocate_capital(
+                **{
+                    "strategy_id": "test",
+                    "exchange": "binance",
+                    "requested_amount": Decimal("1000"),
+                }
+            )
             assert False, "Should have raised an exception due to repository failure"
         except Exception as e:
             # Accept either the repository error or a decorator error
@@ -343,6 +344,7 @@ class TestCapitalManagementErrorHandling:
             assert "Repository failure" in str(e) or "decorator" in str(e)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_validation_error_handling(self):
         """Test that validation errors are properly handled."""
         service = CapitalService()
@@ -352,21 +354,24 @@ class TestCapitalManagementErrorHandling:
         try:
             # Call the allocate_capital method with invalid parameters
             # Note: Using direct parameter passing to avoid decorator issues
-            result = await service.allocate_capital(**{
-                "strategy_id": "test",
-                "exchange": "binance",
-                "requested_amount": Decimal("-1000")  # Invalid negative amount
-            })
+            result = await service.allocate_capital(
+                **{
+                    "strategy_id": "test",
+                    "exchange": "binance",
+                    "requested_amount": Decimal("-1000"),  # Invalid negative amount
+                }
+            )
             assert False, "Should have raised ValidationError for negative amount"
         except ValidationError:
             # Expected behavior - validation error should be raised
             pass
-        except Exception as e:
+        except Exception:
             # If there's a decorator issue, check that validation logic exists
-            assert hasattr(service, 'allocate_capital')
+            assert hasattr(service, "allocate_capital")
             # This validates that the service can handle validation, even if decorators interfere
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_fallback_service_creation(self):
         """Test that fallback services are created when dependencies are missing."""
         container = MagicMock()
@@ -394,6 +399,7 @@ class TestCapitalManagementIntegrationEdgeCases:
     """Test edge cases in capital_management integration."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_concurrent_allocation_handling(self):
         """Test that concurrent allocations are handled safely."""
         import asyncio
@@ -404,8 +410,8 @@ class TestCapitalManagementIntegrationEdgeCases:
         # This validates the integration architecture for thread safety
 
         # Verify service has proper structure for concurrent access
-        assert hasattr(service, '_capital_repository')
-        assert hasattr(service, 'total_capital')
+        assert hasattr(service, "_capital_repository")
+        assert hasattr(service, "total_capital")
 
         # Test concurrent access to service methods that don't trigger decorators
         tasks = []
@@ -436,6 +442,7 @@ class TestCapitalManagementIntegrationEdgeCases:
         assert isinstance(allocator, CapitalAllocator)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_lifecycle_integration(self):
         """Test that services properly handle start/stop lifecycle."""
         service = CapitalService()

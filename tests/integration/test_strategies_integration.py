@@ -149,6 +149,7 @@ class TestStrategyFrameworkIntegration:
         assert strategy.config.name == "test_strategy"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_with_risk_manager_integration(
         self, strategy_factory, mock_risk_manager
     ):
@@ -191,6 +192,7 @@ class TestStrategyFrameworkIntegration:
         mock_risk_manager.validate_signal.assert_called_once_with(signal)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_with_exchange_integration(self, strategy_factory, mock_exchange):
         """Test strategy integration with exchange."""
         # Register strategy class
@@ -225,6 +227,7 @@ class TestStrategyFrameworkIntegration:
         assert signals[0].confidence == 0.8
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_lifecycle_integration(self, strategy_factory):
         """Test complete strategy lifecycle."""
         # Register strategy class
@@ -267,6 +270,7 @@ class TestStrategyFrameworkIntegration:
         assert strategy.status == StrategyStatus.STOPPED
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_multiple_strategies_integration(self, strategy_factory):
         """Test multiple strategies working together."""
         # Register strategy class
@@ -326,6 +330,7 @@ class TestStrategyFrameworkIntegration:
             assert strategy.status == StrategyStatus.STOPPED
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_configuration_integration(self, config_manager):
         """Test strategy configuration integration."""
         # Test loading default configs
@@ -356,6 +361,7 @@ class TestStrategyFrameworkIntegration:
         assert updated_config.min_confidence == 0.9
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_performance_tracking(self, strategy_factory, mock_market_data):
         """Test strategy performance tracking integration."""
         # Register strategy class
@@ -396,6 +402,7 @@ class TestStrategyFrameworkIntegration:
         assert performance["win_rate"] == 1.0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_error_handling_integration(self, strategy_factory):
         """Test strategy error handling integration."""
 
@@ -485,6 +492,7 @@ class TestStrategyFrameworkIntegration:
             config_manager._get_default_config("non_existent_strategy")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_hot_swap_integration(self, strategy_factory):
         """Test strategy hot swap integration."""
         # Register strategy class
@@ -668,6 +676,7 @@ class TestStaticStrategiesIntegration:
         return {"timestamps": timestamps, "prices": prices, "volumes": volumes}
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_mean_reversion_strategy_integration(
         self, mean_reversion_config, mock_risk_manager
     ):
@@ -734,6 +743,7 @@ class TestStaticStrategiesIntegration:
         assert should_exit is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_trend_following_strategy_integration(
         self, trend_following_config, mock_risk_manager
     ):
@@ -802,6 +812,7 @@ class TestStaticStrategiesIntegration:
         assert should_exit is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_breakout_strategy_integration(self, breakout_config, mock_risk_manager):
         """Test breakout strategy integration with risk management."""
         # Create strategy
@@ -883,6 +894,7 @@ class TestStaticStrategiesIntegration:
         assert should_exit is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_static_strategies_with_factory_integration(self, strategy_factory):
         """Test static strategies integration with strategy factory."""
         # Register static strategies
@@ -946,6 +958,7 @@ class TestStaticStrategiesIntegration:
         assert strategy.name == "breakout_test"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_static_strategies_with_risk_management_integration(
         self, mean_reversion_config, trend_following_config, breakout_config
     ):
@@ -1004,6 +1017,7 @@ class TestStaticStrategiesIntegration:
             assert position_size <= Decimal("0.1")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_static_strategies_error_handling_integration(self, mean_reversion_config):
         """Test static strategies error handling integration."""
         # Create strategy with invalid configuration
@@ -1026,6 +1040,7 @@ class TestStaticStrategiesIntegration:
         assert signals == []
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_static_strategies_performance_integration(
         self, mean_reversion_config, historical_price_data
     ):
@@ -1072,6 +1087,7 @@ class TestStaticStrategiesIntegration:
         assert "strategy_type" in strategy_info
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_static_strategies_multi_symbol_integration(self, mean_reversion_config):
         """Test static strategies with multiple symbols integration."""
         # Configure strategy for multiple symbols
@@ -1108,6 +1124,7 @@ class TestStaticStrategiesIntegration:
                 assert signals[0].symbol == symbol
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_static_strategies_configuration_integration(self, config_manager):
         """Test static strategies configuration integration."""
         # Test that config manager has required risk management settings

@@ -5,20 +5,20 @@ This test suite validates that capital_management properly integrates with
 other modules and uses correct API patterns, error handling, and data contracts.
 """
 
-import pytest
-from decimal import Decimal
 from datetime import datetime
-from unittest.mock import Mock, AsyncMock
-from typing import Any
+from decimal import Decimal
+from unittest.mock import AsyncMock, Mock
 
-from src.capital_management.service import CapitalService
+import pytest
+
 from src.capital_management.interfaces import (
-    CapitalServiceProtocol,
-    CapitalRepositoryProtocol,
     AuditRepositoryProtocol,
+    CapitalRepositoryProtocol,
+    CapitalServiceProtocol,
 )
-from src.core.types import CapitalAllocation, CapitalMetrics, BotPriority
-from src.core.exceptions import ServiceError, ValidationError
+from src.capital_management.service import CapitalService
+from src.core.exceptions import ServiceError
+from src.core.types import BotPriority, CapitalAllocation, CapitalMetrics
 from src.strategies.dependencies import StrategyServiceContainer
 from src.web_interface.services.capital_service import WebCapitalService
 
@@ -54,6 +54,7 @@ class TestCapitalManagementIntegration:
         return service
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_service_container_integration(self, capital_service):
         """Test that StrategyServiceContainer properly uses CapitalService."""
         # Create service container with capital service
@@ -64,6 +65,7 @@ class TestCapitalManagementIntegration:
         assert container.get_service_status()["capital_service"] is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_web_capital_service_integration(self, capital_service):
         """Test WebCapitalService properly uses CapitalService interface."""
         web_service = WebCapitalService(capital_service=capital_service)
@@ -92,7 +94,7 @@ class TestCapitalManagementIntegration:
                 strategies_active=3,
                 positions_open=12,
                 leverage_used=Decimal("1.2"),
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
         )
         capital_service.allocate_capital = AsyncMock(
@@ -107,7 +109,7 @@ class TestCapitalManagementIntegration:
                 min_allocation=Decimal("100"),
                 max_allocation=Decimal("5000"),
                 last_rebalance=datetime.now(),
-                exchange="binance"
+                exchange="binance",
             )
         )
 
@@ -116,9 +118,7 @@ class TestCapitalManagementIntegration:
 
         # Test allocation
         result = await web_service.allocate_capital(
-            strategy_id="test-strategy",
-            exchange="binance",
-            amount=Decimal("1000")
+            strategy_id="test-strategy", exchange="binance", amount=Decimal("1000")
         )
 
         # Verify correct method was called with proper parameters
@@ -128,7 +128,7 @@ class TestCapitalManagementIntegration:
             requested_amount=Decimal("1000"),
             bot_id=None,
             authorized_by=None,
-            risk_context=None
+            risk_context=None,
         )
 
         # Verify response format
@@ -137,6 +137,7 @@ class TestCapitalManagementIntegration:
         assert result["strategy_id"] == "test-strategy"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategies_base_integration_patterns(self, capital_service):
         """Test that strategies properly use capital service methods."""
         # Mock the methods that strategies actually call
@@ -163,7 +164,7 @@ class TestCapitalManagementIntegration:
                 strategies_active=2,
                 positions_open=8,
                 leverage_used=Decimal("1.1"),
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
         )
 
@@ -180,7 +181,7 @@ class TestCapitalManagementIntegration:
                     min_allocation=Decimal("100"),
                     max_allocation=Decimal("5000"),
                     last_rebalance=datetime.now(),
-                    exchange="binance"
+                    exchange="binance",
                 )
             ]
         )
@@ -198,6 +199,7 @@ class TestCapitalManagementIntegration:
         assert allocations[0].allocated_amount == Decimal("1000")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_handling_propagation(self, capital_service):
         """Test that errors are properly handled and propagated across module boundaries."""
         # Mock repository to raise errors
@@ -208,16 +210,17 @@ class TestCapitalManagementIntegration:
         # Test that service properly handles and propagates errors
         with pytest.raises(ServiceError) as exc_info:
             await capital_service.allocate_capital(
-                strategy_id="test-strategy",
-                exchange="binance",
-                requested_amount=Decimal("1000")
+                strategy_id="test-strategy", exchange="binance", requested_amount=Decimal("1000")
             )
 
         # Verify error message contains relevant information
         assert "Database connection failed" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_dependency_injection_patterns(self, mock_capital_repository, mock_audit_repository):
+    @pytest.mark.timeout(300)
+    async def test_dependency_injection_patterns(
+        self, mock_capital_repository, mock_audit_repository
+    ):
         """Test that dependency injection works correctly."""
         # Test that service can be created without dependencies (fallback mode)
         service_without_deps = CapitalService()  # Should work with default None values
@@ -225,8 +228,7 @@ class TestCapitalManagementIntegration:
 
         # Test that service works with proper dependencies
         service = CapitalService(
-            capital_repository=mock_capital_repository,
-            audit_repository=mock_audit_repository
+            capital_repository=mock_capital_repository, audit_repository=mock_audit_repository
         )
 
         # Verify dependencies are properly injected
@@ -234,19 +236,21 @@ class TestCapitalManagementIntegration:
         assert service._audit_repository is mock_audit_repository
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_interface_compliance(self, capital_service):
         """Test that CapitalService properly implements its interfaces."""
         # Verify it implements the protocol (check required methods instead of isinstance)
         # Since CapitalServiceProtocol is not @runtime_checkable, we test method presence
 
         # Test required methods exist and have correct signatures
-        assert hasattr(capital_service, 'allocate_capital')
-        assert hasattr(capital_service, 'release_capital')
-        assert hasattr(capital_service, 'get_capital_metrics')
-        assert hasattr(capital_service, 'get_allocations_by_strategy')
-        assert hasattr(capital_service, 'get_all_allocations')
+        assert hasattr(capital_service, "allocate_capital")
+        assert hasattr(capital_service, "release_capital")
+        assert hasattr(capital_service, "get_capital_metrics")
+        assert hasattr(capital_service, "get_allocations_by_strategy")
+        assert hasattr(capital_service, "get_all_allocations")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_bot_resource_manager_integration(self, capital_service):
         """Test ResourceManager integration with CapitalService."""
         from src.bot_management.resource_manager import ResourceManager
@@ -275,22 +279,21 @@ class TestCapitalManagementIntegration:
                 min_allocation=Decimal("100"),
                 max_allocation=Decimal("5000"),
                 last_rebalance=datetime.now(),
-                exchange="internal"
+                exchange="internal",
             )
         )
         capital_service.release_capital = AsyncMock(return_value=True)
 
         # Test resource allocation triggers capital service
         await resource_manager.request_resources(
-            bot_id="test-bot",
-            capital_amount=Decimal("1000"),
-            priority=BotPriority.NORMAL
+            bot_id="test-bot", capital_amount=Decimal("1000"), priority=BotPriority.NORMAL
         )
 
         # Verify capital service was called
         capital_service.allocate_capital.assert_called()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_data_contract_validation(self, capital_service):
         """Test that data contracts between modules are respected."""
         # Mock successful allocation
@@ -302,15 +305,13 @@ class TestCapitalManagementIntegration:
                 available_amount=Decimal("1000.00"),
                 allocation_percentage=10.0,
                 created_at=None,
-                updated_at=None
+                updated_at=None,
             )
         )
 
         # Test allocation returns proper data structure
         result = await capital_service.allocate_capital(
-            strategy_id="test-strategy",
-            exchange="binance",
-            requested_amount=Decimal("1000")
+            strategy_id="test-strategy", exchange="binance", requested_amount=Decimal("1000")
         )
 
         # Validate data contract
@@ -322,6 +323,7 @@ class TestCapitalManagementIntegration:
         assert result.exchange == "binance"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_lifecycle_integration(self, capital_service):
         """Test service lifecycle operations work correctly."""
         # Test service can be started
@@ -364,16 +366,17 @@ class TestCapitalManagementBoundaryValidation:
         return service
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_no_direct_database_access(self):
         """Verify that consumers don't bypass service layer to access database directly."""
         # This test ensures architectural boundaries are respected
 
         # Test that strategies module imports only service layer
-        from src.strategies.dependencies import StrategyServiceContainer
 
         # Verify no direct database imports in the dependencies
-        import src.strategies.dependencies
         import inspect
+
+        import src.strategies.dependencies
 
         source = inspect.getsource(src.strategies.dependencies)
 
@@ -385,6 +388,7 @@ class TestCapitalManagementBoundaryValidation:
         assert "from src.capital_management.service import CapitalService" in source
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_proper_exception_handling_boundaries(self, capital_service):
         """Test that exceptions are properly transformed at module boundaries."""
         # Mock a database-level exception
@@ -395,9 +399,7 @@ class TestCapitalManagementBoundaryValidation:
         # Service should catch and transform to proper service exception
         with pytest.raises(ServiceError) as exc_info:
             await capital_service.allocate_capital(
-                strategy_id="test-strategy",
-                exchange="binance",
-                requested_amount=Decimal("1000")
+                strategy_id="test-strategy", exchange="binance", requested_amount=Decimal("1000")
             )
 
         # Verify exception is transformed appropriately
@@ -406,23 +408,19 @@ class TestCapitalManagementBoundaryValidation:
         assert exc_info.value.__cause__ is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_interface_segregation(self):
         """Test that interfaces are properly segregated and focused."""
-        from src.capital_management.interfaces import (
-            CapitalServiceProtocol,
-            CurrencyManagementServiceProtocol,
-            ExchangeDistributionServiceProtocol,
-            FundFlowManagementServiceProtocol
-        )
 
         # Verify interfaces have appropriate method counts (not too large)
-        capital_methods = [method for method in dir(CapitalServiceProtocol)
-                          if not method.startswith('_')]
+        capital_methods = [
+            method for method in dir(CapitalServiceProtocol) if not method.startswith("_")
+        ]
 
         # Interface should be focused - not too many methods
         assert len(capital_methods) <= 10, "Interface is too large, consider splitting"
 
         # Verify essential methods are present
-        assert 'allocate_capital' in capital_methods
-        assert 'release_capital' in capital_methods
-        assert 'get_capital_metrics' in capital_methods
+        assert "allocate_capital" in capital_methods
+        assert "release_capital" in capital_methods
+        assert "get_capital_metrics" in capital_methods

@@ -162,6 +162,7 @@ class TestOKXIntegration:
             }
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_complete_trading_workflow(self, config, mock_okx_clients):
         """Test complete trading workflow from connection to order execution."""
         exchange = OKXExchange(config)
@@ -201,6 +202,7 @@ class TestOKXIntegration:
         assert order_response.id == "test_order_123"  # Use 'id' not 'order_id'
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_websocket_integration(self, config):
         """Test WebSocket integration with real message handling."""
         ws_manager = OKXWebSocketManager(config)
@@ -228,6 +230,7 @@ class TestOKXIntegration:
             assert "tickers.BTC-USDT" in ws_manager.public_subscriptions
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_order_manager_integration(self, config, mock_okx_clients):
         """Test order manager integration with real order workflows."""
         # Configure the mock to return proper response
@@ -274,6 +277,7 @@ class TestOKXIntegration:
         assert response.id == "test_order_123"  # Use 'id' not 'order_id'
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_handling_integration(self, config):
         """Test error handling integration."""
         exchange = OKXExchange(config)
@@ -314,6 +318,7 @@ class TestOKXIntegration:
                     await exchange.place_order(order_request)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_market_data_integration(self, config, mock_okx_clients):
         """Test market data integration."""
         exchange = OKXExchange(config)
@@ -353,6 +358,7 @@ class TestOKXIntegration:
         assert hasattr(trades[0], "id")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_rate_limiting_integration(self, config):
         """Test rate limiting integration."""
         exchange = OKXExchange(config)
@@ -365,6 +371,7 @@ class TestOKXIntegration:
         assert rate_limits["requests_per_minute"] == 600
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_health_check_integration(self, config, mock_okx_clients):
         """Test health check integration."""
         exchange = OKXExchange(config)
@@ -392,6 +399,7 @@ class TestOKXIntegration:
         assert healthy is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_order_type_conversion_integration(self, config):
         """Test order type conversion integration."""
         exchange = OKXExchange(config)
@@ -414,6 +422,7 @@ class TestOKXIntegration:
         assert exchange._convert_timeframe_to_okx("1d") == "1D"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_websocket_reconnection_integration(self, config):
         """Test WebSocket reconnection integration."""
         ws_manager = OKXWebSocketManager(config)
@@ -438,6 +447,7 @@ class TestOKXIntegration:
                 pass
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_order_manager_fee_integration(self, config):
         """Test order manager fee integration."""
         order_manager = OKXOrderManager(config, None)
@@ -460,6 +470,7 @@ class TestOKXIntegration:
         assert maker_fee == taker_fee
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_order_history_integration(self, config):
         """Test order history integration."""
         order_manager = OKXOrderManager(config, None)
@@ -472,6 +483,7 @@ class TestOKXIntegration:
         assert len(order_manager.order_history) == 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_comprehensive_error_scenarios(self, config):
         """Test comprehensive error scenarios."""
         exchange = OKXExchange(config)
@@ -494,6 +506,7 @@ class TestOKXIntegration:
             order_manager._validate_order_request(invalid_order)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_websocket_message_handling_integration(self, config):
         """Test WebSocket message handling integration."""
         ws_manager = OKXWebSocketManager(config)
@@ -511,6 +524,7 @@ class TestOKXIntegration:
             # Note: This depends on the actual message parsing logic
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_order_manager_validation_integration(self, config):
         """Test order manager validation integration."""
         order_manager = OKXOrderManager(config, None)

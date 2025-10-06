@@ -12,33 +12,23 @@ Tests:
 """
 
 import asyncio
-from decimal import Decimal
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import pytest
-import pytest_asyncio
 
-from src.core.config import Config
 from src.core.types import Signal, SignalDirection
 from src.risk_management.factory import RiskManagementFactory
-from src.risk_management.service import RiskService
 from src.risk_management.interfaces import RiskServiceInterface
-
-from .fixtures.real_service_fixtures import (
-    real_risk_service,
-    real_risk_factory,
-    sample_positions,
-    sample_signal,
-)
+from src.risk_management.service import RiskService
 
 
 class TestRealModuleValidation:
     """Test real module integration with dependency injection."""
 
     @pytest.mark.asyncio
-    async def test_factory_creates_real_services(
-        self, real_risk_factory: RiskManagementFactory
-    ):
+    @pytest.mark.timeout(300)
+    async def test_factory_creates_real_services(self, real_risk_factory: RiskManagementFactory):
         """Test that factory creates real service instances."""
         # WHEN: Create service using factory
         risk_service = real_risk_factory.create_risk_service()
@@ -46,25 +36,24 @@ class TestRealModuleValidation:
         # THEN: Should create real RiskService instance
         assert isinstance(risk_service, RiskService)
         assert isinstance(risk_service, RiskServiceInterface)
-        assert not hasattr(risk_service, '_mock_name'), "Should not be a mock"
+        assert not hasattr(risk_service, "_mock_name"), "Should not be a mock"
 
     @pytest.mark.asyncio
-    async def test_factory_validates_dependencies(
-        self, real_risk_factory: RiskManagementFactory
-    ):
+    @pytest.mark.timeout(300)
+    async def test_factory_validates_dependencies(self, real_risk_factory: RiskManagementFactory):
         """Test that factory validates required dependencies."""
         # WHEN: Validate dependencies
         dependencies = real_risk_factory.validate_dependencies()
 
         # THEN: All dependencies should be available
         assert isinstance(dependencies, dict)
-        assert all(dependencies.values()), \
+        assert all(dependencies.values()), (
             f"Missing dependencies: {[k for k, v in dependencies.items() if not v]}"
+        )
 
     @pytest.mark.asyncio
-    async def test_di_container_service_lifecycle(
-        self, real_risk_factory: RiskManagementFactory
-    ):
+    @pytest.mark.timeout(300)
+    async def test_di_container_service_lifecycle(self, real_risk_factory: RiskManagementFactory):
         """Test service lifecycle through DI container."""
         # GIVEN: Factory with services
         # WHEN: Create and initialize service
@@ -80,6 +69,7 @@ class TestRealModuleValidation:
         await risk_service.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_service_integration_through_factory(
         self, real_risk_factory: RiskManagementFactory, sample_signal: Signal
     ):
@@ -93,7 +83,7 @@ class TestRealModuleValidation:
             position_size = await risk_service.calculate_position_size(
                 signal=sample_signal,
                 available_capital=Decimal("100000.00"),
-                current_price=Decimal("50000.00")
+                current_price=Decimal("50000.00"),
             )
 
             is_valid = await risk_service.validate_signal(sample_signal)
@@ -106,9 +96,8 @@ class TestRealModuleValidation:
             await risk_service.cleanup()
 
     @pytest.mark.asyncio
-    async def test_factory_recommended_component(
-        self, real_risk_factory: RiskManagementFactory
-    ):
+    @pytest.mark.timeout(300)
+    async def test_factory_recommended_component(self, real_risk_factory: RiskManagementFactory):
         """Test factory recommends correct component."""
         # WHEN: Get recommended component
         recommended = real_risk_factory.get_recommended_component()
@@ -117,9 +106,8 @@ class TestRealModuleValidation:
         assert isinstance(recommended, RiskService)
 
     @pytest.mark.asyncio
-    async def test_factory_service_management(
-        self, real_risk_factory: RiskManagementFactory
-    ):
+    @pytest.mark.timeout(300)
+    async def test_factory_service_management(self, real_risk_factory: RiskManagementFactory):
         """Test factory service start/stop management."""
         # The factory is already started in the fixture
 
@@ -135,6 +123,7 @@ class TestRealCrossModuleIntegration:
     """Test real cross-module integration."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_risk_service_database_integration(
         self, real_risk_service: RiskService, sample_positions
     ):
@@ -144,8 +133,7 @@ class TestRealCrossModuleIntegration:
 
         # WHEN: Update state (should use real database)
         await real_risk_service.update_portfolio_state(
-            positions=sample_positions,
-            available_capital=portfolio_value
+            positions=sample_positions, available_capital=portfolio_value
         )
 
         # THEN: State should be persisted via database service
@@ -153,27 +141,27 @@ class TestRealCrossModuleIntegration:
         assert isinstance(summary, dict)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_risk_service_monitoring_integration(
         self, real_risk_service: RiskService, sample_positions
     ):
         """Test risk service integrates with monitoring."""
         # GIVEN: Risk metrics to calculate
         from .fixtures.real_service_fixtures import generate_realistic_market_data_sequence
+
         market_data = generate_realistic_market_data_sequence(periods=30)
 
         # WHEN: Calculate metrics (should integrate with monitoring)
         risk_metrics = await real_risk_service.calculate_risk_metrics(
-            positions=sample_positions,
-            market_data=market_data
+            positions=sample_positions, market_data=market_data
         )
 
         # THEN: Metrics should be calculated (monitoring integration works)
         assert risk_metrics is not None
 
     @pytest.mark.asyncio
-    async def test_concurrent_module_operations(
-        self, real_risk_service: RiskService
-    ):
+    @pytest.mark.timeout(300)
+    async def test_concurrent_module_operations(self, real_risk_service: RiskService):
         """Test concurrent operations across modules."""
         # GIVEN: Multiple operations
         signal = Signal(
@@ -185,7 +173,7 @@ class TestRealCrossModuleIntegration:
             confidence=Decimal("0.80"),
             strength=Decimal("0.70"),
             source="test",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # WHEN: Execute operations concurrently
@@ -193,7 +181,7 @@ class TestRealCrossModuleIntegration:
             real_risk_service.calculate_position_size(
                 signal=signal,
                 available_capital=Decimal("100000.00"),
-                current_price=Decimal("50000.00")
+                current_price=Decimal("50000.00"),
             )
             for _ in range(5)
         ]
@@ -209,16 +197,16 @@ class TestRealServiceConfiguration:
     """Test real service configuration."""
 
     @pytest.mark.asyncio
-    async def test_service_configuration_loaded(
-        self, real_risk_service: RiskService
-    ):
+    @pytest.mark.timeout(300)
+    async def test_service_configuration_loaded(self, real_risk_service: RiskService):
         """Test that service loads real configuration."""
         # THEN: Service should have valid configuration
         assert real_risk_service.risk_config is not None
-        assert hasattr(real_risk_service.risk_config, 'max_position_size_pct')
+        assert hasattr(real_risk_service.risk_config, "max_position_size_pct")
         assert isinstance(real_risk_service.risk_config.max_position_size_pct, Decimal)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_configuration_affects_behavior(
         self, real_risk_service: RiskService, sample_signal: Signal
     ):
@@ -232,7 +220,7 @@ class TestRealServiceConfiguration:
             position_size = await real_risk_service.calculate_position_size(
                 signal=sample_signal,
                 available_capital=Decimal("100000.00"),
-                current_price=Decimal("50000.00")
+                current_price=Decimal("50000.00"),
             )
 
             # THEN: Should respect new limit

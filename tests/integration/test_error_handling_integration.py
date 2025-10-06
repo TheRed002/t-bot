@@ -60,12 +60,14 @@ def setup_logging_for_tests():
 class TestErrorHandlerIntegration:
     """Test error handler integration."""
 
+    @pytest.mark.timeout(300)
     async def test_error_handler_initialization(self, config, setup_logging_for_tests):
         """Test error handler initialization."""
         handler = ErrorHandler(config)
         assert handler is not None
         assert handler.config == config
 
+    @pytest.mark.timeout(300)
     async def test_error_classification(self, config, setup_logging_for_tests):
         """Test error classification functionality."""
         handler = ErrorHandler(config)
@@ -82,6 +84,7 @@ class TestErrorHandlerIntegration:
             severity = handler.classify_error(error)
             assert severity == expected_severity, f"Expected {expected_severity}, got {severity}"
 
+    @pytest.mark.timeout(300)
     async def test_error_context_creation(self, config, setup_logging_for_tests):
         """Test error context creation."""
         handler = ErrorHandler(config)
@@ -103,6 +106,7 @@ class TestErrorHandlerIntegration:
         assert context.bot_id == "test_bot"
         assert context.symbol == "BTCUSDT"
 
+    @pytest.mark.timeout(300)
     async def test_circuit_breaker_functionality(self, config, setup_logging_for_tests):
         """Test circuit breaker functionality."""
         circuit_breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=5)
@@ -126,6 +130,7 @@ class TestErrorHandlerIntegration:
         with pytest.raises(TradingBotError):
             circuit_breaker.call(lambda: "should not execute")
 
+    @pytest.mark.timeout(300)
     async def test_error_handler_decorator(self, config, setup_logging_for_tests):
         """Test error handler decorator."""
 
@@ -143,6 +148,7 @@ class TestErrorHandlerIntegration:
 class TestRecoveryScenariosIntegration:
     """Test recovery scenario integrations."""
 
+    @pytest.mark.timeout(300)
     async def test_partial_fill_recovery(self, config, setup_logging_for_tests):
         """Test partial fill recovery scenario."""
         recovery = PartialFillRecovery(config)
@@ -161,6 +167,7 @@ class TestRecoveryScenariosIntegration:
         )
         assert result is not None
 
+    @pytest.mark.timeout(300)
     async def test_network_disconnection_recovery(self, config, setup_logging_for_tests):
         """Test network disconnection recovery scenario."""
         recovery = NetworkDisconnectionRecovery(config)
@@ -173,6 +180,7 @@ class TestRecoveryScenariosIntegration:
         )
         assert result is not None
 
+    @pytest.mark.timeout(300)
     async def test_exchange_maintenance_recovery(self, config, setup_logging_for_tests):
         """Test exchange maintenance recovery scenario."""
         recovery = ExchangeMaintenanceRecovery(config)
@@ -185,6 +193,7 @@ class TestRecoveryScenariosIntegration:
         )
         assert result is not None
 
+    @pytest.mark.timeout(300)
     async def test_data_feed_interruption_recovery(self, config, setup_logging_for_tests):
         """Test data feed interruption recovery scenario."""
         recovery = DataFeedInterruptionRecovery(config)
@@ -197,6 +206,7 @@ class TestRecoveryScenariosIntegration:
         )
         assert result is not None
 
+    @pytest.mark.timeout(300)
     async def test_order_rejection_recovery(self, config, setup_logging_for_tests):
         """Test order rejection recovery scenario."""
         recovery = OrderRejectionRecovery(config)
@@ -210,6 +220,7 @@ class TestRecoveryScenariosIntegration:
         )
         assert result is not None
 
+    @pytest.mark.timeout(300)
     async def test_api_rate_limit_recovery(self, config, setup_logging_for_tests):
         """Test API rate limit recovery scenario."""
         recovery = APIRateLimitRecovery(config)
@@ -228,6 +239,7 @@ class TestRecoveryScenariosIntegration:
 class TestConnectionManagerIntegration:
     """Test connection manager integration."""
 
+    @pytest.mark.timeout(300)
     async def test_connection_establishment(self, config, setup_logging_for_tests):
         """Test connection establishment."""
         manager = ConnectionManager(config)
@@ -251,6 +263,7 @@ class TestConnectionManagerIntegration:
         assert status is not None
         assert status.get("state") == ConnectionState.CONNECTED.value
 
+    @pytest.mark.timeout(300)
     async def test_message_queuing(self, config, setup_logging_for_tests):
         """Test message queuing functionality."""
         manager = ConnectionManager(config)
@@ -272,6 +285,7 @@ class TestConnectionManagerIntegration:
         message_count = await manager.flush_message_queue("test_connection")
         assert message_count > 0
 
+    @pytest.mark.timeout(300)
     async def test_connection_closure(self, config, setup_logging_for_tests):
         """Test connection closure."""
         manager = ConnectionManager(config)
@@ -298,6 +312,7 @@ class TestConnectionManagerIntegration:
 class TestStateMonitorIntegration:
     """Test state monitor integration."""
 
+    @pytest.mark.timeout(300)
     async def test_state_validation(self, config, setup_logging_for_tests):
         """Test state validation functionality."""
         monitor = StateMonitor(config)
@@ -307,6 +322,7 @@ class TestStateMonitorIntegration:
         assert validation_result is not None
         assert isinstance(validation_result, StateValidationResult)
 
+    @pytest.mark.timeout(300)
     async def test_state_reconciliation(self, config, setup_logging_for_tests):
         """Test state reconciliation functionality."""
         monitor = StateMonitor(config)
@@ -317,6 +333,7 @@ class TestStateMonitorIntegration:
         )
         assert reconciliation_result is not None
 
+    @pytest.mark.timeout(300)
     async def test_monitoring_summary(self, config, setup_logging_for_tests):
         """Test monitoring summary functionality."""
         monitor = StateMonitor(config)
@@ -326,6 +343,7 @@ class TestStateMonitorIntegration:
         assert summary is not None
         assert "total_validations" in summary
 
+    @pytest.mark.timeout(300)
     async def test_validation_history(self, config, setup_logging_for_tests):
         """Test validation history functionality."""
         monitor = StateMonitor(config)
@@ -339,6 +357,7 @@ class TestStateMonitorIntegration:
 class TestPatternAnalyticsIntegration:
     """Test pattern analytics integration."""
 
+    @pytest.mark.timeout(300)
     async def test_error_pattern_analysis(self, config, setup_logging_for_tests):
         """Test error pattern analysis functionality."""
         analytics = ErrorPatternAnalytics(config)
@@ -359,6 +378,7 @@ class TestPatternAnalyticsIntegration:
         patterns = analytics.get_pattern_summary()
         assert patterns is not None
 
+    @pytest.mark.timeout(300)
     async def test_correlation_analysis(self, config, setup_logging_for_tests):
         """Test correlation analysis functionality."""
         analytics = ErrorPatternAnalytics(config)
@@ -379,6 +399,7 @@ class TestPatternAnalyticsIntegration:
         correlations = analytics.get_correlation_summary()
         assert correlations is not None
 
+    @pytest.mark.timeout(300)
     async def test_trend_analysis(self, config, setup_logging_for_tests):
         """Test trend analysis functionality."""
         analytics = ErrorPatternAnalytics(config)
@@ -404,6 +425,7 @@ class TestPatternAnalyticsIntegration:
 class TestErrorHandlingIntegration:
     """Test comprehensive error handling integration."""
 
+    @pytest.mark.timeout(300)
     async def test_error_handling_with_connection_issues(self, config, setup_logging_for_tests):
         """Test error handling with connection issues."""
         error_handler = ErrorHandler(config)
@@ -436,6 +458,7 @@ class TestErrorHandlingIntegration:
         assert error_context is not None
         assert error_context.severity == ErrorSeverity.HIGH
 
+    @pytest.mark.timeout(300)
     async def test_error_handling_with_state_monitoring(self, config, setup_logging_for_tests):
         """Test error handling with state monitoring integration."""
         error_handler = ErrorHandler(config)
@@ -456,6 +479,7 @@ class TestErrorHandlingIntegration:
         assert error_context is not None
         assert error_context.severity == ErrorSeverity.CRITICAL
 
+    @pytest.mark.timeout(300)
     async def test_error_handling_with_pattern_analytics(self, config, setup_logging_for_tests):
         """Test error handling with pattern analytics integration."""
         error_handler = ErrorHandler(config)
@@ -487,6 +511,7 @@ class TestErrorHandlingIntegration:
         assert error_context is not None
         assert error_context.severity == ErrorSeverity.HIGH
 
+    @pytest.mark.timeout(300)
     async def test_comprehensive_error_recovery_flow(self, config, setup_logging_for_tests):
         """Test comprehensive error recovery flow."""
         error_handler = ErrorHandler(config)

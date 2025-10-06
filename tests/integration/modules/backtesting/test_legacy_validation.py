@@ -6,20 +6,17 @@ with other modules through correct dependency injection patterns and
 service layer architecture.
 """
 
-import asyncio
 from datetime import datetime, timezone
-from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 import pytest_asyncio
+
 from src.backtesting.di_registration import register_backtesting_services
 from src.backtesting.interfaces import BacktestServiceInterface
 from src.backtesting.service import BacktestRequest
-from src.core.dependency_injection import DependencyInjector
 from src.core.config import Config
-from src.core.exceptions import ServiceError
+from src.core.dependency_injection import DependencyInjector
 from src.utils.decimal_utils import to_decimal
 
 
@@ -40,33 +37,35 @@ class TestBacktestingIntegrationValidation:
         # Mock DataService with proper interface
         data_service = AsyncMock()
         data_service.initialize = AsyncMock()
-        data_service.get_market_data = AsyncMock(return_value=[
-            {
-                'timestamp': datetime.now(timezone.utc),
-                'symbol': 'BTCUSDT',
-                'open': to_decimal('50000'),
-                'high': to_decimal('50100'),
-                'low': to_decimal('49900'),
-                'close': to_decimal('50050'),
-                'volume': to_decimal('100'),
-            }
-        ])
-        data_service.health_check = AsyncMock(return_value={'status': 'healthy'})
+        data_service.get_market_data = AsyncMock(
+            return_value=[
+                {
+                    "timestamp": datetime.now(timezone.utc),
+                    "symbol": "BTCUSDT",
+                    "open": to_decimal("50000"),
+                    "high": to_decimal("50100"),
+                    "low": to_decimal("49900"),
+                    "close": to_decimal("50050"),
+                    "volume": to_decimal("100"),
+                }
+            ]
+        )
+        data_service.health_check = AsyncMock(return_value={"status": "healthy"})
 
         # Mock ExecutionService
         execution_service = AsyncMock()
         execution_service.initialize = AsyncMock()
-        execution_service.health_check = AsyncMock(return_value={'status': 'healthy'})
+        execution_service.health_check = AsyncMock(return_value={"status": "healthy"})
 
         # Mock RiskService
         risk_service = AsyncMock()
         risk_service.initialize = AsyncMock()
-        risk_service.health_check = AsyncMock(return_value={'status': 'healthy'})
+        risk_service.health_check = AsyncMock(return_value={"status": "healthy"})
 
         # Mock StrategyService
         strategy_service = AsyncMock()
         strategy_service.initialize = AsyncMock()
-        strategy_service.health_check = AsyncMock(return_value={'status': 'healthy'})
+        strategy_service.health_check = AsyncMock(return_value={"status": "healthy"})
 
         # Mock CacheService
         cache_service = AsyncMock()
@@ -79,12 +78,12 @@ class TestBacktestingIntegrationValidation:
         repository.save_backtest_result = AsyncMock(return_value="test_id_123")
 
         return {
-            'DataService': data_service,
-            'ExecutionService': execution_service,
-            'RiskService': risk_service,
-            'StrategyService': strategy_service,
-            'CacheService': cache_service,
-            'BacktestRepositoryInterface': repository,
+            "DataService": data_service,
+            "ExecutionService": execution_service,
+            "RiskService": risk_service,
+            "StrategyService": strategy_service,
+            "CacheService": cache_service,
+            "BacktestRepositoryInterface": repository,
         }
 
     @pytest_asyncio.fixture
@@ -105,6 +104,7 @@ class TestBacktestingIntegrationValidation:
         return injector
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_dependency_resolution(self, injector):
         """Test that BacktestService correctly resolves dependencies via DI."""
         # Resolve service through interface
@@ -125,9 +125,10 @@ class TestBacktestingIntegrationValidation:
         # This is acceptable for integration tests that don't require database persistence
         # If repository is available, verify it has correct type
         if service.repository is not None:
-            assert hasattr(service.repository, 'save_backtest_result')
+            assert hasattr(service.repository, "save_backtest_result")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_layer_architecture(self, injector):
         """Test that service follows proper layer architecture."""
         service = injector.resolve("BacktestServiceInterface")
@@ -136,27 +137,29 @@ class TestBacktestingIntegrationValidation:
         await service.initialize()
 
         # Verify service uses dependencies through interfaces, not direct access
-        assert hasattr(service, 'data_service')
-        assert hasattr(service, 'execution_service')
-        assert hasattr(service, 'risk_service')
-        assert hasattr(service, 'strategy_service')
+        assert hasattr(service, "data_service")
+        assert hasattr(service, "execution_service")
+        assert hasattr(service, "risk_service")
+        assert hasattr(service, "strategy_service")
 
         # Test service method delegation
         health_result = await service.health_check()
-        assert health_result.status.value in ['healthy', 'degraded', 'unhealthy']
+        assert health_result.status.value in ["healthy", "degraded", "unhealthy"]
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_controller_uses_service_interface(self, injector):
         """Test that BacktestController uses service through interface."""
         controller = injector.resolve("BacktestController")
         assert controller is not None
 
         # Verify controller has service interface
-        assert hasattr(controller, 'backtest_service')
+        assert hasattr(controller, "backtest_service")
         service = controller.backtest_service
         assert isinstance(service, BacktestServiceInterface)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_factory_creates_proper_components(self, injector):
         """Test that factory creates components with proper dependencies."""
         factory = injector.resolve("BacktestFactory")
@@ -180,6 +183,7 @@ class TestBacktestingIntegrationValidation:
             pass
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_no_circular_dependencies(self, injector):
         """Test that there are no circular dependencies."""
         # This should not hang or throw circular dependency errors
@@ -192,10 +196,11 @@ class TestBacktestingIntegrationValidation:
         assert factory is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_error_propagation(self, injector, mock_services):
         """Test that service errors are properly propagated."""
         # Mock service to throw error
-        mock_services['DataService'].get_market_data = AsyncMock(
+        mock_services["DataService"].get_market_data = AsyncMock(
             side_effect=Exception("Data service error")
         )
 
@@ -204,11 +209,11 @@ class TestBacktestingIntegrationValidation:
 
         # Create invalid request
         request = BacktestRequest(
-            strategy_config={'name': 'test'},
-            symbols=['INVALID'],
+            strategy_config={"name": "test"},
+            symbols=["INVALID"],
             start_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
             end_date=datetime(2023, 1, 2, tzinfo=timezone.utc),
-            initial_capital=to_decimal('1000'),
+            initial_capital=to_decimal("1000"),
         )
 
         # Should handle error gracefully without exposing internal details
@@ -219,21 +224,23 @@ class TestBacktestingIntegrationValidation:
         # The key is that it doesn't crash or expose internal errors
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_module_boundary_respect(self, injector):
         """Test that backtesting respects other module boundaries."""
         service = injector.resolve("BacktestServiceInterface")
 
         # Service should not directly access other module internals
         # Only use provided interfaces
-        assert not hasattr(service, '_database_connection')
-        assert not hasattr(service, '_redis_client')
+        assert not hasattr(service, "_database_connection")
+        assert not hasattr(service, "_redis_client")
 
         # Should use abstracted services
-        assert hasattr(service, 'data_service')
-        assert hasattr(service, 'execution_service')
-        assert hasattr(service, '_cache_service')
+        assert hasattr(service, "data_service")
+        assert hasattr(service, "execution_service")
+        assert hasattr(service, "_cache_service")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_service_initialization_robustness(self, injector):
         """Test that service initializes robustly even with missing dependencies."""
         # Create injector with minimal dependencies
@@ -254,26 +261,28 @@ class TestBacktestingIntegrationValidation:
         await service.initialize()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_interface_compliance(self, injector):
         """Test that concrete implementations comply with interfaces."""
         service = injector.resolve("BacktestServiceInterface")
 
         # Check all interface methods are implemented
-        assert hasattr(service, 'initialize')
-        assert hasattr(service, 'run_backtest')
-        assert hasattr(service, 'run_backtest_from_dict')
-        assert hasattr(service, 'serialize_result')
-        assert hasattr(service, 'get_active_backtests')
-        assert hasattr(service, 'cancel_backtest')
-        assert hasattr(service, 'clear_cache')
-        assert hasattr(service, 'get_cache_stats')
-        assert hasattr(service, 'health_check')
-        assert hasattr(service, 'get_backtest_result')
-        assert hasattr(service, 'list_backtest_results')
-        assert hasattr(service, 'delete_backtest_result')
-        assert hasattr(service, 'cleanup')
+        assert hasattr(service, "initialize")
+        assert hasattr(service, "run_backtest")
+        assert hasattr(service, "run_backtest_from_dict")
+        assert hasattr(service, "serialize_result")
+        assert hasattr(service, "get_active_backtests")
+        assert hasattr(service, "cancel_backtest")
+        assert hasattr(service, "clear_cache")
+        assert hasattr(service, "get_cache_stats")
+        assert hasattr(service, "health_check")
+        assert hasattr(service, "get_backtest_result")
+        assert hasattr(service, "list_backtest_results")
+        assert hasattr(service, "delete_backtest_result")
+        assert hasattr(service, "cleanup")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_dependency_injection_patterns(self, injector):
         """Test that proper DI patterns are followed."""
         # Constructor injection
@@ -290,6 +299,7 @@ class TestBacktestingIntegrationValidation:
         assert service_via_interface is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_lifecycle_management(self, injector):
         """Test proper service lifecycle management."""
         service = injector.resolve("BacktestServiceInterface")
@@ -313,9 +323,12 @@ class TestOptimizationBacktestingIntegration:
     """Test optimization module's integration with backtesting."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_optimization_uses_interface(self):
         """Test that optimization module uses BacktestService through interface."""
-        with patch('src.optimization.backtesting_integration.BacktestServiceInterface') as mock_interface:
+        with patch(
+            "src.optimization.backtesting_integration.BacktestServiceInterface"
+        ) as mock_interface:
             from src.optimization.backtesting_integration import BacktestIntegrationService
 
             mock_service = AsyncMock()
@@ -323,11 +336,12 @@ class TestOptimizationBacktestingIntegration:
             assert service._backtest_service is mock_service
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_evaluation_error_handling(self):
         """Test that strategy evaluation handles errors properly."""
-        with patch('src.optimization.backtesting_integration.BacktestServiceInterface'):
-            from src.optimization.backtesting_integration import BacktestIntegrationService
+        with patch("src.optimization.backtesting_integration.BacktestServiceInterface"):
             from src.core.types import StrategyConfig, StrategyType
+            from src.optimization.backtesting_integration import BacktestIntegrationService
 
             # Mock backtest service that throws error
             mock_service = AsyncMock()
@@ -342,13 +356,13 @@ class TestOptimizationBacktestingIntegration:
                 symbol="BTCUSDT",
                 timeframe="1h",
                 enabled=True,
-                parameters={}
+                parameters={},
             )
 
             # Should return poor performance instead of throwing error
             result = await service.evaluate_strategy(config)
-            assert result['total_return'] < 0
-            assert result['sharpe_ratio'] < 0
+            assert result["total_return"] < 0
+            assert result["sharpe_ratio"] < 0
 
 
 @pytest.mark.integration
@@ -356,12 +370,13 @@ class TestWebInterfaceBacktestingIntegration:
     """Test web interface integration with backtesting."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_playground_uses_dependency_injection(self):
         """Test that playground API uses DI instead of globals."""
         from src.web_interface.api.playground import get_dependencies
 
         # Mock global injector - need to patch the import path where it's imported
-        with patch('src.core.dependency_injection.get_global_injector') as mock_get_injector:
+        with patch("src.core.dependency_injection.get_global_injector") as mock_get_injector:
             mock_injector = MagicMock()
             mock_injector.resolve = MagicMock(side_effect=Exception("No service"))
             mock_get_injector.return_value = mock_injector
@@ -369,17 +384,18 @@ class TestWebInterfaceBacktestingIntegration:
             deps = get_dependencies()
 
             # Should handle missing services gracefully
-            assert deps['backtesting_service'] is None
-            assert deps['strategy_factory'] is None
-            assert deps['bot_orchestrator'] is None
+            assert deps["backtesting_service"] is None
+            assert deps["strategy_factory"] is None
+            assert deps["bot_orchestrator"] is None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_playground_handles_missing_services(self):
         """Test that playground handles missing services gracefully."""
         from src.web_interface.api.playground import get_dependencies
 
         # Mock failed injector resolution
-        with patch('src.core.dependency_injection.get_global_injector', side_effect=Exception()):
+        with patch("src.core.dependency_injection.get_global_injector", side_effect=Exception()):
             deps = get_dependencies()
 
             # Should return None services without throwing error

@@ -155,6 +155,7 @@ class TestCompleteSignalToExecutionWorkflow:
     """Test complete workflow from signal generation to order execution."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_buy_signal_execution_workflow(self, mock_config, mock_exchange, mock_strategy):
         """Test complete buy signal execution workflow."""
         # Setup components
@@ -220,6 +221,7 @@ class TestCompleteSignalToExecutionWorkflow:
         assert True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_sell_signal_execution_workflow(self, mock_config, mock_exchange, mock_strategy):
         """Test complete sell signal execution workflow."""
         # Modify strategy to generate sell signal
@@ -266,6 +268,7 @@ class TestCompleteSignalToExecutionWorkflow:
         assert True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_workflow_with_rejected_signal(self, mock_config, mock_exchange, mock_strategy):
         """Test workflow when signal is rejected by risk management."""
         # Setup risk manager to reject trade
@@ -288,6 +291,7 @@ class TestPositionManagementWorkflow:
     """Test position management throughout trading lifecycle."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_position_opening_and_tracking(self, mock_config, mock_exchange):
         """Test opening and tracking new positions."""
         position_manager = Mock()
@@ -321,6 +325,7 @@ class TestPositionManagementWorkflow:
         assert position_manager.positions["BTC/USDT"].quantity == Decimal("1.0")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_position_size_increase(self, mock_config):
         """Test increasing existing position size."""
         position_manager = Mock()
@@ -370,6 +375,7 @@ class TestPositionManagementWorkflow:
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_position_partial_close(self, mock_config):
         """Test partially closing a position."""
         position_manager = Mock()
@@ -416,6 +422,7 @@ class TestPositionManagementWorkflow:
         assert realized_pnl == Decimal("1600.0")  # (52000 - 50000) * 0.8
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_position_complete_close(self, mock_config):
         """Test completely closing a position."""
         position_manager = Mock()
@@ -458,6 +465,7 @@ class TestRiskManagementWorkflow:
     """Test risk management integration in trading workflows."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_position_size_limits(self, mock_config, mock_strategy):
         """Test position size limit enforcement."""
         risk_manager = Mock()
@@ -495,6 +503,7 @@ class TestRiskManagementWorkflow:
         assert is_valid_oversized is False
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_daily_loss_limits(self, mock_config):
         """Test daily loss limit enforcement."""
         risk_manager = Mock()
@@ -516,6 +525,7 @@ class TestRiskManagementWorkflow:
         assert can_trade_excessive is False
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_circuit_breaker_activation(self, mock_config):
         """Test circuit breaker activation during high losses."""
         risk_manager = Mock()
@@ -542,6 +552,7 @@ class TestRiskManagementWorkflow:
         assert abs(cumulative_loss) == Decimal("5700.0")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_correlation_limits(self, mock_config):
         """Test correlation-based position limits."""
         risk_manager = Mock()
@@ -575,6 +586,7 @@ class TestMultiExchangeWorkflow:
     """Test trading workflows across multiple exchanges."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_best_price_execution_across_exchanges(self, mock_config):
         """Test finding best execution price across multiple exchanges."""
         # Mock multiple exchanges with different prices
@@ -632,6 +644,7 @@ class TestMultiExchangeWorkflow:
         assert best_ask_price == Decimal("49981.0")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_cross_exchange_position_management(self, mock_config):
         """Test managing positions across multiple exchanges."""
         position_manager = Mock()
@@ -671,6 +684,7 @@ class TestMultiExchangeWorkflow:
         assert combined_position.average_price == Decimal("49812.5")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_exchange_failover_workflow(self, mock_config):
         """Test failover to backup exchange when primary fails."""
         primary_exchange = Mock()
@@ -709,6 +723,7 @@ class TestErrorRecoveryWorkflow:
     """Test error handling and recovery in trading workflows."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_network_error_retry_workflow(self, mock_config, mock_exchange):
         """Test retry mechanism for network errors."""
         # Mock exchange that fails first two times, succeeds on third
@@ -743,6 +758,7 @@ class TestErrorRecoveryWorkflow:
         assert call_count == 3  # Succeeded on third attempt
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_partial_fill_handling_workflow(self, mock_config):
         """Test handling of partially filled orders."""
         order_manager = Mock()
@@ -778,6 +794,7 @@ class TestErrorRecoveryWorkflow:
         assert fill_percentage == 35.0  # 35% filled
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_state_recovery_after_crash(self, mock_config):
         """Test state recovery after system crash."""
         state_manager = Mock()
@@ -812,6 +829,7 @@ class TestErrorRecoveryWorkflow:
         assert "order_123" in recovered_state["portfolio"]["open_orders"]
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_risk_limit_breach_recovery(self, mock_config):
         """Test recovery workflow when risk limits are breached."""
         risk_manager = Mock()
@@ -851,6 +869,7 @@ class TestBotInstanceIntegration:
     """Test full bot instance integration with all components."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_bot_instance_complete_lifecycle(self, mock_config, mock_exchange, mock_strategy):
         """Test complete bot instance lifecycle."""
         # This test simulates a full bot instance running through its lifecycle
@@ -907,6 +926,7 @@ class TestBotInstanceIntegration:
         assert bot.profit_loss > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_multi_strategy_coordination(self, mock_config):
         """Test coordination between multiple strategies in a single bot."""
         # Create multiple mock strategies
@@ -957,6 +977,7 @@ class TestBotInstanceIntegration:
         assert len(signals) == 2
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_performance_monitoring_integration(self, mock_config):
         """Test performance monitoring throughout trading workflows."""
         performance_monitor = Mock()

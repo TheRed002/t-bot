@@ -9,26 +9,22 @@ CRITICAL: All signal generation must use real indicator calculations
 with Decimal precision for financial accuracy.
 """
 
-import asyncio
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any
 
 import pytest
-
 import pytest_asyncio
+
 from src.core.types import MarketData, Signal, SignalDirection, StrategyConfig, StrategyType
+from src.strategies.static.breakout import BreakoutStrategy
 from src.strategies.static.mean_reversion import MeanReversionStrategy
 from src.strategies.static.trend_following import TrendFollowingStrategy
-from src.strategies.static.breakout import BreakoutStrategy
 
 from .fixtures.real_service_fixtures import (
     generate_mean_reversion_scenario,
-    generate_trend_following_scenario,
-    generate_breakout_scenario,
-    generate_realistic_market_data_sequence
+    generate_realistic_market_data_sequence,
 )
-from .utils.indicator_validation import IndicatorValidator, IndicatorAccuracyTester
+from .utils.indicator_validation import IndicatorValidator
 
 
 class TestRealMeanReversionSignalGeneration:
@@ -52,18 +48,16 @@ class TestRealMeanReversionSignalGeneration:
                 "min_volume_ratio": Decimal("1.5"),
                 "atr_period": 14,
                 "atr_multiplier": Decimal("2.0"),
-            }
+            },
         )
 
-        strategy = MeanReversionStrategy(
-            config=config.dict(),
-            services=strategy_service_container
-        )
+        strategy = MeanReversionStrategy(config=config.dict(), services=strategy_service_container)
         await strategy.initialize(config)
         yield strategy
         strategy.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_z_score_calculation_accuracy(self, real_mean_reversion_strategy):
         """Test that Z-score calculations are mathematically accurate."""
         strategy = real_mean_reversion_strategy
@@ -89,12 +83,14 @@ class TestRealMeanReversionSignalGeneration:
                 low=price - Decimal("100"),
                 close=price,
                 volume=Decimal("2500.00"),  # Above min_volume_ratio threshold
-                timestamp=datetime.now(timezone.utc) - timedelta(hours=25-i),
-                exchange="binance"
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=25 - i),
+                exchange="binance",
             )
 
             # Store market data for strategy calculations
-            await strategy.services.data_service.store_market_data(market_data, exchange=market_data.exchange)
+            await strategy.services.data_service.store_market_data(
+                market_data, exchange=market_data.exchange
+            )
             prices.append(price)
 
         # Calculate expected Z-score manually
@@ -115,7 +111,7 @@ class TestRealMeanReversionSignalGeneration:
             close=current_price,
             volume=Decimal("3000.00"),
             timestamp=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
 
         signals = await strategy.generate_signals(final_market_data)
@@ -139,7 +135,9 @@ class TestRealMeanReversionSignalGeneration:
 
             # Compare calculated vs expected Z-score (allow small tolerance)
             z_score_difference = abs(calculated_z_score - expected_z_score)
-            assert z_score_difference < Decimal("0.1"), f"Z-score difference too large: {z_score_difference}"
+            assert z_score_difference < Decimal("0.1"), (
+                f"Z-score difference too large: {z_score_difference}"
+            )
 
             # Verify signal direction matches Z-score
             if calculated_z_score < -strategy.entry_threshold:
@@ -148,6 +146,7 @@ class TestRealMeanReversionSignalGeneration:
                 assert signal.direction == SignalDirection.SELL
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_volume_filter_integration(self, real_mean_reversion_strategy):
         """Test that volume filter correctly affects signal generation."""
         strategy = real_mean_reversion_strategy
@@ -162,10 +161,12 @@ class TestRealMeanReversionSignalGeneration:
                 low=base_price - Decimal("100"),
                 close=base_price + Decimal(str((i % 5 - 2) * 100)),
                 volume=Decimal("1000.00"),  # Standard volume
-                timestamp=datetime.now(timezone.utc) - timedelta(hours=21-i),
-                exchange="binance"
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=21 - i),
+                exchange="binance",
             )
-            await strategy.services.data_service.store_market_data(market_data, exchange=market_data.exchange)
+            await strategy.services.data_service.store_market_data(
+                market_data, exchange=market_data.exchange
+            )
 
         # Test with low volume (should not generate signal)
         low_volume_data = MarketData(
@@ -176,7 +177,7 @@ class TestRealMeanReversionSignalGeneration:
             close=Decimal("47500.00"),  # Significant price deviation
             volume=Decimal("800.00"),  # Below min_volume_ratio * average
             timestamp=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
 
         low_volume_signals = await strategy.generate_signals(low_volume_data)
@@ -190,7 +191,7 @@ class TestRealMeanReversionSignalGeneration:
             close=Decimal("47500.00"),  # Same price deviation
             volume=Decimal("2000.00"),  # Above min_volume_ratio * average
             timestamp=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
 
         high_volume_signals = await strategy.generate_signals(high_volume_data)
@@ -202,6 +203,7 @@ class TestRealMeanReversionSignalGeneration:
             assert len(high_volume_signals) >= len(low_volume_signals)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_atr_based_position_sizing(self, real_mean_reversion_strategy):
         """Test that ATR calculations affect position sizing in signals."""
         strategy = real_mean_reversion_strategy
@@ -212,7 +214,7 @@ class TestRealMeanReversionSignalGeneration:
         low_volatility_data = []
 
         for i in range(25):
-            timestamp = datetime.now(timezone.utc) - timedelta(hours=25-i)
+            timestamp = datetime.now(timezone.utc) - timedelta(hours=25 - i)
 
             # High volatility data
             volatility_factor = Decimal("500")  # High volatility
@@ -224,7 +226,7 @@ class TestRealMeanReversionSignalGeneration:
                 close=base_price + Decimal(str(i * 10 + (i % 7 - 3) * 200)),
                 volume=Decimal("2000.00"),
                 timestamp=timestamp,
-                exchange="binance"
+                exchange="binance",
             )
             high_volatility_data.append(high_vol_market_data)
 
@@ -238,20 +240,24 @@ class TestRealMeanReversionSignalGeneration:
                 close=base_price + Decimal(str(i * 10 + (i % 7 - 3) * 200)),
                 volume=Decimal("2000.00"),
                 timestamp=timestamp,
-                exchange="binance"
+                exchange="binance",
             )
             low_volatility_data.append(low_vol_market_data)
 
         # Test high volatility scenario
         for market_data in high_volatility_data:
-            await strategy.services.data_service.store_market_data(market_data, exchange=market_data.exchange)
+            await strategy.services.data_service.store_market_data(
+                market_data, exchange=market_data.exchange
+            )
 
         high_vol_signals = await strategy.generate_signals(high_volatility_data[-1])
 
         # Reset and test low volatility scenario
         await strategy.services.data_service.clear_market_data("BTC/USDT")
         for market_data in low_volatility_data:
-            await strategy.services.data_service.store_market_data(market_data, exchange=market_data.exchange)
+            await strategy.services.data_service.store_market_data(
+                market_data, exchange=market_data.exchange
+            )
 
         low_vol_signals = await strategy.generate_signals(low_volatility_data[-1])
 
@@ -287,18 +293,16 @@ class TestRealTrendFollowingSignalGeneration:
                 "rsi_oversold": 30,
                 "volume_confirmation": True,
                 "min_volume_ratio": Decimal("1.2"),
-            }
+            },
         )
 
-        strategy = TrendFollowingStrategy(
-            config=config.dict(),
-            services=strategy_service_container
-        )
+        strategy = TrendFollowingStrategy(config=config.dict(), services=strategy_service_container)
         await strategy.initialize(config)
         yield strategy
         strategy.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_ma_crossover_signal_generation(self, real_trend_following_strategy):
         """Test MA crossover detection with real calculations."""
         strategy = real_trend_following_strategy
@@ -323,11 +327,13 @@ class TestRealTrendFollowingSignalGeneration:
                 low=price - Decimal("100"),
                 close=price,
                 volume=Decimal("2500.00"),
-                timestamp=datetime.now(timezone.utc) - timedelta(hours=25-i),
-                exchange="binance"
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=25 - i),
+                exchange="binance",
             )
 
-            await strategy.services.data_service.store_market_data(market_data, exchange=market_data.exchange)
+            await strategy.services.data_service.store_market_data(
+                market_data, exchange=market_data.exchange
+            )
             prices.append(price)
 
         # Calculate expected MAs manually
@@ -344,7 +350,7 @@ class TestRealTrendFollowingSignalGeneration:
             close=prices[-1] + Decimal("200"),  # Strong upward movement
             volume=Decimal("3000.00"),
             timestamp=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
 
         signals = await strategy.generate_signals(final_market_data)
@@ -372,6 +378,7 @@ class TestRealTrendFollowingSignalGeneration:
             assert "fast_ma" in signal.metadata or "slow_ma" in signal.metadata
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_rsi_filter_integration(self, real_trend_following_strategy):
         """Test RSI filter integration with trend following signals."""
         strategy = real_trend_following_strategy
@@ -393,10 +400,12 @@ class TestRealTrendFollowingSignalGeneration:
                 low=price - Decimal("50"),
                 close=price,
                 volume=Decimal("2000.00"),
-                timestamp=datetime.now(timezone.utc) - timedelta(hours=21-i),
-                exchange="binance"
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=21 - i),
+                exchange="binance",
             )
-            await strategy.services.data_service.store_market_data(market_data, exchange=market_data.exchange)
+            await strategy.services.data_service.store_market_data(
+                market_data, exchange=market_data.exchange
+            )
 
         # Calculate expected RSI
         validator = IndicatorValidator()
@@ -411,7 +420,7 @@ class TestRealTrendFollowingSignalGeneration:
             close=oversold_prices[-1] + Decimal("150"),  # Slight recovery
             volume=Decimal("2500.00"),
             timestamp=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
 
         oversold_signals = await strategy.generate_signals(oversold_market_data)
@@ -454,18 +463,16 @@ class TestRealBreakoutSignalGeneration:
                 "min_volume_ratio": Decimal("1.5"),
                 "false_breakout_filter": True,
                 "false_breakout_threshold": Decimal("0.02"),
-            }
+            },
         )
 
-        strategy = BreakoutStrategy(
-            config=config.dict(),
-            services=strategy_service_container
-        )
+        strategy = BreakoutStrategy(config=config.dict(), services=strategy_service_container)
         await strategy.initialize(config)
         yield strategy
         strategy.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_support_resistance_detection(self, real_breakout_strategy):
         """Test real support and resistance level detection."""
         strategy = real_breakout_strategy
@@ -499,11 +506,13 @@ class TestRealBreakoutSignalGeneration:
                 low=price - Decimal("75"),
                 close=price,
                 volume=volume,
-                timestamp=datetime.now(timezone.utc) - timedelta(hours=25-i),
-                exchange="binance"
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=25 - i),
+                exchange="binance",
             )
 
-            await strategy.services.data_service.store_market_data(market_data, exchange=market_data.exchange)
+            await strategy.services.data_service.store_market_data(
+                market_data, exchange=market_data.exchange
+            )
 
         # Generate breakout signal
         breakout_market_data = MarketData(
@@ -514,7 +523,7 @@ class TestRealBreakoutSignalGeneration:
             close=resistance_level + Decimal("600"),  # Clear breakout
             volume=Decimal("4000.00"),  # High volume confirmation
             timestamp=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
 
         signals = await strategy.generate_signals(breakout_market_data)
@@ -543,6 +552,7 @@ class TestRealBreakoutSignalGeneration:
                 assert signal.confidence > Decimal("0.65")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_false_breakout_filter(self, real_breakout_strategy):
         """Test false breakout filter with real price action."""
         strategy = real_breakout_strategy
@@ -560,10 +570,12 @@ class TestRealBreakoutSignalGeneration:
                 low=price - Decimal("100"),
                 close=price,
                 volume=Decimal("1500.00"),
-                timestamp=datetime.now(timezone.utc) - timedelta(hours=21-i),
-                exchange="binance"
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=21 - i),
+                exchange="binance",
             )
-            await strategy.services.data_service.store_market_data(market_data, exchange=market_data.exchange)
+            await strategy.services.data_service.store_market_data(
+                market_data, exchange=market_data.exchange
+            )
 
         # Test false breakout (breaks resistance but doesn't sustain)
         false_breakout_data = MarketData(
@@ -574,7 +586,7 @@ class TestRealBreakoutSignalGeneration:
             close=resistance_level - Decimal("20"),  # Closes back below resistance
             volume=Decimal("2000.00"),  # Lower volume
             timestamp=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
 
         false_breakout_signals = await strategy.generate_signals(false_breakout_data)
@@ -588,7 +600,7 @@ class TestRealBreakoutSignalGeneration:
             close=resistance_level + Decimal("300"),  # Closes well above resistance
             volume=Decimal("4000.00"),  # High volume
             timestamp=datetime.now(timezone.utc),
-            exchange="binance"
+            exchange="binance",
         )
 
         real_breakout_signals = await strategy.generate_signals(real_breakout_data)
@@ -610,6 +622,7 @@ class TestRealMultiStrategySignalCoordination:
     """Test coordination between multiple real strategies."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_strategy_signal_aggregation(self, strategy_service_container):
         """Test aggregation of signals from multiple real strategies."""
         # Create multiple strategies
@@ -622,11 +635,10 @@ class TestRealMultiStrategySignalCoordination:
             strategy_type=StrategyType.MEAN_REVERSION,
             symbol="BTC/USDT",
             timeframe="1h",
-            parameters={"lookback_period": 20, "entry_threshold": Decimal("2.0")}
+            parameters={"lookback_period": 20, "entry_threshold": Decimal("2.0")},
         )
         mr_strategy = MeanReversionStrategy(
-            config=mr_config.dict(),
-            services=strategy_service_container
+            config=mr_config.dict(), services=strategy_service_container
         )
         await mr_strategy.initialize(mr_config)
         strategies.append(mr_strategy)
@@ -638,11 +650,10 @@ class TestRealMultiStrategySignalCoordination:
             strategy_type=StrategyType.TREND_FOLLOWING,
             symbol="BTC/USDT",
             timeframe="1h",
-            parameters={"fast_ma_period": 10, "slow_ma_period": 20}
+            parameters={"fast_ma_period": 10, "slow_ma_period": 20},
         )
         tf_strategy = TrendFollowingStrategy(
-            config=tf_config.dict(),
-            services=strategy_service_container
+            config=tf_config.dict(), services=strategy_service_container
         )
         await tf_strategy.initialize(tf_config)
         strategies.append(tf_strategy)
@@ -656,7 +667,9 @@ class TestRealMultiStrategySignalCoordination:
             # Store market data for all strategies
             for strategy in strategies:
                 for market_data in market_data_sequence:
-                    await strategy.services.data_service.store_market_data(market_data, exchange=market_data.exchange)
+                    await strategy.services.data_service.store_market_data(
+                        market_data, exchange=market_data.exchange
+                    )
 
             # Generate signals from all strategies
             all_signals = []
@@ -693,6 +706,7 @@ class TestRealMultiStrategySignalCoordination:
                 strategy.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_signal_persistence_and_retrieval(self, strategy_service_container):
         """Test real signal persistence to database and retrieval."""
         # Create strategy
@@ -702,13 +716,10 @@ class TestRealMultiStrategySignalCoordination:
             strategy_type=StrategyType.MEAN_REVERSION,
             symbol="BTC/USDT",
             timeframe="1h",
-            parameters={"lookback_period": 20, "entry_threshold": Decimal("2.0")}
+            parameters={"lookback_period": 20, "entry_threshold": Decimal("2.0")},
         )
 
-        strategy = MeanReversionStrategy(
-            config=config.dict(),
-            services=strategy_service_container
-        )
+        strategy = MeanReversionStrategy(config=config.dict(), services=strategy_service_container)
         await strategy.initialize(config)
 
         try:
@@ -716,7 +727,9 @@ class TestRealMultiStrategySignalCoordination:
             market_data_sequence = generate_mean_reversion_scenario()
 
             for market_data in market_data_sequence:
-                await strategy.services.data_service.store_market_data(market_data, exchange=market_data.exchange)
+                await strategy.services.data_service.store_market_data(
+                    market_data, exchange=market_data.exchange
+                )
 
             signals = await strategy.generate_signals(market_data_sequence[-1])
 
@@ -728,15 +741,15 @@ class TestRealMultiStrategySignalCoordination:
 
                 # Retrieve signals from database
                 retrieved_signals = await signal_service.get_signals(
-                    strategy_id=config.strategy_id,
-                    symbol="BTC/USDT",
-                    limit=10
+                    strategy_id=config.strategy_id, symbol="BTC/USDT", limit=10
                 )
 
                 # Verify persistence accuracy
                 assert len(retrieved_signals) >= len(signals)
 
-                for original_signal, retrieved_signal in zip(signals, retrieved_signals):
+                for original_signal, retrieved_signal in zip(
+                    signals, retrieved_signals, strict=False
+                ):
                     assert retrieved_signal.strategy_id == original_signal.strategy_id
                     assert retrieved_signal.symbol == original_signal.symbol
                     assert retrieved_signal.direction == original_signal.direction

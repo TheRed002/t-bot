@@ -151,6 +151,7 @@ class TestCrossExchangeArbitrageDetection:
     """Test cross-exchange arbitrage opportunity detection."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_simple_arbitrage_detection(
         self, mock_config, mock_exchanges, sample_arbitrage_prices
     ):
@@ -196,6 +197,7 @@ class TestCrossExchangeArbitrageDetection:
         assert best_opportunity.profit_amount > Decimal("200.0")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_arbitrage_with_fees_calculation(
         self, mock_config, mock_exchanges, sample_arbitrage_prices
     ):
@@ -225,6 +227,7 @@ class TestCrossExchangeArbitrageDetection:
         assert profit_percentage < 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_minimum_profit_threshold_filtering(self, mock_config, mock_exchanges):
         """Test filtering of opportunities below minimum profit threshold."""
         # Mock the strategy instead of instantiating
@@ -276,6 +279,7 @@ class TestCrossExchangeArbitrageDetection:
         assert len(profitable_signals) == 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_multi_symbol_arbitrage_scanning(
         self, mock_config, mock_exchanges, sample_arbitrage_prices
     ):
@@ -323,6 +327,7 @@ class TestArbitrageExecutionWorkflow:
     """Test arbitrage execution workflow."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_simultaneous_order_execution(self, mock_config, mock_exchanges):
         """Test simultaneous order placement on multiple exchanges."""
         # Mock successful order placement on both exchanges
@@ -369,6 +374,7 @@ class TestArbitrageExecutionWorkflow:
         assert sell_result == sell_order_id
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_execution_timing_and_latency(self, mock_config, mock_exchanges):
         """Test execution timing and latency handling."""
         start_time = datetime.now()
@@ -408,6 +414,7 @@ class TestArbitrageExecutionWorkflow:
         assert len(results) == 2
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_partial_execution_handling(self, mock_config, mock_exchanges):
         """Test handling of partial order executions."""
         # Scenario: Buy order fills completely, sell order fills partially
@@ -460,6 +467,7 @@ class TestArbitrageExecutionWorkflow:
             assert cancelled is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_execution_failure_recovery(self, mock_config, mock_exchanges):
         """Test recovery from execution failures."""
         # Scenario: Buy order succeeds, sell order fails
@@ -533,6 +541,7 @@ class TestTriangularArbitrageWorkflow:
         }
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_triangular_arbitrage_detection(self, mock_config, triangular_prices):
         """Test detection of triangular arbitrage opportunities."""
         # Test triangular arbitrage calculation logic directly
@@ -552,6 +561,7 @@ class TestTriangularArbitrageWorkflow:
         assert profit_percentage > Decimal("0.5")  # > 0.5% profit opportunity
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_triangular_arbitrage_execution_sequence(
         self, mock_config, mock_exchanges, triangular_prices
     ):
@@ -603,6 +613,7 @@ class TestTriangularArbitrageWorkflow:
         assert profit > Decimal("80.0")  # Should be profitable
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_triangular_arbitrage_with_fees(self, mock_config, triangular_prices):
         """Test triangular arbitrage profitability including fees."""
         starting_amount = Decimal("10000.0")
@@ -630,6 +641,7 @@ class TestArbitrageRiskManagement:
     """Test risk management in arbitrage workflows."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_exposure_limits(self, mock_config):
         """Test arbitrage exposure limits."""
         risk_manager = Mock()
@@ -667,6 +679,7 @@ class TestArbitrageRiskManagement:
         assert can_execute_large is False
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_market_impact_assessment(self, mock_config, sample_arbitrage_prices):
         """Test market impact assessment before execution."""
         # Large order size relative to market depth
@@ -701,6 +714,7 @@ class TestArbitrageRiskManagement:
         assert final_quantity == expected_reduced  # Should be reduced to 7.5
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_exchange_reliability_scoring(self, mock_config, mock_exchanges):
         """Test exchange reliability scoring for arbitrage routing."""
         # Mock reliability metrics
@@ -736,6 +750,7 @@ class TestArbitrageRiskManagement:
         # OKX might or might not qualify depending on exact calculation
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_circuit_breaker_activation(self, mock_config):
         """Test circuit breaker activation during adverse conditions."""
         circuit_breaker = Mock()
@@ -773,6 +788,7 @@ class TestArbitrageProfitRealization:
     """Test profit realization and accounting in arbitrage."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_profit_calculation_accuracy(self, mock_config):
         """Test accurate profit calculation including all costs."""
         # Executed arbitrage trade
@@ -812,6 +828,7 @@ class TestArbitrageProfitRealization:
         assert profit_margin < Decimal("0.0")  # Negative margin
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_multi_currency_arbitrage_accounting(self, mock_config):
         """Test accounting for arbitrage across different base currencies."""
         # Arbitrage involving BTC/EUR and BTC/USD
@@ -845,6 +862,7 @@ class TestArbitrageProfitRealization:
         assert abs(profit_percentage - Decimal("0.89")) < Decimal("0.01")  # ~0.89%
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_arbitrage_performance_tracking(self, mock_config):
         """Test comprehensive arbitrage performance tracking."""
         performance_tracker = Mock()
@@ -898,6 +916,7 @@ class TestArbitrageIntegrationScenarios:
     """Test complete arbitrage integration scenarios."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_end_to_end_arbitrage_workflow(
         self, mock_config, mock_exchanges, sample_arbitrage_prices
     ):
@@ -989,6 +1008,7 @@ class TestArbitrageIntegrationScenarios:
         assert performance_update["profit_realized"] > Decimal("0.0")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_high_frequency_arbitrage_scenario(self, mock_config, mock_exchanges):
         """Test high-frequency arbitrage scenario with multiple rapid opportunities."""
         # Simulate rapid-fire opportunities
@@ -1035,6 +1055,7 @@ class TestArbitrageIntegrationScenarios:
         assert total_profit > Decimal("200.0")  # Accumulated profit
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_market_stress_arbitrage_behavior(self, mock_config, mock_exchanges):
         """Test arbitrage behavior during market stress conditions."""
         # Simulate market stress conditions

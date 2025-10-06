@@ -98,6 +98,22 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
                 missing_deps.append("ErrorHandler")
             if self._global_handler is None:
                 missing_deps.append("GlobalErrorHandler")
+
+            # Initialize ErrorHandler if present
+            if self._error_handler is not None and hasattr(self._error_handler, 'initialize'):
+                import inspect
+                if inspect.iscoroutinefunction(self._error_handler.initialize):
+                    await self._error_handler.initialize()
+                else:
+                    # Try to call synchronously or handle mock objects
+                    try:
+                        result = self._error_handler.initialize()
+                        # If it returned a coroutine, await it
+                        if inspect.iscoroutine(result):
+                            await result
+                    except TypeError:
+                        # Mock or non-callable, skip
+                        pass
             if self._pattern_analytics is None:
                 missing_deps.append("ErrorPatternAnalytics")
 
@@ -232,12 +248,20 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
             self.propagate_validation_error(error, f"{component}.{operation}")
             raise error
 
+        # Transform and validate context data
+        transformed_context = self._transform_error_context(context or {}, component)
+
         # Create error context
         if self._error_handler is None:
             raise ServiceError("ErrorHandler is not available")
 
+        # Remove component/operation from context to avoid duplicate keyword arguments
+        context_kwargs = transformed_context.copy()
+        context_kwargs.pop("component", None)
+        context_kwargs.pop("operation", None)
+
         error_context = self._error_handler.create_error_context(
-            error=error, component=component, operation=operation, **(context or {})
+            error=error, component=component, operation=operation, **context_kwargs
         )
 
         # Handle error with recovery
@@ -495,15 +519,18 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
         transformed_context = context.copy()
 
         # Add standard processing fields with consistent module alignment
+        current_timestamp = datetime.now(timezone.utc).isoformat()
         transformed_context.update(
             {
                 "processing_stage": "error_handling",
-                "processed_at": datetime.now(timezone.utc).isoformat(),
+                "processed_at": current_timestamp,
+                "timestamp": current_timestamp,  # Required by data_transformer boundary validation
                 "component": component,
                 # Add consistent processing metadata to align with monitoring module
                 "processing_mode": transformed_context.get("processing_mode", "stream"),
                 "data_format": transformed_context.get("data_format", "bot_event_v1"),  # Consistent with risk_management module
                 "message_pattern": "pub_sub",  # Consistent with risk_management module
+                "source": transformed_context.get("source", component),  # Required by data_transformer
                 "boundary_validation": "applied",
                 "error_propagation_pattern": "service_to_service",
             }

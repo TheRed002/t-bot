@@ -39,6 +39,7 @@ class TestCompleteSignalToExecution(BaseIntegrationTest):
 
     @pytest.mark.asyncio
     @performance_test(max_duration=30.0)
+    @pytest.mark.timeout(300)
     async def test_buy_signal_complete_workflow(self, performance_monitor):
         """Test complete buy signal workflow with realistic timing and error handling."""
 
@@ -161,6 +162,7 @@ class TestCompleteSignalToExecution(BaseIntegrationTest):
 
     @pytest.mark.asyncio
     @performance_test(max_duration=30.0)
+    @pytest.mark.timeout(300)
     async def test_sell_signal_with_existing_position(self, performance_monitor):
         """Test sell signal workflow with existing position."""
 
@@ -227,6 +229,7 @@ class TestCompleteSignalToExecution(BaseIntegrationTest):
         logger.info("Sell signal with existing position completed successfully")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_signal_rejection_by_risk_management(self):
         """Test workflow when signal is rejected by risk management."""
 
@@ -255,6 +258,7 @@ class TestCompleteSignalToExecution(BaseIntegrationTest):
         logger.info(f"Signal correctly rejected: {reason}")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_multi_strategy_signal_aggregation(self):
         """Test aggregation of signals from multiple strategies."""
 
@@ -318,6 +322,7 @@ class TestOrderExecutionScenarios(BaseIntegrationTest):
     """Test various order execution scenarios."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_limit_order_execution_workflow(self):
         """Test limit order execution with partial fills."""
 
@@ -377,6 +382,7 @@ class TestOrderExecutionScenarios(BaseIntegrationTest):
         assert balance["BTC"] == Decimal("0.3")  # Only partial fill amount
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_slippage_and_price_impact(self):
         """Test order execution with slippage and price impact."""
 
@@ -452,6 +458,7 @@ class TestOrderExecutionScenarios(BaseIntegrationTest):
         assert large_slippage < Decimal("0.01")  # But still reasonable (< 1%)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_order_timeout_and_retry(self):
         """Test order timeout handling and retry mechanism."""
 
@@ -501,6 +508,7 @@ class TestOrderExecutionScenarios(BaseIntegrationTest):
         logger.info(f"Order succeeded after {retry_count} retries")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_order_rejection_handling(self):
         """Test handling of rejected orders."""
 
@@ -550,6 +558,7 @@ class TestPositionManagementIntegration(BaseIntegrationTest):
     """Test position management integration scenarios."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_position_lifecycle_management(self):
         """Test complete position lifecycle from opening to closing."""
 
@@ -668,6 +677,7 @@ class TestPositionManagementIntegration(BaseIntegrationTest):
         assert final_balance["USDT"] != Decimal("100000.0")  # Should be different from start
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_multi_symbol_position_management(self):
         """Test managing positions across multiple symbols."""
 
@@ -752,6 +762,7 @@ class TestPositionManagementIntegration(BaseIntegrationTest):
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_position_pnl_tracking(self):
         """Test real-time P&L tracking for positions."""
 
@@ -826,6 +837,7 @@ class TestErrorRecoveryIntegration(BaseIntegrationTest):
     """Test error recovery and resilience in trading workflows."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_network_disconnection_recovery(self):
         """Test recovery from network disconnection during trading."""
 
@@ -877,6 +889,7 @@ class TestErrorRecoveryIntegration(BaseIntegrationTest):
         logger.info(f"Network recovery successful after {attempt} retries")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_partial_system_failure_recovery(self):
         """Test recovery when some system components fail."""
 
@@ -919,6 +932,7 @@ class TestErrorRecoveryIntegration(BaseIntegrationTest):
         logger.info("Exchange failover completed successfully")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_state_corruption_recovery(self):
         """Test recovery from corrupted state data."""
 
@@ -987,6 +1001,7 @@ class TestErrorRecoveryIntegration(BaseIntegrationTest):
         logger.info("State corruption recovery completed successfully")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_cascade_failure_isolation(self):
         """Test isolation of cascade failures across system components."""
 

@@ -10,21 +10,18 @@ compliance violation and must be fixed immediately.
 """
 
 import asyncio
-import inspect
-import sys
-from decimal import Decimal, getcontext, InvalidOperation
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional, Tuple, Union
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation, getcontext
+from typing import Any
 
 import pytest
 
-from src.core.types import MarketData, Signal, SignalDirection, StrategyConfig, StrategyType
+from src.core.types import MarketData, Signal, StrategyConfig, StrategyType
+from src.strategies.static.breakout import BreakoutStrategy
 from src.strategies.static.mean_reversion import MeanReversionStrategy
 from src.strategies.static.trend_following import TrendFollowingStrategy
-from src.strategies.static.breakout import BreakoutStrategy
 
 from .fixtures.real_service_fixtures import generate_realistic_market_data_sequence
-from .utils.indicator_validation import IndicatorValidator
 
 # Set maximum precision for testing
 getcontext().prec = 28
@@ -56,7 +53,7 @@ class DecimalPrecisionValidator:
         return True
 
     @staticmethod
-    def validate_market_data_precision(market_data: MarketData) -> Dict[str, bool]:
+    def validate_market_data_precision(market_data: MarketData) -> dict[str, bool]:
         """
         Validate all price fields in MarketData use Decimal precision.
 
@@ -72,10 +69,7 @@ class DecimalPrecisionValidator:
         results = {}
 
         # Price fields that MUST be Decimal
-        price_fields = [
-            'open', 'high', 'low', 'close', 'volume',
-            'bid_price', 'ask_price'
-        ]
+        price_fields = ["open", "high", "low", "close", "volume", "bid_price", "ask_price"]
 
         for field in price_fields:
             value = getattr(market_data, field, None)
@@ -90,7 +84,7 @@ class DecimalPrecisionValidator:
         return results
 
     @staticmethod
-    def validate_signal_precision(signal: Signal) -> Dict[str, bool]:
+    def validate_signal_precision(signal: Signal) -> dict[str, bool]:
         """
         Validate all financial fields in Signal use Decimal precision.
 
@@ -106,7 +100,7 @@ class DecimalPrecisionValidator:
         results = {}
 
         # Financial fields that MUST be Decimal
-        financial_fields = ['confidence', 'strength']
+        financial_fields = ["confidence", "strength"]
 
         for field in financial_fields:
             value = getattr(signal, field, None)
@@ -121,9 +115,19 @@ class DecimalPrecisionValidator:
         # Validate metadata financial values
         if signal.metadata:
             financial_metadata_keys = [
-                'price', 'volume', 'rsi', 'macd', 'sma', 'ema',
-                'atr', 'z_score', 'entry_price', 'exit_price',
-                'pnl', 'stop_loss', 'take_profit'
+                "price",
+                "volume",
+                "rsi",
+                "macd",
+                "sma",
+                "ema",
+                "atr",
+                "z_score",
+                "entry_price",
+                "exit_price",
+                "pnl",
+                "stop_loss",
+                "take_profit",
             ]
 
             for key in financial_metadata_keys:
@@ -133,7 +137,7 @@ class DecimalPrecisionValidator:
                         try:
                             DecimalPrecisionValidator.validate_decimal_type(
                                 Decimal(str(value)) if not isinstance(value, Decimal) else value,
-                                f"Signal.metadata.{key}"
+                                f"Signal.metadata.{key}",
                             )
                             results[f"metadata.{key}"] = True
                         except (AssertionError, InvalidOperation):
@@ -147,7 +151,7 @@ class DecimalPrecisionValidator:
         return results
 
     @staticmethod
-    def validate_strategy_config_precision(config: StrategyConfig) -> Dict[str, bool]:
+    def validate_strategy_config_precision(config: StrategyConfig) -> dict[str, bool]:
         """
         Validate all financial fields in StrategyConfig use Decimal precision.
 
@@ -164,14 +168,19 @@ class DecimalPrecisionValidator:
 
         # Financial fields that MUST be Decimal
         financial_fields = [
-            'min_confidence', 'position_size_pct', 'stop_loss_pct', 'take_profit_pct'
+            "min_confidence",
+            "position_size_pct",
+            "stop_loss_pct",
+            "take_profit_pct",
         ]
 
         for field in financial_fields:
             value = getattr(config, field, None)
             if value is not None:
                 try:
-                    DecimalPrecisionValidator.validate_decimal_type(value, f"StrategyConfig.{field}")
+                    DecimalPrecisionValidator.validate_decimal_type(
+                        value, f"StrategyConfig.{field}"
+                    )
                     results[field] = True
                 except AssertionError:
                     results[field] = False
@@ -180,10 +189,16 @@ class DecimalPrecisionValidator:
         # Validate parameters
         if config.parameters:
             financial_param_keys = [
-                'entry_threshold', 'exit_threshold', 'atr_multiplier',
-                'min_volume_ratio', 'trailing_stop_pct', 'target_multiplier',
-                'momentum_threshold', 'signal_strength', 'reversion_strength',
-                'false_breakout_threshold'
+                "entry_threshold",
+                "exit_threshold",
+                "atr_multiplier",
+                "min_volume_ratio",
+                "trailing_stop_pct",
+                "target_multiplier",
+                "momentum_threshold",
+                "signal_strength",
+                "reversion_strength",
+                "false_breakout_threshold",
             ]
 
             for key in financial_param_keys:
@@ -204,7 +219,7 @@ class DecimalPrecisionValidator:
         return results
 
     @staticmethod
-    def scan_for_float_usage(obj: Any, path: str = "") -> List[str]:
+    def scan_for_float_usage(obj: Any, path: str = "") -> list[str]:
         """
         Recursively scan object for float usage in financial contexts.
 
@@ -225,8 +240,15 @@ class DecimalPrecisionValidator:
             for key, value in obj.items():
                 # Check if this is a financial field
                 financial_keys = [
-                    'price', 'volume', 'confidence', 'strength', 'pnl',
-                    'threshold', 'ratio', 'multiplier', 'percentage'
+                    "price",
+                    "volume",
+                    "confidence",
+                    "strength",
+                    "pnl",
+                    "threshold",
+                    "ratio",
+                    "multiplier",
+                    "percentage",
                 ]
                 if any(fin_key in key.lower() for fin_key in financial_keys):
                     if isinstance(value, float):
@@ -243,9 +265,9 @@ class DecimalPrecisionValidator:
                     DecimalPrecisionValidator.scan_for_float_usage(item, f"{path}[{i}]")
                 )
 
-        elif hasattr(obj, '__dict__'):
+        elif hasattr(obj, "__dict__"):
             for attr_name in dir(obj):
-                if not attr_name.startswith('_'):
+                if not attr_name.startswith("_"):
                     try:
                         attr_value = getattr(obj, attr_name)
                         if not callable(attr_value):
@@ -262,10 +284,8 @@ class DecimalPrecisionValidator:
 
     @staticmethod
     def validate_calculation_precision(
-        input_values: List[Decimal],
-        calculation_func: callable,
-        expected_precision: int = 8
-    ) -> Tuple[bool, Decimal, str]:
+        input_values: list[Decimal], calculation_func: callable, expected_precision: int = 8
+    ) -> tuple[bool, Decimal, str]:
         """
         Validate that a calculation maintains required precision.
 
@@ -281,7 +301,7 @@ class DecimalPrecisionValidator:
             # Verify all inputs are Decimal
             for i, value in enumerate(input_values):
                 if not isinstance(value, Decimal):
-                    return False, Decimal('0'), f"Input {i} is not Decimal: {type(value)}"
+                    return False, Decimal("0"), f"Input {i} is not Decimal: {type(value)}"
 
             # Perform calculation
             result = calculation_func(*input_values)
@@ -292,15 +312,19 @@ class DecimalPrecisionValidator:
 
             # Verify precision
             result_str = str(result)
-            if '.' in result_str:
-                decimal_places = len(result_str.split('.')[1])
+            if "." in result_str:
+                decimal_places = len(result_str.split(".")[1])
                 if decimal_places < expected_precision:
-                    return False, result, f"Insufficient precision: {decimal_places} < {expected_precision}"
+                    return (
+                        False,
+                        result,
+                        f"Insufficient precision: {decimal_places} < {expected_precision}",
+                    )
 
             return True, result, ""
 
         except Exception as e:
-            return False, Decimal('0'), f"Calculation error: {str(e)}"
+            return False, Decimal("0"), f"Calculation error: {e!s}"
 
 
 class TestDecimalPrecisionCompliance:
@@ -346,7 +370,7 @@ class TestDecimalPrecisionCompliance:
                 "exit_threshold": Decimal("0.56789012"),
                 "atr_multiplier": Decimal("2.34567890"),
                 "min_volume_ratio": Decimal("1.56789012"),
-            }
+            },
         )
 
     def test_market_data_decimal_precision(self, precision_validator, sample_market_data_decimal):
@@ -370,10 +394,14 @@ class TestDecimalPrecisionCompliance:
         expected_total = Decimal("50156.78901234") * Decimal("1234.56789012")
         assert total_value == expected_total
 
-    def test_strategy_config_decimal_precision(self, precision_validator, sample_strategy_config_decimal):
+    def test_strategy_config_decimal_precision(
+        self, precision_validator, sample_strategy_config_decimal
+    ):
         """Test that StrategyConfig maintains Decimal precision for all financial fields."""
         # Validate all financial fields are Decimal
-        results = precision_validator.validate_strategy_config_precision(sample_strategy_config_decimal)
+        results = precision_validator.validate_strategy_config_precision(
+            sample_strategy_config_decimal
+        )
 
         # All validations should pass
         for field, is_valid in results.items():
@@ -385,12 +413,13 @@ class TestDecimalPrecisionCompliance:
 
         # Test that config values maintain precision in calculations
         risk_amount = (
-            sample_strategy_config_decimal.position_size_pct *
-            sample_strategy_config_decimal.stop_loss_pct
+            sample_strategy_config_decimal.position_size_pct
+            * sample_strategy_config_decimal.stop_loss_pct
         )
         assert isinstance(risk_amount, Decimal)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_signal_decimal_precision(self, precision_validator, strategy_service_container):
         """Test that Signal objects maintain Decimal precision."""
         # Create strategy and generate real signals
@@ -404,13 +433,10 @@ class TestDecimalPrecisionCompliance:
             parameters={
                 "lookback_period": 20,
                 "entry_threshold": Decimal("2.0"),
-            }
+            },
         )
 
-        strategy = MeanReversionStrategy(
-            config=config.dict(),
-            services=strategy_service_container
-        )
+        strategy = MeanReversionStrategy(config=config.dict(), services=strategy_service_container)
         await strategy.initialize(config)
 
         try:
@@ -429,12 +455,14 @@ class TestDecimalPrecisionCompliance:
                     low=price - Decimal("15.33333333"),
                     close=price,
                     volume=Decimal(f"1000.{i:08d}"),
-                    timestamp=datetime.now(timezone.utc) - timedelta(hours=25-i),
-                    exchange="binance"
+                    timestamp=datetime.now(timezone.utc) - timedelta(hours=25 - i),
+                    exchange="binance",
                 )
 
                 market_data_series.append(market_data)
-                await strategy.services.data_service.store_market_data(market_data, exchange="binance")
+                await strategy.services.data_service.store_market_data(
+                    market_data, exchange="binance"
+                )
 
             # Generate signals
             signals = await strategy.generate_signals(market_data_series[-1])
@@ -454,16 +482,20 @@ class TestDecimalPrecisionCompliance:
                 # Verify metadata contains Decimal values for financial fields
                 if signal.metadata:
                     for key, value in signal.metadata.items():
-                        if any(fin_key in key.lower() for fin_key in
-                               ['price', 'volume', 'score', 'ratio', 'threshold']):
+                        if any(
+                            fin_key in key.lower()
+                            for fin_key in ["price", "volume", "score", "ratio", "threshold"]
+                        ):
                             if isinstance(value, (int, float, Decimal)):
-                                assert isinstance(value, Decimal) or isinstance(value, int), \
+                                assert isinstance(value, Decimal) or isinstance(value, int), (
                                     f"Signal metadata '{key}' should be Decimal, got {type(value)}: {value}"
+                                )
 
         finally:
             strategy.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_indicator_calculation_precision(self, strategy_service_container):
         """Test that technical indicator calculations maintain Decimal precision."""
         config = StrategyConfig(
@@ -476,13 +508,10 @@ class TestDecimalPrecisionCompliance:
                 "fast_ma_period": 10,
                 "slow_ma_period": 20,
                 "rsi_period": 14,
-            }
+            },
         )
 
-        strategy = TrendFollowingStrategy(
-            config=config.dict(),
-            services=strategy_service_container
-        )
+        strategy = TrendFollowingStrategy(config=config.dict(), services=strategy_service_container)
         await strategy.initialize(config)
 
         try:
@@ -501,12 +530,14 @@ class TestDecimalPrecisionCompliance:
                     low=price - Decimal("0.098765432"),
                     close=price + Decimal("0.011111111"),
                     volume=Decimal(f"1000.{i:09d}"),
-                    timestamp=datetime.now(timezone.utc) - timedelta(hours=30-i),
-                    exchange="binance"
+                    timestamp=datetime.now(timezone.utc) - timedelta(hours=30 - i),
+                    exchange="binance",
                 )
 
                 market_data_series.append(market_data)
-                await strategy.services.data_service.store_market_data(market_data, exchange="binance")
+                await strategy.services.data_service.store_market_data(
+                    market_data, exchange="binance"
+                )
 
             # Test various indicator calculations
             indicators = await asyncio.gather(
@@ -520,15 +551,23 @@ class TestDecimalPrecisionCompliance:
             sma, ema, rsi, atr, bb = indicators
 
             # Verify all indicators return Decimal values
-            assert sma is None or isinstance(sma, Decimal), f"SMA should be Decimal, got {type(sma)}"
-            assert ema is None or isinstance(ema, Decimal), f"EMA should be Decimal, got {type(ema)}"
-            assert rsi is None or isinstance(rsi, Decimal), f"RSI should be Decimal, got {type(rsi)}"
-            assert atr is None or isinstance(atr, Decimal), f"ATR should be Decimal, got {type(atr)}"
+            assert sma is None or isinstance(sma, Decimal), (
+                f"SMA should be Decimal, got {type(sma)}"
+            )
+            assert ema is None or isinstance(ema, Decimal), (
+                f"EMA should be Decimal, got {type(ema)}"
+            )
+            assert rsi is None or isinstance(rsi, Decimal), (
+                f"RSI should be Decimal, got {type(rsi)}"
+            )
+            assert atr is None or isinstance(atr, Decimal), (
+                f"ATR should be Decimal, got {type(atr)}"
+            )
 
             if bb:
-                assert isinstance(bb["upper"], Decimal), f"BB upper should be Decimal"
-                assert isinstance(bb["middle"], Decimal), f"BB middle should be Decimal"
-                assert isinstance(bb["lower"], Decimal), f"BB lower should be Decimal"
+                assert isinstance(bb["upper"], Decimal), "BB upper should be Decimal"
+                assert isinstance(bb["middle"], Decimal), "BB middle should be Decimal"
+                assert isinstance(bb["lower"], Decimal), "BB lower should be Decimal"
 
             # Test precision in indicator calculations
             if sma and ema:
@@ -583,8 +622,8 @@ class TestDecimalPrecisionCompliance:
             "volume": 1000.456,  # Float violation
             "metadata": {
                 "price_change": 123.45,  # Float violation
-                "non_financial": "test_string"  # OK
-            }
+                "non_financial": "test_string",  # OK
+            },
         }
 
         # Scan for float violations
@@ -599,6 +638,7 @@ class TestDecimalPrecisionCompliance:
         assert any("volume: 1000.456" in v for v in violation_strings)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_end_to_end_decimal_precision_workflow(self, strategy_service_container):
         """Test complete workflow maintains Decimal precision end-to-end."""
         # Create strategy configuration with Decimal precision
@@ -617,13 +657,10 @@ class TestDecimalPrecisionCompliance:
                 "volume_confirmation": True,
                 "min_volume_ratio": Decimal("1.567890123"),
                 "false_breakout_threshold": Decimal("0.023456789"),
-            }
+            },
         )
 
-        strategy = BreakoutStrategy(
-            config=config.dict(),
-            services=strategy_service_container
-        )
+        strategy = BreakoutStrategy(config=config.dict(), services=strategy_service_container)
         await strategy.initialize(config)
 
         try:
@@ -655,7 +692,7 @@ class TestDecimalPrecisionCompliance:
                 assert isinstance(position_size, Decimal)
 
                 # Verify risk calculations maintain precision
-                if hasattr(strategy, 'calculate_stop_loss'):
+                if hasattr(strategy, "calculate_stop_loss"):
                     stop_loss = strategy.calculate_stop_loss(signal, market_data_series[-1])
                     if stop_loss:
                         assert isinstance(stop_loss, Decimal)
@@ -665,10 +702,13 @@ class TestDecimalPrecisionCompliance:
                     for key, value in signal.metadata.items():
                         if isinstance(value, (int, float)):
                             # Financial metadata should be Decimal
-                            if any(fin_key in key.lower() for fin_key in
-                                   ['price', 'volume', 'ratio', 'threshold', 'score']):
-                                assert isinstance(value, (Decimal, int)), \
+                            if any(
+                                fin_key in key.lower()
+                                for fin_key in ["price", "volume", "ratio", "threshold", "score"]
+                            ):
+                                assert isinstance(value, (Decimal, int)), (
                                     f"Metadata {key} should be Decimal, got {type(value)}: {value}"
+                                )
 
             # Test that precision is maintained in aggregated calculations
             if len(signals) > 1:
@@ -691,11 +731,11 @@ class TestDecimalPrecisionCompliance:
 
         # Test currency precision (18 decimal places for crypto)
         crypto_amount = Decimal("123.45678901")
-        assert len(str(crypto_amount).split('.')[1]) >= 8
+        assert len(str(crypto_amount).split(".")[1]) >= 8
 
         # Test percentage precision (6 decimal places minimum)
         percentage = Decimal("0.123456")
-        assert len(str(percentage).split('.')[1]) >= 6
+        assert len(str(percentage).split(".")[1]) >= 6
 
         # Test that calculations don't lose precision
         amount1 = Decimal("1000.12345678")
@@ -711,21 +751,22 @@ class TestDecimalPrecisionCompliance:
         # Division should maintain reasonable precision
         result_div = amount1 / Decimal("3")
         # Should have at least 18 decimal places
-        decimal_part = str(result_div).split('.')[1]
+        decimal_part = str(result_div).split(".")[1]
         assert len(decimal_part) >= 8
 
         # Test rounding behavior for regulatory compliance
         # Should round to nearest even (banker's rounding)
         test_value = Decimal("123.456785")
-        rounded_6 = test_value.quantize(Decimal('0.000001'))
+        rounded_6 = test_value.quantize(Decimal("0.000001"))
         assert rounded_6 == Decimal("123.456785")
 
         test_value2 = Decimal("123.4567865")
-        rounded_6_2 = test_value2.quantize(Decimal('0.000001'))
+        rounded_6_2 = test_value2.quantize(Decimal("0.000001"))
         # Should round to nearest even (banker's rounding: 123.4567865 rounds to 123.456787)
         assert rounded_6_2 == Decimal("123.456787")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_performance_impact_of_decimal_precision(self, strategy_service_container):
         """Test that Decimal precision doesn't significantly impact performance."""
         import time
@@ -736,13 +777,10 @@ class TestDecimalPrecisionCompliance:
             strategy_type=StrategyType.MEAN_REVERSION,
             symbol="BTC/USDT",
             timeframe="1h",
-            parameters={"lookback_period": 20, "entry_threshold": Decimal("2.0")}
+            parameters={"lookback_period": 20, "entry_threshold": Decimal("2.0")},
         )
 
-        strategy = MeanReversionStrategy(
-            config=config.dict(),
-            services=strategy_service_container
-        )
+        strategy = MeanReversionStrategy(config=config.dict(), services=strategy_service_container)
         await strategy.initialize(config)
 
         try:
@@ -759,8 +797,8 @@ class TestDecimalPrecisionCompliance:
                     low=price - Decimal("8.22222222"),
                     close=price + Decimal("2.33333333"),
                     volume=Decimal(f"1000.{i:08d}"),
-                    timestamp=datetime.now(timezone.utc) - timedelta(hours=100-i),
-                    exchange="binance"
+                    timestamp=datetime.now(timezone.utc) - timedelta(hours=100 - i),
+                    exchange="binance",
                 )
                 market_data_series.append(market_data)
 

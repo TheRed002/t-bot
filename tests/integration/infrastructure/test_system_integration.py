@@ -246,8 +246,8 @@ class ServiceValidator:
 
         try:
             # Test bot management services - use corrected import paths
-            from src.bot_management.orchestrator import BotOrchestrator
             from src.bot_management.monitor import BotMonitor
+            from src.bot_management.orchestrator import BotOrchestrator
             from src.bot_management.resource_manager import ResourceManager
 
             orchestrator = BotOrchestrator()
@@ -286,7 +286,6 @@ class ServiceValidator:
         return results
 
 
-@pytest.mark.asyncio
 class TestSystemIntegration:
     """Comprehensive system integration tests."""
 
@@ -340,6 +339,7 @@ class TestSystemIntegration:
         assert len(critical_errors) == 0, f"Critical configuration errors: {critical_errors}"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_startup_validation(self):
         """Test that all services can be started and initialized properly."""
         validator = ServiceValidator()
@@ -392,6 +392,7 @@ class TestSystemIntegration:
         assert len(failed_imports) == 0, f"Critical modules failed to import: {failed_imports}"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_end_to_end_workflow(self):
         """Test a basic end-to-end workflow to ensure system integration."""
         try:
@@ -431,16 +432,21 @@ class TestSystemIntegration:
                     assert bot_registered, "Bot registration failed"
 
                 # 3. Test risk validation
-                mock_order = {
-                    "symbol": "BTCUSDT",
-                    "side": "BUY",
-                    "quantity": 0.01,
-                    "price": 50000.0,
-                }
+                from decimal import Decimal
+
+                from src.core.types import OrderRequest, OrderSide, OrderType
+
+                mock_order = OrderRequest(
+                    symbol="BTCUSDT",
+                    side=OrderSide.BUY,
+                    order_type=OrderType.MARKET,
+                    quantity=Decimal("0.01"),
+                    price=Decimal("50000.0"),
+                )
 
                 # Test with mocked validation (just ensure the method exists)
                 try:
-                    risk_manager.validate_order(mock_order)
+                    await risk_manager.validate_order(mock_order)
                     risk_valid = True
                 except Exception:
                     risk_valid = False
@@ -461,8 +467,8 @@ class TestSystemIntegration:
             assert factory is not None, "Error handler factory creation failed"
 
             # Test factory methods exist
-            assert hasattr(factory, 'create'), "Factory missing create method"
-            assert hasattr(factory, 'list_handlers'), "Factory missing list_handlers method"
+            assert hasattr(factory, "create"), "Factory missing create method"
+            assert hasattr(factory, "list_handlers"), "Factory missing list_handlers method"
 
             # Test that factory is functional (even if no handlers registered)
             available_handlers = factory.list_handlers()

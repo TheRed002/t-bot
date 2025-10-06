@@ -11,7 +11,6 @@ Requirements:
 - BINANCE_TESTNET=true
 """
 
-import asyncio
 import os
 from decimal import Decimal
 
@@ -19,8 +18,7 @@ import pytest
 import pytest_asyncio
 from dotenv import load_dotenv
 
-from src.core.exceptions import ExchangeConnectionError, ExchangeError
-from src.exchanges.binance import BinanceExchange, BINANCE_AVAILABLE
+from src.exchanges.binance import BINANCE_AVAILABLE, BinanceExchange
 
 # Load real credentials
 load_dotenv()
@@ -38,12 +36,7 @@ def real_binance_config():
     if not api_key or not api_secret:
         pytest.skip("Binance testnet credentials not configured in .env")
 
-    return {
-        "api_key": api_key,
-        "api_secret": api_secret,
-        "testnet": True,
-        "sandbox": True
-    }
+    return {"api_key": api_key, "api_secret": api_secret, "testnet": True, "sandbox": True}
 
 
 @pytest_asyncio.fixture
@@ -65,6 +58,7 @@ class TestRealBinanceConnection:
     """Test real Binance testnet API connection."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_connection_and_ping(self, real_binance_exchange):
         """Test connecting to real Binance testnet and ping."""
         # Verify we're connected to REAL API
@@ -75,6 +69,7 @@ class TestRealBinanceConnection:
         assert result is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_account_info(self, real_binance_exchange):
         """Test getting real account information from testnet."""
         # Get REAL account balance from testnet
@@ -86,6 +81,7 @@ class TestRealBinanceConnection:
         assert len(balance) > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_exchange_info(self, real_binance_exchange):
         """Test loading real exchange info from Binance."""
         # Should have loaded exchange info during connection
@@ -102,6 +98,7 @@ class TestRealBinanceMarketData:
     """Test real market data from Binance testnet."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_ticker_data(self, real_binance_exchange):
         """Test getting real ticker data from Binance."""
         # Get REAL ticker from Binance testnet
@@ -117,6 +114,7 @@ class TestRealBinanceMarketData:
         assert ticker.exchange == "binance"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_order_book(self, real_binance_exchange):
         """Test getting real order book from Binance."""
         # Get REAL order book from Binance testnet
@@ -141,6 +139,7 @@ class TestRealBinanceMarketData:
             assert order_book.asks[0].price < order_book.asks[1].price
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_recent_trades(self, real_binance_exchange):
         """Test getting real recent trades from Binance."""
         # Get REAL recent trades from Binance testnet
@@ -162,6 +161,7 @@ class TestRealBinanceErrorHandling:
     """Test real error handling with Binance API."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_invalid_symbol(self, real_binance_exchange):
         """Test real error response for invalid symbol."""
         from src.core.exceptions import ValidationError
@@ -175,6 +175,7 @@ class TestRealBinanceReconnection:
     """Test real reconnection behavior."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_disconnect_and_reconnect(self, real_binance_exchange):
         """Test disconnecting and reconnecting to real Binance."""
         # Start connected

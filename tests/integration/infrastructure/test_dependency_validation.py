@@ -5,13 +5,11 @@ This test suite validates that dependency injection works correctly across
 all modules and that services properly integrate with the DI container.
 """
 
-
 import pytest
 
 from src.core.base.service import BaseService
 from src.core.dependency_injection import (
     DependencyInjector,
-    inject,
     injectable,
 )
 from src.core.exceptions import DependencyError, ServiceError
@@ -118,6 +116,7 @@ class TestDependencyInjectionValidation:
 
     def test_factory_pattern(self, clean_injector):
         """Test factory-based service registration."""
+
         def create_data_service():
             return MockDataService()
 
@@ -143,6 +142,7 @@ class TestDependencyInjectionValidation:
         assert isinstance(instance, MockDataService)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_dependency_injection(self, clean_injector):
         """Test service-to-service dependency injection."""
         # Register dependencies
@@ -189,11 +189,13 @@ class TestDependencyInjectionValidation:
         def test_inject(func):
             def wrapper(*args, **kwargs):
                 import inspect
+
                 sig = inspect.signature(func)
                 for param_name, param in sig.parameters.items():
                     if param_name not in kwargs and clean_injector.has_service(param_name):
                         kwargs[param_name] = clean_injector.resolve(param_name)
                 return func(*args, **kwargs)
+
             return wrapper
 
         @test_inject
@@ -242,6 +244,7 @@ class TestDependencyInjectionValidation:
 
     def test_circular_dependency_prevention(self, clean_injector):
         """Test that circular dependencies are handled properly."""
+
         class ServiceA(BaseService):
             def __init__(self):
                 super().__init__("ServiceA")
@@ -320,28 +323,19 @@ class TestServiceManagerIntegration:
         injector.clear()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_registration_with_dependencies(self, service_manager):
         """Test service registration with dependency specification."""
         # Register data service first (no dependencies)
-        service_manager.register_service(
-            "DataService",
-            MockDataService,
-            dependencies=[]
-        )
+        service_manager.register_service("DataService", MockDataService, dependencies=[])
 
         # Register dependent service
         service_manager.register_service(
-            "DependentService",
-            DependentService,
-            dependencies=["DataService", "RiskService"]
+            "DependentService", DependentService, dependencies=["DataService", "RiskService"]
         )
 
         # Register risk service
-        service_manager.register_service(
-            "RiskService",
-            MockRiskService,
-            dependencies=[]
-        )
+        service_manager.register_service("RiskService", MockRiskService, dependencies=[])
 
         # Start all services
         await service_manager.start_all_services()
@@ -351,6 +345,7 @@ class TestServiceManagerIntegration:
         assert isinstance(dependent_service, DependentService)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_startup_order(self, service_manager):
         """Test that services start in correct dependency order."""
         startup_order = []
@@ -383,9 +378,24 @@ class TestServiceManagerIntegration:
         service_manager._injector.register_factory("ServiceC", create_service_c, singleton=True)
 
         # Register service configs for startup order calculation
-        service_manager._service_configs["ServiceA"] = {"dependencies": [], "singleton": True, "class": OrderedService, "config": {}}
-        service_manager._service_configs["ServiceB"] = {"dependencies": ["ServiceA"], "singleton": True, "class": OrderedService, "config": {}}
-        service_manager._service_configs["ServiceC"] = {"dependencies": ["ServiceB"], "singleton": True, "class": OrderedService, "config": {}}
+        service_manager._service_configs["ServiceA"] = {
+            "dependencies": [],
+            "singleton": True,
+            "class": OrderedService,
+            "config": {},
+        }
+        service_manager._service_configs["ServiceB"] = {
+            "dependencies": ["ServiceA"],
+            "singleton": True,
+            "class": OrderedService,
+            "config": {},
+        }
+        service_manager._service_configs["ServiceC"] = {
+            "dependencies": ["ServiceB"],
+            "singleton": True,
+            "class": OrderedService,
+            "config": {},
+        }
 
         # Start all services
         await service_manager.start_all_services()
@@ -399,9 +409,7 @@ class TestServiceManagerIntegration:
         """Test detection of missing dependencies."""
         # Register service with missing dependency
         service_manager.register_service(
-            "ServiceWithMissingDep",
-            DependentService,
-            dependencies=["NonexistentService"]
+            "ServiceWithMissingDep", DependentService, dependencies=["NonexistentService"]
         )
 
         # Should raise error when trying to get service
@@ -413,6 +421,7 @@ class TestCrossModuleIntegration:
     """Test integration patterns across different modules."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_service_integration(self):
         """Test strategy service integration with core DI."""
         injector = DependencyInjector()
@@ -437,6 +446,7 @@ class TestCrossModuleIntegration:
             injector.clear()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_database_service_integration(self):
         """Test database service integration with core DI."""
         injector = DependencyInjector()
@@ -448,6 +458,7 @@ class TestCrossModuleIntegration:
             from unittest.mock import MagicMock
 
             from src.database.service import DatabaseService
+
             mock_connection_manager = MagicMock()
             db_service = DatabaseService(connection_manager=mock_connection_manager)
             db_service.configure_dependencies(injector)
@@ -463,6 +474,7 @@ class TestCrossModuleIntegration:
             injector.clear()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_exchange_service_integration(self):
         """Test exchange service integration with core DI."""
         injector = DependencyInjector()

@@ -7,17 +7,15 @@ through proper dependency injection patterns and interface usage.
 Phase 5: Real service-based tests - NO MOCKS allowed except for external APIs.
 """
 
-import pytest
-import pytest_asyncio
 from decimal import Decimal
 
-from tests.integration.infrastructure.service_factory import RealServiceFactory
+import pytest
+import pytest_asyncio
 
-from src.core.dependency_injection import DependencyContainer
-from src.core.types import BotConfiguration, BotStatus, BotPriority, BotType
 from src.bot_management.factory import BotManagementFactory
 from src.bot_management.service import BotService
-from src.bot_management.bot_instance import BotInstance
+from src.core.types import BotConfiguration, BotType
+from tests.integration.infrastructure.service_factory import RealServiceFactory
 
 
 @pytest_asyncio.fixture
@@ -44,7 +42,7 @@ def bot_config():
         exchanges=["binance"],
         symbols=["BTC/USDT"],
         allocated_capital=Decimal("1000"),
-        risk_percentage=0.02
+        risk_percentage=0.02,
     )
 
 
@@ -52,6 +50,7 @@ class TestBotManagementModuleIntegration:
     """Test bot_management module integration with dependency injection."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_dependency_injection_patterns(self, real_bot_services):
         """Test that bot_management uses proper dependency injection patterns."""
         container = real_bot_services.container
@@ -73,6 +72,7 @@ class TestBotManagementModuleIntegration:
         assert resource_manager is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_boundary_validation(self, real_bot_services):
         """Test that bot_management respects service boundaries."""
         bot_service = real_bot_services.container.get("BotService")
@@ -85,10 +85,10 @@ class TestBotManagementModuleIntegration:
         """Test that there are no circular dependencies in bot_management."""
         # Import modules to ensure no circular imports
         try:
-            from src.bot_management.service import BotService
-            from src.bot_management.bot_monitor import BotMonitor
             from src.bot_management.bot_instance import BotInstance
+            from src.bot_management.bot_monitor import BotMonitor
             from src.bot_management.factory import BotManagementFactory
+            from src.bot_management.service import BotService
 
             # If we reach this point, no circular imports occurred
             assert True
@@ -97,6 +97,7 @@ class TestBotManagementModuleIntegration:
             pytest.fail(f"Circular import detected: {e}")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_integration_with_capital_management(self, real_bot_services):
         """Test integration with capital management module."""
         capital_service = real_bot_services.container.get("capital_service")
@@ -106,6 +107,7 @@ class TestBotManagementModuleIntegration:
         assert bot_service._capital_service is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_integration_with_execution_module(self, real_bot_services):
         """Test integration with execution module through interfaces."""
         execution_service = real_bot_services.container.get("execution_service")
@@ -128,11 +130,11 @@ class TestBotManagementModuleIntegration:
 
     def test_module_provides_required_services(self):
         """Test that bot_management provides all required service classes."""
-        from src.bot_management.service import BotService
         from src.bot_management.bot_coordinator import BotCoordinator
         from src.bot_management.bot_monitor import BotMonitor
-        from src.bot_management.resource_manager import ResourceManager
         from src.bot_management.factory import BotManagementFactory
+        from src.bot_management.resource_manager import ResourceManager
+        from src.bot_management.service import BotService
 
         # Verify all service classes are properly defined
         assert BotService is not None
@@ -143,7 +145,6 @@ class TestBotManagementModuleIntegration:
 
     def test_proper_exception_usage(self):
         """Test that bot_management uses core exceptions properly."""
-        from src.bot_management.service import BotService
         from src.core.exceptions import ServiceError, ValidationError
 
         # Should import core exceptions, not define its own
@@ -151,6 +152,7 @@ class TestBotManagementModuleIntegration:
         assert ValidationError is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_lifecycle_management(self, real_bot_services):
         """Test that services properly manage their lifecycle."""
         bot_service = real_bot_services.container.get("BotService")
@@ -171,7 +173,7 @@ class TestBotManagementModuleIntegration:
         assert issubclass(BotService, BaseService)
 
         # Should have proper service methods
-        assert hasattr(BotService, 'create_bot')
-        assert hasattr(BotService, 'start_bot')
-        assert hasattr(BotService, 'stop_bot')
-        assert hasattr(BotService, 'delete_bot')
+        assert hasattr(BotService, "create_bot")
+        assert hasattr(BotService, "start_bot")
+        assert hasattr(BotService, "stop_bot")
+        assert hasattr(BotService, "delete_bot")

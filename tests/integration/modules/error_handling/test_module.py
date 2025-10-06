@@ -13,8 +13,8 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 import pytest_asyncio
+
 pytestmark = pytest.mark.skip("Error handling module tests need comprehensive setup")
 
 from src.core.config import Config
@@ -55,6 +55,7 @@ class TestErrorHandlingServiceIntegration:
     """Test error handling service integration."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_dependency_injection(self, dependency_container):
         """Test that error handling services are properly registered with DI."""
         # Verify all required services are registered
@@ -69,6 +70,7 @@ class TestErrorHandlingServiceIntegration:
         assert isinstance(error_service, ErrorHandlingService)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_initialization_with_dependencies(self, error_handling_service):
         """Test that error handling service initializes with proper dependencies."""
         assert error_handling_service._error_handler is not None
@@ -77,6 +79,7 @@ class TestErrorHandlingServiceIntegration:
         # StateMonitor is optional, so we don't assert it
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_handling_service_error_processing(self, error_handling_service):
         """Test that error handling service properly processes errors."""
         test_error = ValidationError("Test validation error")
@@ -91,6 +94,7 @@ class TestErrorHandlingServiceIntegration:
             )
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_handling_service_non_validation_errors(self, error_handling_service):
         """Test error handling for non-validation errors."""
         test_error = DatabaseError("Test database error")
@@ -112,6 +116,7 @@ class TestDatabaseServiceIntegration:
     """Test database service integration with error handling."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_database_service_uses_error_handling_service(self):
         """Test that DatabaseService properly uses ErrorHandlingService."""
         # Mock the error handling service
@@ -126,6 +131,7 @@ class TestDatabaseServiceIntegration:
 
     @patch("src.database.service.ValidationFramework")
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_database_service_error_handling_integration(self, mock_validation):
         """Test that database service calls error handling service on validation errors."""
         # Setup mock validation to raise error
@@ -156,6 +162,7 @@ class TestExchangeServiceIntegration:
     """Test exchange service integration with error handling."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_exchange_service_has_error_handling_dependency(self):
         """Test that ExchangeService accepts error handling service dependency."""
         mock_error_service = MagicMock()
@@ -178,6 +185,7 @@ class TestDecoratorIntegration:
     """Test error handling decorator integration."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_handling_decorators_available(self):
         """Test that error handling decorators can be imported and used."""
         from src.error_handling.decorators import (
@@ -189,6 +197,7 @@ class TestDecoratorIntegration:
         @with_retry(max_attempts=2)
         @with_circuit_breaker(failure_threshold=3)
         @pytest.mark.asyncio
+        @pytest.mark.timeout(300)
         async def test_function():
             return "success"
 
@@ -196,13 +205,15 @@ class TestDecoratorIntegration:
         assert result == "success"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_decorator_integration_with_services(self):
         """Test that decorators integrate properly with services."""
         # This test verifies that services using decorators work correctly
-        from src.database.service import DatabaseService
-
         # Create service instance
         from unittest.mock import MagicMock
+
+        from src.database.service import DatabaseService
+
         mock_connection_manager = MagicMock()
         service = DatabaseService(connection_manager=mock_connection_manager)
 
@@ -215,6 +226,7 @@ class TestModuleBoundaryValidation:
     """Test module boundary validation patterns."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_handling_boundary_validation(self, error_handling_service):
         """Test boundary validation between error_handling and monitoring modules."""
         # This tests the BoundaryValidator usage in ErrorHandlingService
@@ -237,6 +249,7 @@ class TestModuleBoundaryValidation:
         assert "operation" in result
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_context_transformation(self, error_handling_service):
         """Test error context transformation for financial data."""
         test_error = ServiceError("Test error")
@@ -256,6 +269,7 @@ class TestServiceManagerIntegration:
     """Test service manager integration."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_manager_registers_error_handling(self):
         """Test that service manager properly registers error handling services."""
         from src.core.dependency_injection import DependencyContainer

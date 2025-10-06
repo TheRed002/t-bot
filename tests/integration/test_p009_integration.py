@@ -72,6 +72,7 @@ class TestP009Integration:
         return exchange
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_complete_emergency_cycle(self, mock_config, mock_risk_manager, mock_exchange):
         """Test complete emergency cycle from circuit breaker to recovery."""
         with (
@@ -133,6 +134,7 @@ class TestP009Integration:
             assert emergency_controls.is_trading_allowed() is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_emergency_with_positions_and_orders(
         self, mock_config, mock_risk_manager, mock_exchange
     ):
@@ -181,6 +183,7 @@ class TestP009Integration:
             assert event.positions_affected == 2
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_manual_override_functionality(self, mock_config, mock_risk_manager):
         """Test manual override functionality."""
         with (
@@ -222,6 +225,7 @@ class TestP009Integration:
             assert emergency_controls.manual_override_user is None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_circuit_breaker_recovery_cycle(self, mock_config, mock_risk_manager):
         """Test circuit breaker recovery cycle."""
         with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
@@ -259,6 +263,7 @@ class TestP009Integration:
             assert daily_loss_breaker.state.value == "closed"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_multiple_circuit_breakers_coordination(self, mock_config, mock_risk_manager):
         """Test coordination between multiple circuit breakers."""
         with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
@@ -288,6 +293,7 @@ class TestP009Integration:
             assert circuit_breaker_manager.is_trading_allowed() is False
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_emergency_controls_status_reporting(self, mock_config, mock_risk_manager):
         """Test emergency controls status reporting."""
         with (
@@ -328,6 +334,7 @@ class TestP009RealWorldScenario:
     """Real-world scenario tests for P-009."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_market_crash_scenario(self):
         """Test P-009 response to a simulated market crash scenario."""
         with (
@@ -374,6 +381,7 @@ class TestP009RealWorldScenario:
             assert len(triggered) >= 3  # Should trigger multiple breakers
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_system_failure_scenario(self):
         """Test P-009 response to system failure scenario."""
         with (

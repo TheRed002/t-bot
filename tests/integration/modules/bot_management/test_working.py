@@ -8,43 +8,28 @@ Phase 5: Real service-based tests - NO MOCKS allowed except for external APIs.
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
-from typing import Dict, Any
 
 import pytest
-
 import pytest_asyncio
-# Import test infrastructure
-from tests.integration.infrastructure.service_factory import RealServiceFactory
 
-# Import actual bot management classes
-from src.bot_management.service import BotService
 from src.bot_management.bot_coordinator import BotCoordinator
 from src.bot_management.bot_lifecycle import BotLifecycle
-from src.bot_management.bot_monitor import BotMonitor
 from src.bot_management.resource_manager import ResourceManager
 
+# Import actual bot management classes
 from src.core.types.bot import (
     BotConfiguration,
-    BotState,
-    BotStatus,
-    BotMetrics,
     BotType,
-    BotPriority,
 )
 from src.core.types.risk import RiskLevel
 from src.core.types.trading import (
-    OrderRequest,
     OrderSide,
-    OrderType,
-    OrderStatus,
 )
-from src.core.exceptions import (
-    ComponentError,
-    ServiceError,
-    ValidationError,
-)
+
+# Import test infrastructure
+from tests.integration.infrastructure.service_factory import RealServiceFactory
 
 
 @pytest_asyncio.fixture
@@ -89,6 +74,7 @@ class TestBotServiceIntegration:
     """Test BotService with integrated components using real services."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_bot_service_initialization(self, real_bot_services):
         """Test bot service initialization and basic functionality."""
         bot_service = real_bot_services.container.get("BotService")
@@ -108,9 +94,8 @@ class TestBotServiceIntegration:
         assert health_status.status in ["healthy", "HEALTHY"]
 
     @pytest.mark.asyncio
-    async def test_create_bot_with_real_services(
-        self, real_bot_services, sample_bot_config
-    ):
+    @pytest.mark.timeout(300)
+    async def test_create_bot_with_real_services(self, real_bot_services, sample_bot_config):
         """Test bot creation with real service pipeline."""
         bot_service = real_bot_services.container.get("BotService")
         await bot_service.start()
@@ -126,6 +111,7 @@ class TestBotServiceIntegration:
         assert bot_id in bot_service._bots
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_get_all_bots_status(self, real_bot_services):
         """Test getting status of all bots with real service integration."""
         bot_service = real_bot_services.container.get("BotService")
@@ -154,9 +140,8 @@ class TestBotCoordinatorIntegration:
     """Test BotCoordinator with integrated components using real services."""
 
     @pytest.mark.asyncio
-    async def test_coordinator_startup_sequence(
-        self, real_bot_services
-    ):
+    @pytest.mark.timeout(300)
+    async def test_coordinator_startup_sequence(self, real_bot_services):
         """Test coordinator startup and bot registration with real config."""
         from src.core.config import get_config
 
@@ -171,17 +156,17 @@ class TestBotCoordinatorIntegration:
         for i, bot_id in enumerate(bot_ids):
             bot_config = BotConfiguration(
                 bot_id=bot_id,
-                name=f"Test Bot {i+1}",
+                name=f"Test Bot {i + 1}",
                 bot_type=BotType.TRADING,
                 version="1.0.0",
                 strategy_name="momentum",
                 exchanges=["binance"],
-                symbols=[f"BTC/USDT"],
+                symbols=["BTC/USDT"],
                 allocated_capital=Decimal("1000.00"),
                 risk_profile=RiskLevel.MEDIUM,
                 max_position_size=Decimal("100.00"),
                 stop_loss_percentage=Decimal("0.02"),
-                take_profit_percentage=Decimal("0.05")
+                take_profit_percentage=Decimal("0.05"),
             )
             await coordinator.register_bot(bot_id, bot_config)
 
@@ -190,9 +175,8 @@ class TestBotCoordinatorIntegration:
         assert "bot_1" in coordinator.registered_bots
 
     @pytest.mark.asyncio
-    async def test_signal_sharing_between_bots(
-        self, real_bot_services
-    ):
+    @pytest.mark.timeout(300)
+    async def test_signal_sharing_between_bots(self, real_bot_services):
         """Test signal sharing functionality with real coordinator."""
         from src.core.config import get_config
 
@@ -213,7 +197,7 @@ class TestBotCoordinatorIntegration:
             risk_profile=RiskLevel.MEDIUM,
             max_position_size=Decimal("100.00"),
             stop_loss_percentage=Decimal("0.02"),
-            take_profit_percentage=Decimal("0.05")
+            take_profit_percentage=Decimal("0.05"),
         )
 
         receiver_config = BotConfiguration(
@@ -228,7 +212,7 @@ class TestBotCoordinatorIntegration:
             risk_profile=RiskLevel.MEDIUM,
             max_position_size=Decimal("100.00"),
             stop_loss_percentage=Decimal("0.02"),
-            take_profit_percentage=Decimal("0.05")
+            take_profit_percentage=Decimal("0.05"),
         )
 
         await coordinator.register_bot("bot_sender", sender_config)
@@ -244,9 +228,7 @@ class TestBotCoordinatorIntegration:
         }
 
         result = await coordinator.share_signal(
-            bot_id="bot_sender",
-            signal_data=signal_data,
-            target_bots=["bot_receiver"]
+            bot_id="bot_sender", signal_data=signal_data, target_bots=["bot_receiver"]
         )
 
         # Verify signal was shared (result is number of recipients)
@@ -257,6 +239,7 @@ class TestBotCoordinatorIntegration:
         assert len(signals) == 1
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_risk_coordination(self, real_bot_services):
         """Test portfolio-level risk coordination with real services."""
         from src.core.config import get_config
@@ -278,7 +261,7 @@ class TestBotCoordinatorIntegration:
             risk_profile=RiskLevel.MEDIUM,
             max_position_size=Decimal("500.00"),
             stop_loss_percentage=Decimal("0.02"),
-            take_profit_percentage=Decimal("0.05")
+            take_profit_percentage=Decimal("0.05"),
         )
 
         bot2_config = BotConfiguration(
@@ -293,7 +276,7 @@ class TestBotCoordinatorIntegration:
             risk_profile=RiskLevel.MEDIUM,
             max_position_size=Decimal("300.00"),
             stop_loss_percentage=Decimal("0.02"),
-            take_profit_percentage=Decimal("0.05")
+            take_profit_percentage=Decimal("0.05"),
         )
 
         await coordinator.register_bot("bot_1", bot1_config)
@@ -301,25 +284,25 @@ class TestBotCoordinatorIntegration:
 
         # Check cross-bot risk for a proposed order
         risk_result = await coordinator.check_cross_bot_risk(
-            bot_id="bot_1",
-            symbol="BTC/USDT",
-            side=OrderSide.BUY,
-            quantity=Decimal("100.00")
+            bot_id="bot_1", symbol="BTC/USDT", side=OrderSide.BUY, quantity=Decimal("100.00")
         )
 
         # Verify risk assessment structure
         assert isinstance(risk_result, dict)
         # Should have risk assessment data
-        assert "boundary_validation" in risk_result or "acknowledgment_required" in risk_result or "approved" in risk_result
+        assert (
+            "boundary_validation" in risk_result
+            or "acknowledgment_required" in risk_result
+            or "approved" in risk_result
+        )
 
 
 class TestBotLifecycleIntegration:
     """Test BotLifecycle with real services."""
 
     @pytest.mark.asyncio
-    async def test_complete_lifecycle_flow(
-        self, real_bot_services, sample_bot_config
-    ):
+    @pytest.mark.timeout(300)
+    async def test_complete_lifecycle_flow(self, real_bot_services, sample_bot_config):
         """Test complete bot lifecycle from creation to termination with real services."""
         from src.core.config import get_config
 
@@ -336,7 +319,7 @@ class TestBotLifecycleIntegration:
                 "exchanges": ["binance"],
                 "symbols": ["BTC/USDT"],
                 "allocated_capital": Decimal("1000.00"),
-            }
+            },
         )
         assert bot_config.bot_id.startswith("simple_strategy_bot_")
         assert bot_config.name == "Test Lifecycle Bot"
@@ -360,6 +343,7 @@ class TestResourceManagerIntegration:
     """Test ResourceManager with real services."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_resource_allocation_flow(self, real_bot_services):
         """Test complete resource allocation with real capital service."""
         from src.core.config import get_config
@@ -395,6 +379,7 @@ class TestPerformanceIntegration:
     """Test performance aspects of integrated services."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_concurrent_bot_operations(self, real_bot_services):
         """Test concurrent operations on multiple bots with real service."""
         bot_service = real_bot_services.container.get("BotService")

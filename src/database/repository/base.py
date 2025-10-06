@@ -93,7 +93,7 @@ class DatabaseRepository(CoreBaseRepository):
         try:
             entity = await self._get_entity_by_id(entity_id)
             if entity:
-                self.session.delete(entity)
+                await self.session.delete(entity)
                 await self.session.flush()
                 return True
             return False

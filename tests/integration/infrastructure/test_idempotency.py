@@ -43,15 +43,17 @@ class RealServiceIdempotencyTest:
 
         # Create idempotency manager with real persistence
         from src.core.config import get_config
+
         config = get_config()
 
         # Get Redis client from cache manager for idempotency storage
-        redis_client = await self.cache_manager.get_client() if hasattr(self.cache_manager, "get_client") else None
-
-        self.idempotency_manager = OrderIdempotencyManager(
-            config=config,
-            redis_client=redis_client
+        redis_client = (
+            await self.cache_manager.get_client()
+            if hasattr(self.cache_manager, "get_client")
+            else None
         )
+
+        self.idempotency_manager = OrderIdempotencyManager(config=config, redis_client=redis_client)
 
         # Store factory for cleanup
         self.service_factory = service_factory
@@ -69,10 +71,11 @@ class RealServiceIdempotencyTest:
             "order_id": order_id,
             "symbol": order_data.get("symbol"),
             "status": "submitted",
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_idempotent_order_submission(self, clean_database):
         """Test idempotent order submission with real persistence."""
         container = await self.setup_test_services(clean_database)
@@ -84,7 +87,7 @@ class RealServiceIdempotencyTest:
                 "side": OrderSide.BUY,
                 "order_type": OrderType.LIMIT,
                 "quantity": Decimal("0.1"),
-                "price": Decimal("45000.0")
+                "price": Decimal("45000.0"),
             }
 
             # Test idempotency with simplified order data approach
@@ -94,20 +97,18 @@ class RealServiceIdempotencyTest:
                 "order_type": "limit",
                 "quantity": "0.1",
                 "price": "45000.0",
-                "client_order_id": idempotency_key
+                "client_order_id": idempotency_key,
             }
 
             # First submission - should create new entry (returns None for new orders)
             result1 = await self.idempotency_manager.check_and_store_order(
-                client_order_id=idempotency_key,
-                order_data=order_dict
+                client_order_id=idempotency_key, order_data=order_dict
             )
             assert result1 is None  # New orders return None
 
             # Second submission with same client_order_id - should detect duplicate
             result2 = await self.idempotency_manager.check_and_store_order(
-                client_order_id=idempotency_key,
-                order_data=order_dict
+                client_order_id=idempotency_key, order_data=order_dict
             )
             assert result2 == order_dict  # Duplicates return original order data
 
@@ -123,7 +124,9 @@ class RealServiceIdempotencyTest:
 
             # Test basic infrastructure functionality
             assert self.idempotency_manager is not None
-            logger.info("✅ Idempotency manager successfully created and tested with Redis persistence")
+            logger.info(
+                "✅ Idempotency manager successfully created and tested with Redis persistence"
+            )
 
             logger.info("✅ Real idempotent order submission test passed")
 
@@ -133,6 +136,7 @@ class RealServiceIdempotencyTest:
             container.clear()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_concurrent_idempotent_operations(self, clean_database):
         """Test concurrent idempotent operations with real locking."""
         container = await self.setup_test_services(clean_database)
@@ -146,7 +150,7 @@ class RealServiceIdempotencyTest:
                 "side": "buy",
                 "order_type": "limit",
                 "quantity": "1.0",
-                "price": "3000.0"
+                "price": "3000.0",
             }
 
             # Launch multiple concurrent requests with DIFFERENT order data (different quantities)
@@ -158,8 +162,8 @@ class RealServiceIdempotencyTest:
                         "side": "buy",
                         "order_type": "limit",
                         "quantity": f"{1.0 + i * 0.1}",  # Different quantities
-                        "price": "3000.0"
-                    }
+                        "price": "3000.0",
+                    },
                 )
                 for i in range(5)
             ]
@@ -176,13 +180,12 @@ class RealServiceIdempotencyTest:
                 "side": "sell",
                 "order_type": "market",
                 "quantity": "0.5",
-                "price": "50000.0"
+                "price": "50000.0",
             }
 
             same_id_tasks = [
                 self.idempotency_manager.check_and_store_order(
-                    client_order_id=duplicate_client_order_id,
-                    order_data=duplicate_order_data
+                    client_order_id=duplicate_client_order_id, order_data=duplicate_order_data
                 )
                 for _ in range(3)
             ]
@@ -202,6 +205,7 @@ class RealServiceIdempotencyTest:
             container.clear()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_idempotency_expiration(self, clean_database):
         """Test idempotency key expiration with real TTL."""
         container = await self.setup_test_services(clean_database)
@@ -215,22 +219,20 @@ class RealServiceIdempotencyTest:
                 "side": "sell",
                 "order_type": "market",
                 "quantity": "2.0",
-                "price": "100.0"
+                "price": "100.0",
             }
 
             # First submission with short expiration (convert hours to appropriate value)
             result1 = await self.idempotency_manager.check_and_store_order(
                 client_order_id=client_order_id,
                 order_data=order_data,
-                expiration_hours=1  # 1 hour TTL
+                expiration_hours=1,  # 1 hour TTL
             )
             assert result1 is None  # New order
 
             # Immediate retry should detect duplicate
             result2 = await self.idempotency_manager.check_and_store_order(
-                client_order_id=client_order_id,
-                order_data=order_data,
-                expiration_hours=1
+                client_order_id=client_order_id, order_data=order_data, expiration_hours=1
             )
             assert result2 == order_data  # Duplicate detected
 
@@ -246,9 +248,7 @@ class RealServiceIdempotencyTest:
 
             # After expiration, should be treated as new order again
             result3 = await self.idempotency_manager.check_and_store_order(
-                client_order_id=client_order_id,
-                order_data=order_data,
-                expiration_hours=1
+                client_order_id=client_order_id, order_data=order_data, expiration_hours=1
             )
             assert result3 is None  # New order again after expiration
 
@@ -262,6 +262,7 @@ class RealServiceIdempotencyTest:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_comprehensive_real_idempotency(clean_database):
     """Run comprehensive idempotency tests with real services."""
     test = RealServiceIdempotencyTest()

@@ -13,7 +13,7 @@ COMPREHENSIVE VALIDATION:
    - Bot management uses IExchangeFactory interface
    - No direct exchange implementation imports
 
-2. **Module Hierarchy Compliance** 
+2. **Module Hierarchy Compliance**
    - Exchanges only imports from: core, utils, error_handling, database, monitoring, state
    - Higher modules (execution, strategies, bot_management) properly use exchanges through interfaces
 
@@ -41,15 +41,11 @@ Usage:
 """
 
 import ast
-import importlib
-import inspect
 import os
-from pathlib import Path
-from typing import Any, get_type_hints
-
-import pytest
 import sys
 from pathlib import Path
+
+import pytest
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent.parent
@@ -63,15 +59,15 @@ class TestExchangeArchitecturalCompliance:
         """Test that execution module uses ExchangeFactory through DI."""
         # Check execution module doesn't import exchanges directly
         execution_imports = self._get_module_imports("src/execution")
-        
+
         # Execution should not import specific exchange implementations
         forbidden_imports = [
             "src.exchanges.binance",
-            "src.exchanges.coinbase", 
+            "src.exchanges.coinbase",
             "src.exchanges.okx",
             "src.exchanges.implementations",
         ]
-        
+
         for forbidden in forbidden_imports:
             assert not any(forbidden in imp for imp in execution_imports), (
                 f"Execution module should not directly import {forbidden}"
@@ -81,14 +77,14 @@ class TestExchangeArchitecturalCompliance:
         """Test bot management uses IExchangeFactory interface."""
         # Verify bot management imports interfaces, not implementations
         bot_management_imports = self._get_module_imports("src/bot_management")
-        
+
         # Should not import specific implementations
         forbidden_implementations = [
             "src.exchanges.binance",
             "src.exchanges.coinbase",
-            "src.exchanges.okx"
+            "src.exchanges.okx",
         ]
-        
+
         for forbidden in forbidden_implementations:
             assert not any(forbidden in imp for imp in bot_management_imports), (
                 f"Bot management should not directly import {forbidden}"
@@ -97,34 +93,34 @@ class TestExchangeArchitecturalCompliance:
     def test_module_hierarchy_compliance(self):
         """Test exchanges only imports from approved lower-level modules."""
         exchanges_imports = self._get_module_imports("src/exchanges")
-        
+
         # Approved modules (lower in hierarchy)
         approved_modules = [
             "src.core",
-            "src.utils", 
+            "src.utils",
             "src.error_handling",
             "src.database",
             "src.monitoring",
-            "src.state"
+            "src.state",
         ]
-        
-        # Forbidden modules (higher in hierarchy) 
+
+        # Forbidden modules (higher in hierarchy)
         forbidden_modules = [
             "src.execution",
-            "src.strategies", 
+            "src.strategies",
             "src.bot_management",
             "src.analytics",
             "src.backtesting",
-            "src.web_interface"
+            "src.web_interface",
         ]
-        
+
         # Check no forbidden imports
         for import_statement in exchanges_imports:
             for forbidden in forbidden_modules:
                 assert not import_statement.startswith(forbidden), (
                     f"Exchange module should not import from higher-level module: {forbidden}"
                 )
-        
+
         # Verify at least some approved imports exist
         has_approved_imports = any(
             any(import_statement.startswith(approved) for approved in approved_modules)
@@ -137,34 +133,48 @@ class TestExchangeArchitecturalCompliance:
         # Import interface types to verify they exist
         try:
             from src.exchanges.interfaces import IExchange, IExchangeFactory
-            
+
             # Verify IExchange has required methods
             required_exchange_methods = [
-                "connect", "disconnect", "health_check", "is_connected",
-                "place_order", "cancel_order", "get_order_status",
-                "get_market_data", "get_order_book", "get_ticker",
-                "get_account_balance", "get_positions", "get_exchange_info",
-                "exchange_name"
+                "connect",
+                "disconnect",
+                "health_check",
+                "is_connected",
+                "place_order",
+                "cancel_order",
+                "get_order_status",
+                "get_market_data",
+                "get_order_book",
+                "get_ticker",
+                "get_account_balance",
+                "get_positions",
+                "get_exchange_info",
+                "exchange_name",
             ]
-            
+
             # Check methods are defined in protocol
             for method in required_exchange_methods:
                 assert hasattr(IExchange, method) or method in IExchange.__annotations__, (
                     f"IExchange should define {method}"
                 )
-            
+
             # Verify IExchangeFactory has required methods
             required_factory_methods = [
-                "get_supported_exchanges", "get_available_exchanges", 
-                "is_exchange_supported", "get_exchange", "create_exchange",
-                "remove_exchange", "health_check_all", "disconnect_all"
+                "get_supported_exchanges",
+                "get_available_exchanges",
+                "is_exchange_supported",
+                "get_exchange",
+                "create_exchange",
+                "remove_exchange",
+                "health_check_all",
+                "disconnect_all",
             ]
-            
+
             for method in required_factory_methods:
-                assert hasattr(IExchangeFactory, method) or method in IExchangeFactory.__annotations__, (
-                    f"IExchangeFactory should define {method}"
-                )
-                
+                assert (
+                    hasattr(IExchangeFactory, method) or method in IExchangeFactory.__annotations__
+                ), f"IExchangeFactory should define {method}"
+
         except ImportError as e:
             pytest.fail(f"Failed to import exchange interfaces: {e}")
 
@@ -173,19 +183,23 @@ class TestExchangeArchitecturalCompliance:
         try:
             from src.exchanges.factory import ExchangeFactory
             from src.exchanges.interfaces import IExchangeFactory
-            
+
             # Verify ExchangeFactory has all required methods
             required_methods = [
-                "get_supported_exchanges", "get_available_exchanges", 
-                "is_exchange_supported", "create_exchange", "remove_exchange",
-                "health_check_all", "disconnect_all"
+                "get_supported_exchanges",
+                "get_available_exchanges",
+                "is_exchange_supported",
+                "create_exchange",
+                "remove_exchange",
+                "health_check_all",
+                "disconnect_all",
             ]
-            
+
             for method in required_methods:
                 assert hasattr(ExchangeFactory, method), (
                     f"ExchangeFactory should implement {method}"
                 )
-                
+
         except ImportError as e:
             pytest.fail(f"Failed to import ExchangeFactory: {e}")
 
@@ -194,26 +208,26 @@ class TestExchangeArchitecturalCompliance:
         # Check key modules that should use factory pattern
         modules_to_check = [
             "src/execution",
-            "src/bot_management", 
+            "src/bot_management",
             "src/strategies",
-            "src/analytics"
+            "src/analytics",
         ]
-        
+
         forbidden_patterns = [
             "from src.exchanges.binance import",
-            "from src.exchanges.coinbase import", 
+            "from src.exchanges.coinbase import",
             "from src.exchanges.okx import",
             "import src.exchanges.binance",
             "import src.exchanges.coinbase",
-            "import src.exchanges.okx"
+            "import src.exchanges.okx",
         ]
-        
+
         for module_path in modules_to_check:
             if not os.path.exists(module_path):
                 continue
-                
+
             imports = self._get_module_imports(module_path)
-            
+
             for import_statement in imports:
                 for forbidden in forbidden_patterns:
                     assert forbidden not in import_statement, (
@@ -227,7 +241,7 @@ class TestExchangeArchitecturalCompliance:
             from src.exchanges.di_registration import (
                 register_exchange_dependencies,
                 register_exchange_services,
-                setup_exchange_services
+                setup_exchange_services,
             )
 
             # Verify registration functions exist
@@ -237,43 +251,39 @@ class TestExchangeArchitecturalCompliance:
 
         except ImportError as e:
             pytest.fail(f"Failed to import DI registration: {e}")
-    
+
     def test_service_layer_exists(self):
         """Test exchange service layer exists."""
         try:
             from src.exchanges.service import ExchangeService
-            
+
             # Verify service has required structure
             assert hasattr(ExchangeService, "__init__")
-            
+
         except ImportError as e:
             pytest.fail(f"Failed to import ExchangeService: {e}")
 
     def test_circular_dependency_prevention(self):
         """Test no circular dependencies exist between modules."""
         # Get all module imports
-        modules = [
-            "src/exchanges",
-            "src/execution", 
-            "src/bot_management",
-            "src/strategies"
-        ]
-        
+        modules = ["src/exchanges", "src/execution", "src/bot_management", "src/strategies"]
+
         import_graph = {}
-        
+
         for module_path in modules:
             if os.path.exists(module_path):
                 module_name = module_path.replace("/", ".")
                 imports = self._get_module_imports(module_path)
-                
+
                 # Filter to only internal imports
                 internal_imports = [
-                    imp for imp in imports 
+                    imp
+                    for imp in imports
                     if imp.startswith("src.") and not imp.startswith("src.core")
                 ]
-                
+
                 import_graph[module_name] = internal_imports
-        
+
         # Check for direct circular dependencies
         for module, imports in import_graph.items():
             for imported_module in imports:
@@ -285,18 +295,18 @@ class TestExchangeArchitecturalCompliance:
     def _get_module_imports(self, module_path: str) -> list[str]:
         """Extract import statements from a module directory."""
         imports = []
-        
+
         if not os.path.exists(module_path):
             return imports
-            
+
         for root, dirs, files in os.walk(module_path):
             for file in files:
                 if file.endswith(".py") and not file.startswith("__"):
                     file_path = os.path.join(root, file)
                     try:
-                        with open(file_path, "r", encoding="utf-8") as f:
+                        with open(file_path, encoding="utf-8") as f:
                             content = f.read()
-                            
+
                         # Parse AST to extract imports
                         tree = ast.parse(content)
                         for node in ast.walk(tree):
@@ -306,51 +316,51 @@ class TestExchangeArchitecturalCompliance:
                             elif isinstance(node, ast.ImportFrom):
                                 if node.module:
                                     imports.append(node.module)
-                                    
+
                     except (SyntaxError, UnicodeDecodeError):
                         # Skip files with syntax errors or encoding issues
                         continue
-                        
+
         return imports
 
     def test_controller_service_pattern(self):
         """Test controllers use services, not direct exchange access."""
         # Check execution controller
         execution_controller_imports = self._get_module_imports("src/execution")
-        
+
         # Should not import exchange implementations directly
         forbidden_direct_imports = [
             "src.exchanges.binance_exchange",
             "src.exchanges.coinbase_exchange",
-            "src.exchanges.okx_exchange"
+            "src.exchanges.okx_exchange",
         ]
-        
+
         for forbidden in forbidden_direct_imports:
             assert not any(forbidden in imp for imp in execution_controller_imports), (
                 f"Execution controller should not directly import {forbidden}"
             )
-            
+
         # Should use service interfaces
-        assert any("service" in imp.lower() or "interface" in imp.lower() 
-                  for imp in execution_controller_imports), (
-            "Execution should use service layer patterns"
-        )
+        assert any(
+            "service" in imp.lower() or "interface" in imp.lower()
+            for imp in execution_controller_imports
+        ), "Execution should use service layer patterns"
 
 
 # Import asyncio for async test support
-import asyncio
+
 
 def test_exchange_architectural_compliance_standalone():
     """Standalone test runner for basic architectural compliance checks."""
     test_instance = TestExchangeArchitecturalCompliance()
-    
+
     tests_passed = 0
     tests_total = 0
-    
+
     # List of test methods to run
     test_methods = [
         "test_service_layer_pattern_enforcement",
-        "test_bot_management_interface_usage", 
+        "test_bot_management_interface_usage",
         "test_module_hierarchy_compliance",
         "test_interface_contract_adherence",
         "test_exchange_factory_implementation",
@@ -360,7 +370,7 @@ def test_exchange_architectural_compliance_standalone():
         "test_circular_dependency_prevention",
         "test_controller_service_pattern",
     ]
-    
+
     for test_method in test_methods:
         tests_total += 1
         try:
@@ -370,14 +380,14 @@ def test_exchange_architectural_compliance_standalone():
             tests_passed += 1
         except Exception as e:
             print(f"❌ {test_method}: FAILED - {e}")
-    
+
     print(f"\n📊 Results: {tests_passed}/{tests_total} tests passed")
-    
+
     if tests_passed == tests_total:
         print("🎉 All exchange architectural compliance tests passed!")
     else:
         print(f"⚠️ {tests_total - tests_passed} tests failed")
-        
+
     return tests_passed == tests_total
 
 

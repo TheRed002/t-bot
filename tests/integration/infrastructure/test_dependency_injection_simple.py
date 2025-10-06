@@ -5,24 +5,23 @@ This test suite validates basic dependency injection functionality with real ser
 without the complex test execution framework that was causing failures.
 """
 
-import asyncio
 import logging
-from decimal import Decimal
 
 import pytest
 
 from src.core.caching.cache_manager import CacheManager
+from src.core.config import Config
 from src.core.dependency_injection import DependencyContainer
 from src.database.service import DatabaseService
 from src.monitoring.metrics import MetricsCollector
 from src.state.state_manager import StateManager
-from src.core.config import Config
 
 logger = logging.getLogger(__name__)
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_real_dependency_injection_basic(clean_database):
     """Test basic dependency injection with real services."""
     container = DependencyContainer()
@@ -81,9 +80,9 @@ async def test_real_dependency_injection_basic(clean_database):
         # Test basic cache functionality - just verify it exists
         # Skip actual cache operations due to TTL parameter issues in current implementation
         # This test focuses on dependency injection, not cache functionality
-        assert hasattr(cache_manager, 'set')
-        assert hasattr(cache_manager, 'get')
-        assert hasattr(cache_manager, 'delete')
+        assert hasattr(cache_manager, "set")
+        assert hasattr(cache_manager, "get")
+        assert hasattr(cache_manager, "delete")
 
         logger.info("✅ Basic dependency injection test passed")
 
@@ -98,6 +97,7 @@ async def test_real_dependency_injection_basic(clean_database):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_service_singleton_behavior(clean_database):
     """Test that services behave as singletons."""
     container = DependencyContainer()
@@ -133,6 +133,7 @@ async def test_service_singleton_behavior(clean_database):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_service_health_checks(clean_database):
     """Test health checks for registered services."""
     container = DependencyContainer()
@@ -161,9 +162,9 @@ async def test_service_health_checks(clean_database):
 
         # Test cache manager exists and has required methods
         # Skip actual cache operations due to implementation issues
-        assert hasattr(cache_manager, 'set')
-        assert hasattr(cache_manager, 'get')
-        assert hasattr(cache_manager, 'delete')
+        assert hasattr(cache_manager, "set")
+        assert hasattr(cache_manager, "get")
+        assert hasattr(cache_manager, "delete")
         assert cache_manager is not None
 
         logger.info("✅ Service health checks test passed")
@@ -178,6 +179,7 @@ async def test_service_health_checks(clean_database):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_container_error_handling(clean_database):
     """Test error handling in dependency container."""
     container = DependencyContainer()
@@ -185,6 +187,7 @@ async def test_container_error_handling(clean_database):
     try:
         # Test getting non-existent service
         from src.core.exceptions import DependencyError
+
         with pytest.raises(DependencyError):
             container.get("NonExistentService")
 

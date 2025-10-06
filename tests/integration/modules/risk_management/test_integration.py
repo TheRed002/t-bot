@@ -11,15 +11,15 @@ correlation monitoring, and adaptive risk management with REAL database persiste
 
 # Import all test classes from the real implementation
 from .test_integration_real import (
-    TestRiskManagementRealIntegration,
     TestRiskManagementDatabasePersistence,
+    TestRiskManagementRealIntegration,
 )
 
 # For backward compatibility, create aliases
 TestRiskManagementIntegration = TestRiskManagementRealIntegration
 
 __all__ = [
-    'TestRiskManagementRealIntegration',
-    'TestRiskManagementDatabasePersistence',
-    'TestRiskManagementIntegration',  # Alias for backward compatibility
+    "TestRiskManagementDatabasePersistence",
+    "TestRiskManagementIntegration",  # Alias for backward compatibility
+    "TestRiskManagementRealIntegration",
 ]

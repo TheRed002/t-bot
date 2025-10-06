@@ -127,6 +127,7 @@ class OrderIdempotencyManager(BaseComponent):
 
         # In-memory cache with thread safety
         self._cache_lock = RLock()
+        self._async_lock = asyncio.Lock()  # Async lock for concurrent operations
         self._in_memory_cache: dict[str, IdempotencyKey] = {}
         self._order_hash_to_key: dict[str, str] = {}  # order_hash -> key mapping
         self._client_order_id_to_key: dict[
@@ -846,7 +847,10 @@ class OrderIdempotencyManager(BaseComponent):
         """
         Check if order already exists and store it if new.
 
-        This method provides compatibility with test expectations.
+        This method provides compatibility with test expectations and uses
+        content-based deduplication to detect identical orders regardless
+        of client_order_id. Uses async lock to ensure atomic check-and-store
+        for concurrent operations.
 
         Args:
             client_order_id: Client order ID
@@ -880,22 +884,49 @@ class OrderIdempotencyManager(BaseComponent):
                 client_order_id=client_order_id,
             )
 
-            # Use existing idempotency logic
-            returned_client_order_id, is_duplicate = await self.get_or_create_idempotency_key(
-                order_request, expiration_hours
-            )
+            # Generate order hash for content-based deduplication
+            order_hash = self._generate_order_hash(order_request)
 
-            # Return in format expected by tests
-            if is_duplicate:
-                # Return the original order data for duplicate
-                return order_data
-            else:
-                # Store the order data for future duplicate checks
+            # Use async lock to make check-and-store atomic for concurrent operations
+            async with self._async_lock:
+                # Check if this EXACT content already exists (regardless of client_order_id)
+                # This implements content-based deduplication
                 with self._cache_lock:
-                    # Create a key using client_order_id for simple storage
-                    self._order_data_cache = getattr(self, "_order_data_cache", {})
-                    self._order_data_cache[client_order_id] = order_data
-                return None
+                    existing_key_id = self._order_hash_to_key.get(order_hash)
+                    if existing_key_id:
+                        existing_idempotency_key = self._in_memory_cache.get(existing_key_id)
+                        if existing_idempotency_key and not existing_idempotency_key.is_expired():
+                            # Duplicate detected - same content
+                            self.stats["duplicate_orders_prevented"] += 1
+                            self.stats["cache_hits"] += 1
+
+                            self._logger.warning(
+                                "Duplicate order detected (content match)",
+                                order_hash=order_hash,
+                                new_client_order_id=client_order_id,
+                                existing_client_order_id=existing_idempotency_key.client_order_id,
+                            )
+
+                            # Return the stored order data for the existing key
+                            stored_data = self._order_data_cache.get(existing_idempotency_key.client_order_id)
+                            return stored_data if stored_data else order_data
+
+                # Use existing idempotency logic to create new key
+                returned_client_order_id, is_duplicate = await self.get_or_create_idempotency_key(
+                    order_request, expiration_hours
+                )
+
+                # Return in format expected by tests
+                if is_duplicate:
+                    # Return the original order data for duplicate
+                    return order_data
+                else:
+                    # Store the order data for future duplicate checks
+                    with self._cache_lock:
+                        # Create a key using client_order_id for simple storage
+                        self._order_data_cache = getattr(self, "_order_data_cache", {})
+                        self._order_data_cache[client_order_id] = order_data
+                    return None
 
         except Exception as e:
             self._logger.error(f"Failed to check and store order: {e}")

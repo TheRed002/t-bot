@@ -15,13 +15,13 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import text
 
-from src.database.models import BalanceSnapshot, BotInstance, Position, Order, User
+from src.database.models import BalanceSnapshot, BotInstance, Order, Position, User
 from src.database.models.trading import Trade
 from src.database.queries import DatabaseQueries
-from tests.integration.infrastructure.service_factory import RealServiceFactory
+
 # Import the correct fixtures from infrastructure
 from tests.integration.infrastructure.conftest import clean_database, real_test_config  # noqa: F401
-
+from tests.integration.infrastructure.service_factory import RealServiceFactory
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,7 @@ class TestDatabaseConnection:
     """Test database connection and health check with real services."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_database_connection(self, clean_database):
         """Test database connection and health check using real PostgreSQL."""
         service_factory = RealServiceFactory()
@@ -67,6 +68,7 @@ class TestDatabaseModels:
     """Test database model creation and validation with real database."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_user_creation(self, clean_database):
         """Test user creation and validation using real PostgreSQL."""
         service_factory = RealServiceFactory()
@@ -99,6 +101,7 @@ class TestDatabaseModels:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_bot_instance_creation(self, clean_database):
         """Test bot instance creation and validation using real PostgreSQL."""
         service_factory = RealServiceFactory()
@@ -141,6 +144,7 @@ class TestDatabaseModels:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_order_creation_with_strategy(self, clean_database):
         """Test order creation and validation using real PostgreSQL."""
         service_factory = RealServiceFactory()
@@ -163,7 +167,7 @@ class TestDatabaseModels:
                 created_user = await queries.create(user)
 
                 # Create strategy first (required for Order)
-                from src.database.models.bot import Strategy, Bot
+                from src.database.models.bot import Bot, Strategy
 
                 # Create bot first (required for Strategy)
                 bot = Bot(
@@ -171,7 +175,7 @@ class TestDatabaseModels:
                     exchange="binance",  # Use a supported exchange
                     status="running",
                     allocated_capital=Decimal("1000.00"),
-                    current_balance=Decimal("1000.00")
+                    current_balance=Decimal("1000.00"),
                 )
                 created_bot_record = await queries.create(bot)
 
@@ -182,7 +186,7 @@ class TestDatabaseModels:
                     params={"risk_level": "medium"},
                     max_position_size=Decimal("100.00"),
                     risk_per_trade=Decimal("0.02"),
-                    status="active"
+                    status="active",
                 )
                 created_strategy = await queries.create(strategy)
 
@@ -222,12 +226,15 @@ class TestDatabaseModels:
                 assert isinstance(created_order.quantity, Decimal)
                 assert isinstance(created_order.price, Decimal)
                 assert created_order.quantity == Decimal("0.001")
-                logger.info(f"✅ Real database order creation verified: {created_order.exchange_order_id}")
+                logger.info(
+                    f"✅ Real database order creation verified: {created_order.exchange_order_id}"
+                )
 
         finally:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_position_creation(self, clean_database):
         """Test position creation and validation using real PostgreSQL."""
         service_factory = RealServiceFactory()
@@ -250,7 +257,7 @@ class TestDatabaseModels:
                 created_user = await queries.create(user)
 
                 # Create strategy first (required for Position)
-                from src.database.models.bot import Strategy, Bot
+                from src.database.models.bot import Bot, Strategy
 
                 # Create bot first (required for Strategy)
                 bot = Bot(
@@ -258,7 +265,7 @@ class TestDatabaseModels:
                     exchange="binance",  # Use a supported exchange
                     status="running",
                     allocated_capital=Decimal("1000.00"),
-                    current_balance=Decimal("1000.00")
+                    current_balance=Decimal("1000.00"),
                 )
                 created_bot_record = await queries.create(bot)
 
@@ -269,7 +276,7 @@ class TestDatabaseModels:
                     params={"risk_level": "medium"},
                     max_position_size=Decimal("100.00"),
                     risk_per_trade=Decimal("0.02"),
-                    status="active"
+                    status="active",
                 )
                 created_strategy = await queries.create(strategy)
 
@@ -289,6 +296,7 @@ class TestDatabaseModels:
                     exchange="binance",
                     symbol="BTCUSDT",
                     side="LONG",  # Must be uppercase per model constraints
+                    status="OPEN",  # Required field - Position.status accepts "OPEN", "CLOSED", "LIQUIDATED"
                     quantity=Decimal("0.001"),
                     entry_price=Decimal("50000.00"),
                     current_price=Decimal("51000.00"),
@@ -307,12 +315,15 @@ class TestDatabaseModels:
                 # Verify Decimal precision is maintained
                 assert isinstance(created_position.quantity, Decimal)
                 assert isinstance(created_position.entry_price, Decimal)
-                logger.info(f"✅ Real database position creation verified: {created_position.symbol}")
+                logger.info(
+                    f"✅ Real database position creation verified: {created_position.symbol}"
+                )
 
         finally:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_balance_snapshot_creation(self, clean_database):
         """Test balance snapshot creation and validation using real PostgreSQL."""
         service_factory = RealServiceFactory()
@@ -356,7 +367,9 @@ class TestDatabaseModels:
                 # Verify Decimal precision is maintained
                 assert isinstance(created_balance.available_balance, Decimal)
                 assert isinstance(created_balance.total_balance, Decimal)
-                logger.info(f"✅ Real database balance snapshot creation verified: {created_balance.currency}")
+                logger.info(
+                    f"✅ Real database balance snapshot creation verified: {created_balance.currency}"
+                )
 
         finally:
             await service_factory.cleanup()
@@ -367,6 +380,7 @@ class TestDatabaseQueries:
     """Test database query operations with real PostgreSQL."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_get_by_id(self, clean_database):
         """Test get_by_id query using real database."""
         service_factory = RealServiceFactory()
@@ -399,6 +413,7 @@ class TestDatabaseQueries:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_get_all(self, clean_database):
         """Test get_all query using real database."""
         service_factory = RealServiceFactory()
@@ -443,6 +458,7 @@ class TestRedisIntegration:
     """Test Redis client integration with real Redis service."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_redis_basic_operations(self, clean_database):
         """Test Redis basic operations using real Redis."""
         service_factory = RealServiceFactory()
@@ -475,6 +491,7 @@ class TestRedisIntegration:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_redis_trading_operations(self, clean_database):
         """Test Redis trading-specific operations using real Redis."""
         service_factory = RealServiceFactory()
@@ -529,6 +546,7 @@ class TestInfluxDBIntegration:
     """Test InfluxDB client integration with real InfluxDB service."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_influxdb_connection(self, clean_database):
         """Test InfluxDB connection using real InfluxDB."""
         service_factory = RealServiceFactory()
@@ -540,9 +558,7 @@ class TestInfluxDBIntegration:
             influx_client = clean_database.get_influxdb_client()
 
             # Test connection and health check with real InfluxDB
-            health_status = await asyncio.get_event_loop().run_in_executor(
-                None, influx_client.ping
-            )
+            health_status = await asyncio.get_event_loop().run_in_executor(None, influx_client.ping)
             assert health_status is not None
             logger.info("✅ Real InfluxDB connection verified")
 
@@ -550,6 +566,7 @@ class TestInfluxDBIntegration:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_influxdb_data_writing(self, clean_database):
         """Test InfluxDB data writing using real InfluxDB."""
         service_factory = RealServiceFactory()
@@ -565,7 +582,7 @@ class TestInfluxDBIntegration:
                 url="http://localhost:8086",
                 token="test-token",
                 org="test-org",
-                bucket="test-bucket"
+                bucket="test-bucket",
             )
 
             # Initialize the client connection
@@ -583,11 +600,8 @@ class TestInfluxDBIntegration:
             # Write to real InfluxDB using the specific method
             await influx_client.write_market_data(
                 symbol=market_data_point["symbol"],
-                data={
-                    "price": market_data_point["price"],
-                    "volume": market_data_point["volume"]
-                },
-                timestamp=market_data_point["timestamp"]
+                data={"price": market_data_point["price"], "volume": market_data_point["volume"]},
+                timestamp=market_data_point["timestamp"],
             )
 
             # Test trade data writing with unique data
@@ -603,8 +617,7 @@ class TestInfluxDBIntegration:
 
             # Write trade data using the specific method
             await influx_client.write_trade(
-                trade_data=trade_data_point,
-                timestamp=trade_data_point["timestamp"]
+                trade_data=trade_data_point, timestamp=trade_data_point["timestamp"]
             )
 
             # Test performance metrics writing with unique data
@@ -624,9 +637,9 @@ class TestInfluxDBIntegration:
                     "total_pnl": performance_point["total_pnl"],
                     "win_rate": performance_point["win_rate"],
                     "sharpe_ratio": performance_point["sharpe_ratio"],
-                    "max_drawdown": performance_point["max_drawdown"]
+                    "max_drawdown": performance_point["max_drawdown"],
                 },
-                timestamp=performance_point["timestamp"]
+                timestamp=performance_point["timestamp"],
             )
 
             logger.info("✅ Real InfluxDB data writing verified")
@@ -640,6 +653,7 @@ class TestFinancialPrecisionIntegration:
     """Test financial precision with real database operations."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_decimal_precision_maintenance(self, clean_database):
         """Test that Decimal precision is maintained through real database operations."""
         service_factory = RealServiceFactory()
@@ -662,7 +676,7 @@ class TestFinancialPrecisionIntegration:
                 created_user = await queries.create(user)
 
                 # Create strategy first (required for Trade)
-                from src.database.models.bot import Strategy, Bot
+                from src.database.models.bot import Bot, Strategy
 
                 # Create bot first (required for Strategy)
                 bot = Bot(
@@ -670,7 +684,7 @@ class TestFinancialPrecisionIntegration:
                     exchange="binance",  # Use a supported exchange
                     status="running",
                     allocated_capital=Decimal("1000.00"),
-                    current_balance=Decimal("1000.00")
+                    current_balance=Decimal("1000.00"),
                 )
                 created_bot_record = await queries.create(bot)
 
@@ -681,7 +695,7 @@ class TestFinancialPrecisionIntegration:
                     params={"risk_level": "high"},
                     max_position_size=Decimal("100.00"),
                     risk_per_trade=Decimal("0.01"),
-                    status="active"
+                    status="active",
                 )
                 created_strategy = await queries.create(strategy)
 
@@ -692,6 +706,7 @@ class TestFinancialPrecisionIntegration:
                     exchange="binance",
                     symbol="BTCUSDT",
                     side="LONG",
+                    status="OPEN",  # Required field - Position.status accepts "OPEN", "CLOSED", "LIQUIDATED"
                     quantity=Decimal("0.12345678"),
                     entry_price=Decimal("45678.12345678"),
                     current_price=Decimal("46000.00"),
@@ -712,7 +727,9 @@ class TestFinancialPrecisionIntegration:
                 high_precision_quantity = Decimal("0.12345678")  # 18 decimal places
                 high_precision_entry_price = Decimal("45678.12345678")  # 18 decimal places
                 high_precision_exit_price = Decimal("46000.00000000")  # 18 decimal places
-                expected_pnl = (high_precision_exit_price - high_precision_entry_price) * high_precision_quantity
+                expected_pnl = (
+                    high_precision_exit_price - high_precision_entry_price
+                ) * high_precision_quantity
 
                 trade = Trade(
                     bot_id=created_bot_record.id,
@@ -742,10 +759,14 @@ class TestFinancialPrecisionIntegration:
                 assert retrieved_trade.exit_price == high_precision_exit_price
 
                 # Verify calculation precision
-                calculated_pnl = (retrieved_trade.exit_price - retrieved_trade.entry_price) * retrieved_trade.quantity
+                calculated_pnl = (
+                    retrieved_trade.exit_price - retrieved_trade.entry_price
+                ) * retrieved_trade.quantity
                 assert calculated_pnl == expected_pnl
 
-                logger.info(f"✅ Financial precision maintained: ({high_precision_exit_price} - {high_precision_entry_price}) * {high_precision_quantity} = {calculated_pnl}")
+                logger.info(
+                    f"✅ Financial precision maintained: ({high_precision_exit_price} - {high_precision_entry_price}) * {high_precision_quantity} = {calculated_pnl}"
+                )
 
         finally:
             await service_factory.cleanup()

@@ -23,13 +23,12 @@ pytestmark = pytest.mark.skip("Real error handling integration tests need compre
 
 from src.core.config import get_config
 from src.core.exceptions import ServiceError, ValidationError
-from src.error_handling.service import ErrorHandlingService
+from src.error_handling.connection_manager import ConnectionManager
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.global_handler import GlobalErrorHandler
 from src.error_handling.pattern_analytics import ErrorPatternAnalytics
-from src.error_handling.recovery_scenarios import PartialFillRecovery, NetworkDisconnectionRecovery
-from src.error_handling.connection_manager import ConnectionManager
-from tests.integration.infrastructure.conftest import clean_database
+from src.error_handling.recovery_scenarios import NetworkDisconnectionRecovery, PartialFillRecovery
+from src.error_handling.service import ErrorHandlingService
 
 
 @pytest.mark.integration
@@ -37,6 +36,7 @@ class TestRealErrorHandlingServiceIntegration:
     """Real error handling service integration tests with actual database connections."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_error_handling_service_initialization(self, clean_database):
         """Test error handling service initializes with real dependencies."""
         config = get_config()
@@ -61,7 +61,7 @@ class TestRealErrorHandlingServiceIntegration:
             # Test health check with real services
             health_result = await service.health_check()
             assert health_result is not None
-            assert hasattr(health_result, 'status')
+            assert hasattr(health_result, "status")
 
             # Verify components are real instances
             assert service._error_handler is error_handler
@@ -72,6 +72,7 @@ class TestRealErrorHandlingServiceIntegration:
             await service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_error_processing_with_database(self, clean_database):
         """Test error processing with real database storage."""
         config = get_config()
@@ -92,7 +93,7 @@ class TestRealErrorHandlingServiceIntegration:
                 error=test_error,
                 component=component,
                 operation=operation,
-                context={"test_id": str(uuid.uuid4()), "database": "real"}
+                context={"test_id": str(uuid.uuid4()), "database": "real"},
             )
 
             assert error_context is not None
@@ -110,6 +111,7 @@ class TestRealErrorHandlingServiceIntegration:
             await error_handler.cleanup_resources()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_pattern_analytics_with_persistence(self, clean_database):
         """Test pattern analytics with real data persistence."""
         config = get_config()
@@ -126,22 +128,22 @@ class TestRealErrorHandlingServiceIntegration:
                     "component": "database_service",
                     "timestamp": datetime.now(timezone.utc),
                     "severity": "high",
-                    "context": {"connection_pool": "main", "retry_count": 3}
+                    "context": {"connection_pool": "main", "retry_count": 3},
                 },
                 {
                     "error_type": "OrderValidationError",
                     "component": "execution_service",
                     "timestamp": datetime.now(timezone.utc),
                     "severity": "medium",
-                    "context": {"order_id": "real-order-123", "validation_rule": "position_limit"}
+                    "context": {"order_id": "real-order-123", "validation_rule": "position_limit"},
                 },
                 {
                     "error_type": "ExchangeApiError",
                     "component": "binance_client",
                     "timestamp": datetime.now(timezone.utc),
                     "severity": "high",
-                    "context": {"api_endpoint": "order_status", "rate_limit": True}
-                }
+                    "context": {"api_endpoint": "order_status", "rate_limit": True},
+                },
             ]
 
             # Add events to real analytics system
@@ -177,10 +179,11 @@ class TestRealErrorHandlingServiceIntegration:
             await pattern_analytics_2.cleanup()
 
         finally:
-            if hasattr(pattern_analytics, '_error_history_list'):
+            if hasattr(pattern_analytics, "_error_history_list"):
                 pattern_analytics._error_history_list.clear()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_recovery_scenarios_execution(self, clean_database):
         """Test recovery scenarios with real service dependencies."""
         config = get_config()
@@ -200,12 +203,9 @@ class TestRealErrorHandlingServiceIntegration:
                     "quantity": Decimal("1.0"),
                     "filled_quantity": Decimal("0.6"),
                     "remaining_quantity": Decimal("0.4"),
-                    "exchange": "binance"
+                    "exchange": "binance",
                 },
-                "market_conditions": {
-                    "volatility": "high",
-                    "spread": Decimal("0.001")
-                }
+                "market_conditions": {"volatility": "high", "spread": Decimal("0.001")},
             }
 
             recovery_result = await partial_fill_recovery.execute_recovery(
@@ -220,12 +220,10 @@ class TestRealErrorHandlingServiceIntegration:
                 "exchange": "binance",
                 "reconnect_attempts": 2,
                 "last_heartbeat": datetime.now(timezone.utc).isoformat(),
-                "connection_id": f"ws-{uuid.uuid4()}"
+                "connection_id": f"ws-{uuid.uuid4()}",
             }
 
-            network_result = await network_recovery.execute_recovery(
-                context=network_context
-            )
+            network_result = await network_recovery.execute_recovery(context=network_context)
             assert network_result is not None
             assert isinstance(network_result, dict)
 
@@ -234,6 +232,7 @@ class TestRealErrorHandlingServiceIntegration:
             await network_recovery.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_connection_manager_operations(self, clean_database):
         """Test connection manager with real connection handling."""
         config = get_config()
@@ -247,7 +246,7 @@ class TestRealErrorHandlingServiceIntegration:
             connection_result = await connection_manager.establish_connection(
                 endpoint="ws://localhost:9999",  # Invalid endpoint for testing
                 connection_type="websocket",
-                retry_config={"max_attempts": 2, "delay": 0.1}
+                retry_config={"max_attempts": 2, "delay": 0.1},
             )
 
             # Should handle connection failure gracefully
@@ -259,12 +258,11 @@ class TestRealErrorHandlingServiceIntegration:
             test_message = {
                 "type": "test",
                 "data": "real_connection_test",
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
             queue_result = connection_manager.queue_message(
-                connection_id=test_connection_id,
-                message=test_message
+                connection_id=test_connection_id, message=test_message
             )
             assert queue_result is not None
 
@@ -276,6 +274,7 @@ class TestRealErrorHandlingServiceIntegration:
             await connection_manager.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_end_to_end_error_handling_flow(self, clean_database):
         """Test complete error handling flow with real services."""
         config = get_config()
@@ -308,7 +307,7 @@ class TestRealErrorHandlingServiceIntegration:
                 "quantity": "1.0",
                 "price": "50000.00",
                 "account_balance": "45000.00",
-                "exchange": "binance"
+                "exchange": "binance",
             }
 
             # Handle error through complete flow
@@ -316,7 +315,7 @@ class TestRealErrorHandlingServiceIntegration:
                 error=trading_error,
                 component="execution_engine",
                 operation="place_market_order",
-                context=error_context
+                context=error_context,
             )
 
             assert result is not None
@@ -334,6 +333,7 @@ class TestRealErrorHandlingServiceIntegration:
             await service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_concurrent_error_handling(self, clean_database):
         """Test concurrent error handling with real services."""
         config = get_config()
@@ -354,14 +354,14 @@ class TestRealErrorHandlingServiceIntegration:
                 context = {
                     "error_id": error_id,
                     "component": "trading_system",
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
 
                 return await service.handle_error(
                     error=error,
                     component="concurrent_test",
                     operation=f"test_operation_{error_id}",
-                    context=context
+                    context=context,
                 )
 
             # Run concurrent error handling
@@ -382,6 +382,7 @@ class TestRealErrorHandlingServiceIntegration:
             await service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_error_handler_context_validation(self, clean_database):
         """Test error context creation and validation with real services."""
         config = get_config()
@@ -399,7 +400,7 @@ class TestRealErrorHandlingServiceIntegration:
                 "quantity": "2.5",
                 "exchange": "coinbase",
                 "strategy": "mean_reversion",
-                "bot_id": "bot-001"
+                "bot_id": "bot-001",
             }
 
             validation_error = ValidationError("Price outside allowed range")
@@ -408,7 +409,7 @@ class TestRealErrorHandlingServiceIntegration:
                 error=validation_error,
                 component="order_validator",
                 operation="validate_price_range",
-                context=trading_context
+                context=trading_context,
             )
 
             # Verify real validation occurred

@@ -194,6 +194,7 @@ class TestBacktestingIntegration:
         return db_manager
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_end_to_end_backtest_single_symbol(
         self, backtest_config, strategy, mock_db_manager
     ):
@@ -232,6 +233,7 @@ class TestBacktestingIntegration:
             assert trade["exit_time"] >= trade["entry_time"]
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_end_to_end_backtest_multi_symbol(
         self, backtest_config, strategy, mock_db_manager
     ):
@@ -251,6 +253,7 @@ class TestBacktestingIntegration:
         assert len(result.equity_curve) > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_with_risk_manager_integration(
         self, backtest_config, strategy, mock_db_manager
     ):
@@ -279,6 +282,7 @@ class TestBacktestingIntegration:
         assert len(result.equity_curve) > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_metrics_integration(self, backtest_config, strategy, mock_db_manager):
         """Test integration with metrics calculator."""
         engine = BacktestEngine(
@@ -312,6 +316,7 @@ class TestBacktestingIntegration:
             assert abs(float(result.total_return) - calculated_return) < 1.0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_error_recovery(self, backtest_config, strategy, mock_db_manager):
         """Test backtest error recovery and resilience."""
         # Modify strategy to occasionally fail
@@ -339,6 +344,7 @@ class TestBacktestingIntegration:
         assert len(result.equity_curve) > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_commission_slippage_accuracy(
         self, backtest_config, strategy, mock_db_manager
     ):
@@ -374,6 +380,7 @@ class TestBacktestingIntegration:
             )
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_position_management(self, backtest_config, strategy, mock_db_manager):
         """Test position management and limits."""
         backtest_config.max_open_positions = 2  # Limit positions
@@ -402,6 +409,7 @@ class TestBacktestingIntegration:
         assert max_concurrent <= backtest_config.max_open_positions
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_drawdown_limits(self, backtest_config, strategy, mock_db_manager):
         """Test drawdown limit enforcement."""
         engine = BacktestEngine(
@@ -435,6 +443,7 @@ class TestBacktestingIntegration:
 
     @pytest.mark.performance
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_performance_large_dataset(self, strategy, mock_db_manager):
         """Test backtest performance with large dataset."""
         # Large backtest configuration
@@ -465,6 +474,7 @@ class TestBacktestingIntegration:
         assert len(result.daily_returns) > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_data_quality_handling(self, backtest_config, strategy):
         """Test handling of poor quality market data."""
         # Create mock DB manager with problematic data
@@ -523,6 +533,7 @@ class TestBacktestingIntegration:
         # Results might be impacted by data quality but shouldn't crash
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_multiple_strategies_comparison(self, backtest_config, mock_db_manager):
         """Test running multiple strategies for comparison."""
         strategies = [
@@ -559,6 +570,7 @@ class TestBacktestingDatabaseIntegration:
     """Test backtesting integration with real database components."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_database_connection_handling(self, clean_database):
         """Test proper database connection handling during backtest."""
         config = BacktestConfig(
@@ -621,6 +633,7 @@ class TestBacktestingDatabaseIntegration:
 # Stress tests
 @pytest.mark.stress
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_backtest_memory_usage():
     """Test backtest memory usage with large datasets."""
     import os

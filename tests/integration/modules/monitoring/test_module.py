@@ -106,6 +106,7 @@ class TestMonitoringModuleIntegration:
         assert "MonitoringServiceInterface" in factory_names
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_alert_service_integration(self, mock_alert_manager):
         """Test alert service integration with proper data validation."""
         from src.monitoring.alerting import AlertSeverity
@@ -185,6 +186,7 @@ class TestMonitoringModuleIntegration:
         assert monitoring_service.performance == performance_service
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_handling_to_monitoring_integration(self, mock_alert_manager):
         """Test error_handling -> monitoring boundary validation."""
         alert_service = DefaultAlertService(mock_alert_manager)
@@ -200,9 +202,7 @@ class TestMonitoringModuleIntegration:
         }
 
         # Should not raise validation error
-        result = await alert_service.handle_error_event_from_error_handling(
-            error_data
-        )
+        result = await alert_service.handle_error_event_from_error_handling(error_data)
 
     def test_boundary_validation_error_handling(self, mock_alert_manager):
         """Test boundary validation catches invalid data."""
@@ -248,6 +248,7 @@ class TestMonitoringModuleIntegration:
             DefaultPerformanceService(None)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_propagation_patterns(self, mock_alert_manager):
         """Test error propagation follows consistent patterns."""
         alert_service = DefaultAlertService(mock_alert_manager)
@@ -275,6 +276,7 @@ class TestMonitoringModuleIntegration:
         assert error.operation == "create_alert"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_health_check_integration(
         self, mock_alert_manager, mock_metrics_collector, mock_performance_profiler
     ):

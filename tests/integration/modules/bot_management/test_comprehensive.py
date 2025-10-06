@@ -11,67 +11,40 @@ Tests the complete functionality of bot management with real integrations:
 - Error recovery and resilience
 """
 
-import asyncio
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
-from typing import Dict, Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 import pytest_asyncio
+
 # Import real service fixtures from infrastructure
-from tests.integration.infrastructure.conftest import (
-    clean_database,
-    real_database_service,
-    real_cache_manager
-)
-
-from src.bot_management.service import BotService
-from src.bot_management.bot_coordinator import BotCoordinator
-from src.bot_management.bot_instance import BotInstance
-from src.bot_management.bot_lifecycle import BotLifecycle
-from src.bot_management.bot_monitor import BotMonitor
-from src.bot_management.resource_manager import ResourceManager
-from src.bot_management.controller import BotManagementController
-from src.bot_management.factory import BotManagementFactory
 from src.bot_management.di_registration import register_bot_management_services
-
-from src.core.dependency_injection import DependencyInjector
 from src.core.exceptions import (
-    ComponentError,  # Replace BotError
-    ServiceError,
-    ValidationError,
-    CapitalAllocationError,  # Replace InsufficientCapitalError
-    RiskManagementError,  # Replace RiskLimitExceededError
+    ServiceError,  # Replace RiskLimitExceededError
 )
 from src.core.types.bot import (
     BotConfiguration,  # Changed from BotConfig
-    BotState,
-    BotMetrics,
     BotStatus,
     BotType,
 )
+
+# Capital types removed - not available in current implementation
+from src.core.types.risk import RiskLevel
 from src.core.types.trading import (
     OrderRequest,
     OrderSide,
-    OrderType,
     OrderStatus,
-    Position,
-    PositionSide,
-    PositionStatus,
+    OrderType,
 )
-# Capital types removed - not available in current implementation
-from src.core.types.risk import RiskMetrics, PositionLimits, RiskLevel
 from src.state import StateType
 
 
 @pytest_asyncio.fixture
 async def dependency_container(clean_database, real_database_service, real_cache_manager):
     """Create and configure dependency container with REAL services."""
-    from tests.integration.infrastructure.service_factory import RealServiceFactory
-    from src.capital_management.service import CapitalService
     from src.capital_management.di_registration import register_capital_management_services
+    from src.capital_management.service import CapitalService
+    from tests.integration.infrastructure.service_factory import RealServiceFactory
 
     # Create real service factory
     factory = RealServiceFactory()
@@ -94,23 +67,22 @@ async def dependency_container(clean_database, real_database_service, real_cache
 
     # Create CapitalService with real repositories
     real_capital_service = CapitalService(
-        capital_repository=capital_repository,
-        audit_repository=audit_repository
+        capital_repository=capital_repository, audit_repository=audit_repository
     )
     await real_capital_service.start()  # Initialize the service
     container.register("capital_service", real_capital_service, singleton=True)
 
     # Create and register REAL StateService for state recovery tests
-    from src.state.state_service import StateService
     from src.state.di_registration import register_state_services
+
     register_state_services(container)
     real_state_service = container.get("StateService")
     await real_state_service.start()
     container.register("state_service", real_state_service, singleton=True)
 
     # Create and register REAL RiskService for risk management tests
-    from src.risk_management.service import RiskService
     from src.risk_management.di_registration import register_risk_management_services
+
     register_risk_management_services(container)
     real_risk_service = container.get("RiskService")
     await real_risk_service.start()
@@ -120,7 +92,8 @@ async def dependency_container(clean_database, real_database_service, real_cache
     register_bot_management_services(container)
 
     # Create and register mock monitoring service for test
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import AsyncMock
+
     mock_monitoring_service = MagicMock()
     mock_monitoring_service.get_bot_health = MagicMock()
     mock_monitoring_service.send_alert = MagicMock()
@@ -178,14 +151,13 @@ def sample_bot_config():
 
 class TestBotLifecycleIntegration:
     """Test complete bot lifecycle with integrated services."""
-    
+
     @pytest.mark.asyncio
-    async def test_complete_bot_lifecycle_flow(
-        self, bot_management_service, sample_bot_config
-    ):
+    @pytest.mark.timeout(300)
+    async def test_complete_bot_lifecycle_flow(self, bot_management_service, sample_bot_config):
         """Test the complete lifecycle of a bot from creation to termination."""
         # Service mocks are already configured in the fixture
-        
+
         # 1. Create bot
         create_result = await bot_management_service.create_bot(sample_bot_config)
         # BotService.create_bot returns the bot_id as a string on success
@@ -204,6 +176,7 @@ class TestBotLifecycleIntegration:
         assert stop_result is True  # stop_bot returns boolean
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_bot_restart_with_state_recovery(
         self, bot_management_service, sample_bot_config, dependency_container
     ):
@@ -235,14 +208,14 @@ class TestBotLifecycleIntegration:
             state_type=StateType.BOT_STATE,
             state_id=sample_bot_config.bot_id,
             state_data=previous_state,
-            source_component="TestBot"
+            source_component="TestBot",
         )
 
         # Restart bot with recovery
         restart_result = await bot_management_service.restart_bot(
             sample_bot_config.bot_id, recover_state=True
         )
-        
+
         assert restart_result["success"] is True
         # State recovery is complex to mock in integration tests,
         # so we focus on the core restart functionality working
@@ -251,16 +224,12 @@ class TestBotLifecycleIntegration:
         assert "restarted successfully" in restart_result["message"]
 
 
-
-
-
 class TestCapitalManagementIntegration:
     """Test capital management integration."""
-    
+
     @pytest.mark.asyncio
-    async def test_capital_allocation_flow(
-        self, bot_management_service, dependency_container
-    ):
+    @pytest.mark.timeout(300)
+    async def test_capital_allocation_flow(self, bot_management_service, dependency_container):
         """Test complete capital allocation and tracking flow using real services."""
         capital_service = dependency_container.get("capital_service")
 
@@ -285,7 +254,7 @@ class TestCapitalManagementIntegration:
                 exchange="binance",
                 requested_amount=allocation_amount,
                 bot_id=bot_id,
-                authorized_by="test_user"
+                authorized_by="test_user",
             )
 
             # Verify allocation was created correctly
@@ -319,7 +288,7 @@ class TestCapitalManagementIntegration:
 
         # Verify capital metrics contain expected data
         assert capital_metrics is not None
-        assert hasattr(capital_metrics, 'allocated_amount')  # Correct field name
+        assert hasattr(capital_metrics, "allocated_amount")  # Correct field name
         assert capital_metrics.total_capital == Decimal("200000.00")
 
         # Verify that allocations were created successfully (they are in memory)
@@ -344,11 +313,12 @@ class TestCapitalManagementIntegration:
                 strategy_id=allocation.strategy_id,
                 exchange=allocation.exchange,
                 release_amount=allocation.allocated_amount,
-                authorized_by="test_user"
+                authorized_by="test_user",
             )
             assert release_result is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_capital_utilization_tracking(
         self, bot_management_service, sample_bot_config, dependency_container
     ):
@@ -364,7 +334,7 @@ class TestCapitalManagementIntegration:
             exchange=sample_bot_config.exchanges[0] if sample_bot_config.exchanges else "binance",
             requested_amount=Decimal("10000.00"),
             bot_id=sample_bot_config.bot_id,
-            authorized_by="test_user"
+            authorized_by="test_user",
         )
 
         # Verify allocation
@@ -377,7 +347,7 @@ class TestCapitalManagementIntegration:
             strategy_id=sample_bot_config.strategy_id,
             exchange=sample_bot_config.exchanges[0] if sample_bot_config.exchanges else "binance",
             utilized_amount=Decimal("5000.00"),
-            authorized_by="test_user"
+            authorized_by="test_user",
         )
         assert update_result is True
 
@@ -394,15 +364,16 @@ class TestCapitalManagementIntegration:
             strategy_id=sample_bot_config.strategy_id,
             exchange=sample_bot_config.exchanges[0] if sample_bot_config.exchanges else "binance",
             release_amount=Decimal("10000.00"),
-            authorized_by="test_user"
+            authorized_by="test_user",
         )
         assert release_result is True
 
 
 class TestRiskManagementIntegration:
     """Test risk management integration."""
-    
+
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_risk_limits_enforcement(
         self, bot_management_service, sample_bot_config, dependency_container
     ):
@@ -425,12 +396,13 @@ class TestRiskManagementIntegration:
 
             # Set portfolio metrics in risk service to match capital
             from src.core.types import PortfolioMetrics
+
             portfolio_metrics = PortfolioMetrics(
                 total_value=Decimal("10000.00"),
                 total_exposure=Decimal("0.00"),
                 available_balance=Decimal("10000.00"),
                 unrealized_pnl=Decimal("0.00"),
-                realized_pnl=Decimal("0.00")
+                realized_pnl=Decimal("0.00"),
             )
             risk_service._portfolio_metrics = portfolio_metrics
 
@@ -446,8 +418,7 @@ class TestRiskManagementIntegration:
 
             # Direct risk validation should fail
             validation_result = await risk_service.validate_order(
-                large_order,
-                available_capital=Decimal("10000.00")
+                large_order, available_capital=Decimal("10000.00")
             )
             assert validation_result is False, "Large order should fail risk validation"
 
@@ -461,8 +432,7 @@ class TestRiskManagementIntegration:
             )
 
             validation_result = await risk_service.validate_order(
-                small_order,
-                available_capital=Decimal("10000.00")
+                small_order, available_capital=Decimal("10000.00")
             )
             assert validation_result is True, "Small order should pass risk validation"
 
@@ -480,6 +450,7 @@ class TestRiskManagementIntegration:
             risk_service.risk_config.max_position_size_pct = original_max_position_pct
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_risk_service_integration_flow(
         self, bot_management_service, sample_bot_config, dependency_container
     ):
@@ -496,12 +467,13 @@ class TestRiskManagementIntegration:
 
         # Set portfolio metrics in risk service to match capital
         from src.core.types import PortfolioMetrics
+
         portfolio_metrics = PortfolioMetrics(
             total_value=Decimal("10000.00"),
             total_exposure=Decimal("0.00"),
             available_balance=Decimal("10000.00"),
             unrealized_pnl=Decimal("0.00"),
-            realized_pnl=Decimal("0.00")
+            realized_pnl=Decimal("0.00"),
         )
         risk_service._portfolio_metrics = portfolio_metrics
 
@@ -516,15 +488,15 @@ class TestRiskManagementIntegration:
 
         # This should pass risk validation (order value = $50, well within limits)
         validation_result = await risk_service.validate_order(
-            valid_order,
-            available_capital=Decimal("10000.00")
+            valid_order, available_capital=Decimal("10000.00")
         )
         assert validation_result is True, "Small order should pass risk validation"
 
         # Test 2: Get current risk level
         risk_level = risk_service.get_current_risk_level()
-        assert risk_level in [RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH], \
+        assert risk_level in [RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH], (
             f"Risk level should be valid enum value, got: {risk_level}"
+        )
 
         # Test 3: Verify risk service provides basic functionality
         # Note: calculate_risk_metrics requires complex setup, so we test other integration points
@@ -532,23 +504,26 @@ class TestRiskManagementIntegration:
         # Test 4: Risk summary
         risk_summary = await risk_service.get_risk_summary()
         assert isinstance(risk_summary, dict), "Risk summary should be a dictionary"
-        assert "current_risk_level" in risk_summary, "Risk summary should contain current_risk_level"
+        assert "current_risk_level" in risk_summary, (
+            "Risk summary should contain current_risk_level"
+        )
 
 
 class TestMonitoringAndAlertingIntegration:
     """Test monitoring and alerting integration."""
-    
+
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_health_monitoring_flow(
         self, bot_management_service, sample_bot_config, dependency_container
     ):
         """Test complete health monitoring and alerting flow."""
         monitoring_service = dependency_container.get("monitoring_service")
-        
+
         # Setup bot
         await bot_management_service.create_bot(sample_bot_config)
         await bot_management_service.start_bot(sample_bot_config.bot_id)
-        
+
         # Stop the bot so health check shows it as not found
         await bot_management_service.stop_bot(sample_bot_config.bot_id)
 
@@ -564,6 +539,7 @@ class TestMonitoringAndAlertingIntegration:
         assert "checks" in health_result
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_performance_degradation_detection(
         self, bot_management_service, sample_bot_config, dependency_container
     ):
@@ -590,7 +566,9 @@ class TestMonitoringAndAlertingIntegration:
         # Test that performance metrics can be retrieved
         try:
             # Try to get analytics data if available
-            performance_metrics = analytics_service.get_performance_metrics(sample_bot_config.bot_id)
+            performance_metrics = analytics_service.get_performance_metrics(
+                sample_bot_config.bot_id
+            )
             assert performance_metrics["win_rate"] == Decimal("0.35")
             assert performance_metrics["avg_return"] == Decimal("-0.02")
             assert performance_metrics["max_drawdown"] == Decimal("0.15")
@@ -607,39 +585,38 @@ class TestMonitoringAndAlertingIntegration:
 
 class TestErrorRecoveryIntegration:
     """Test error recovery and resilience."""
-    
+
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_exchange_connection_recovery(
         self, bot_management_service, sample_bot_config, dependency_container
     ):
         """Test recovery from exchange connection failure."""
         exchange_factory = dependency_container.get("exchange_factory")
         state_service = dependency_container.get("state_service")
-        
+
         # Setup bot
         await bot_management_service.create_bot(sample_bot_config)
         await bot_management_service.start_bot(sample_bot_config.bot_id)
-        
+
         # Simulate exchange connection failure
         mock_exchange = AsyncMock()
         mock_exchange.get_ticker.side_effect = ServiceError("Connection lost")
         exchange_factory.get_exchange.return_value = mock_exchange
-        
+
         # Trigger error
         with pytest.raises(ServiceError):
-            await bot_management_service.get_market_data(
-                sample_bot_config.bot_id, "BTC/USDT"
-            )
-        
+            await bot_management_service.get_market_data(sample_bot_config.bot_id, "BTC/USDT")
+
         # Simulate recovery
         mock_exchange.get_ticker.side_effect = None
         mock_exchange.get_ticker.return_value = {"last": Decimal("50000.00")}
-        
+
         # Attempt reconnection
         recovery_result = await bot_management_service.recover_bot_connection(
             sample_bot_config.bot_id
         )
-        
+
         assert recovery_result["success"] is True
         assert recovery_result["reconnected"] is True
 
@@ -655,9 +632,8 @@ class TestErrorRecoveryIntegration:
         assert bot_status["bot_id"] == sample_bot_config.bot_id
 
     @pytest.mark.asyncio
-    async def test_cascade_failure_prevention(
-        self, bot_management_service, dependency_container
-    ):
+    @pytest.mark.timeout(300)
+    async def test_cascade_failure_prevention(self, bot_management_service, dependency_container):
         """Test prevention of cascade failures across multiple bots."""
         # Create multiple bots with proper configuration
         bot_ids = [f"bot_{i}" for i in range(3)]  # Reduce to 3 bots for simpler test
@@ -669,8 +645,8 @@ class TestErrorRecoveryIntegration:
                 name=f"Bot {bot_id}",
                 bot_type=BotType.TRADING,  # Required field
                 version="1.0.0",  # Required field
-                strategy_id=f"strategy_{i+1}",
-                strategy_name=f"strategy_{i+1}_strategy",  # Required field
+                strategy_id=f"strategy_{i + 1}",
+                strategy_name=f"strategy_{i + 1}_strategy",  # Required field
                 symbols=["BTC/USDT"],  # Correct field name
                 exchanges=["binance"],  # Correct field name
                 allocated_capital=Decimal("5000.00"),  # Correct field name
@@ -702,21 +678,22 @@ class TestErrorRecoveryIntegration:
 
 class TestEndToEndScenarios:
     """Test complete end-to-end scenarios."""
-    
-    @pytest.mark.skip(reason="Requires ExecutionService - will be enabled when execution module integration tests are complete")
+
+    @pytest.mark.skip(
+        reason="Requires ExecutionService - will be enabled when execution module integration tests are complete"
+    )
     @pytest.mark.asyncio
-    async def test_profitable_trading_session(
-        self, bot_management_service, dependency_container
-    ):
+    @pytest.mark.timeout(300)
+    async def test_profitable_trading_session(self, bot_management_service, dependency_container):
         """Test a complete profitable trading session."""
         # Setup all services
         exchange_factory = dependency_container.get("exchange_factory")
         execution_service = dependency_container.get("execution_service")
         analytics_service = dependency_container.get("analytics_service")
-        
+
         mock_exchange = AsyncMock()
         exchange_factory.get_exchange.return_value = mock_exchange
-        
+
         # Create and configure bot with proper configuration
         config = BotConfiguration(
             bot_id="profit_bot",
@@ -730,11 +707,11 @@ class TestEndToEndScenarios:
             allocated_capital=Decimal("10000.00"),  # Correct field name
             enabled=True,
         )
-        
+
         # Start trading session
         await bot_management_service.create_bot(config)
         await bot_management_service.start_bot(config.bot_id)
-        
+
         # Simulate profitable trades
         trades = [
             {"side": "BUY", "price": "50000", "quantity": "0.01", "pnl": "0"},
@@ -742,7 +719,7 @@ class TestEndToEndScenarios:
             {"side": "BUY", "price": "51000", "quantity": "0.015", "pnl": "0"},
             {"side": "SELL", "price": "52020", "quantity": "0.015", "pnl": "15.3"},  # +2% profit
         ]
-        
+
         # Test that we can execute trades through the bot management service
         try:
             for trade in trades:
@@ -764,10 +741,10 @@ class TestEndToEndScenarios:
                 # Execute trade through bot management service
                 trade_result = await bot_management_service.execute_bot_trade(config.bot_id, order)
                 assert trade_result is not None
-        except Exception as e:
+        except Exception:
             # If execute_bot_trade is not fully implemented, just verify bot can be managed
             pass
-        
+
         # Test that analytics service can be configured and provides data
         try:
             analytics_service.get_session_summary = lambda bot_id: {
@@ -792,17 +769,14 @@ class TestEndToEndScenarios:
             pass
 
     @pytest.mark.asyncio
-    async def test_24_hour_automated_trading(
-        self, bot_management_service, dependency_container
-    ):
+    @pytest.mark.timeout(300)
+    async def test_24_hour_automated_trading(self, bot_management_service, dependency_container):
         """Test 24-hour automated trading with all systems."""
-        import asyncio
-        from datetime import datetime, timedelta
-        
+
         # Setup services
         monitoring_service = dependency_container.get("monitoring_service")
         analytics_service = dependency_container.get("analytics_service")
-        
+
         # Create bot for automated trading with proper configuration
         config = BotConfiguration(
             bot_id="auto_bot",
@@ -816,10 +790,10 @@ class TestEndToEndScenarios:
             allocated_capital=Decimal("20000.00"),  # Correct field name
             enabled=True,
         )
-        
+
         await bot_management_service.create_bot(config)
         await bot_management_service.start_bot(config.bot_id)
-        
+
         # Simulate simplified automated operation
         # Test health checking capability
         try:
@@ -857,25 +831,24 @@ class TestEndToEndScenarios:
 
 class TestAdvancedIntegrationScenarios:
     """Test advanced integration scenarios."""
-    
+
     @pytest.mark.asyncio
-    async def test_multi_exchange_arbitrage(
-        self, bot_management_service, dependency_container
-    ):
+    @pytest.mark.timeout(300)
+    async def test_multi_exchange_arbitrage(self, bot_management_service, dependency_container):
         """Test multi-exchange arbitrage bot coordination."""
         exchange_factory = dependency_container.get("exchange_factory")
-        
+
         # Setup exchanges with price differences
         binance_exchange = AsyncMock()
         binance_exchange.get_ticker.return_value = {"last": Decimal("50000.00")}
-        
+
         coinbase_exchange = AsyncMock()
         coinbase_exchange.get_ticker.return_value = {"last": Decimal("50100.00")}
-        
+
         exchange_factory.get_exchange.side_effect = lambda x: (
             binance_exchange if x == "binance" else coinbase_exchange
         )
-        
+
         # Create arbitrage bots with proper configuration
         configs = [
             BotConfiguration(
@@ -903,11 +876,11 @@ class TestAdvancedIntegrationScenarios:
                 enabled=True,
             ),
         ]
-        
+
         for config in configs:
             await bot_management_service.create_bot(config)
             await bot_management_service.start_bot(config.bot_id)
-        
+
         # Test basic arbitrage bot coordination (execute_arbitrage method doesn't exist)
         # Instead, verify that multiple bots can be managed simultaneously
         all_bots = await bot_management_service.get_all_bots_status()
@@ -922,18 +895,21 @@ class TestAdvancedIntegrationScenarios:
             assert bot_status is not None
             assert "state" in bot_status
 
-    @pytest.mark.skip(reason="Requires StrategyService - will be enabled when strategies module integration tests are complete")
+    @pytest.mark.skip(
+        reason="Requires StrategyService - will be enabled when strategies module integration tests are complete"
+    )
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_migration(
         self, bot_management_service, sample_bot_config, dependency_container
     ):
         """Test live strategy migration without stopping bot."""
         strategy_service = dependency_container.get("strategy_service")
-        
+
         # Create bot with initial strategy
         await bot_management_service.create_bot(sample_bot_config)
         await bot_management_service.start_bot(sample_bot_config.bot_id)
-        
+
         # Test strategy change simulation (migrate_bot_strategy method doesn't exist)
         # Instead, test bot restart which could be used for strategy changes
         try:

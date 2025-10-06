@@ -80,7 +80,8 @@ class StrategyIntegratedBase(ABC):
 
         # Error handling
         self.error_handler: ErrorHandler = get_global_error_handler()
-        self.error_context = ErrorContext(operation_name=f"strategy_{strategy_name}")
+        # ErrorContext requires an error parameter, so we'll create it when needed
+        self._strategy_component = f"strategy_{strategy_name}"
 
         # Validation - use dependency injection
         self.market_data_validator = MarketDataValidator()

@@ -31,7 +31,29 @@ from decimal import Decimal, getcontext
 from typing import Any
 
 import numpy as np
-from numba import float64, jit, prange, vectorize
+
+# Try to import numba for performance optimizations
+try:
+    from numba import float64, jit, prange, vectorize
+    NUMBA_AVAILABLE = True
+except ImportError:
+    # Fallback when numba is not available
+    NUMBA_AVAILABLE = False
+    float64 = None
+
+    # Mock decorators that do nothing
+    def jit(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+    def vectorize(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+    # Replace prange with regular range
+    prange = range
 
 from src.core.config import Config
 from src.core.exceptions import DataProcessingError
@@ -47,14 +69,23 @@ from src.utils.technical_indicators import (
 )
 
 
-@vectorize([float64(float64, float64)], nopython=True, target="parallel")
-def fast_ema_weight(price: float, alpha: float) -> float:
-    """Vectorized EMA weight calculation using SIMD.
-    
-    Note: Internal numpy operations use float64 for performance,
-    but input/output should use Decimal for financial precision.
-    """
-    return price * alpha
+if NUMBA_AVAILABLE:
+    @vectorize([float64(float64, float64)], nopython=True, target="parallel")
+    def fast_ema_weight(price: float, alpha: float) -> float:
+        """Vectorized EMA weight calculation using SIMD.
+
+        Note: Internal numpy operations use float64 for performance,
+        but input/output should use Decimal for financial precision.
+        """
+        return price * alpha
+else:
+    def fast_ema_weight(price: float, alpha: float) -> float:
+        """EMA weight calculation (fallback without numba).
+
+        Note: Internal numpy operations use float64 for performance,
+        but input/output should use Decimal for financial precision.
+        """
+        return price * alpha
 
 
 # NOTE: Vectorized calculation functions are now imported from src.utils.technical_indicators

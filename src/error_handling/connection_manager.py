@@ -52,6 +52,7 @@ class ConnectionManager:
 
         # Simple connection storage
         self.connections: dict[str, ConnectionInfo] = {}
+        self._message_queues: dict[str, list[dict[str, Any]]] = {}
 
         # Basic reconnection settings
         self.max_attempts = 3
@@ -59,6 +60,14 @@ class ConnectionManager:
         self.max_delay = 30.0
         self.connection_timeout = 30.0  # Default connection timeout
         self.heartbeat_interval = 30.0  # Default heartbeat interval
+
+    async def initialize(self) -> None:
+        """Initialize the connection manager."""
+        self.logger.info("Connection manager initialized")
+
+    async def cleanup(self) -> None:
+        """Cleanup alias for cleanup_resources."""
+        await self.cleanup_resources()
 
     async def establish_connection(
         self,
@@ -177,6 +186,24 @@ class ConnectionManager:
 
         connection_info = self.connections[connection_id]
         return connection_info.state == ConnectionState.CONNECTED
+
+    async def queue_message(self, connection_id: str, message: dict[str, Any]) -> None:
+        """Queue a message for a connection."""
+        if connection_id not in self._message_queues:
+            self._message_queues[connection_id] = []
+
+        self._message_queues[connection_id].append(message)
+        self.logger.debug(f"Message queued for connection {connection_id}: {message.get('type', 'unknown')}")
+
+    async def flush_message_queue(self, connection_id: str) -> int:
+        """Flush all queued messages for a connection and return count."""
+        if connection_id not in self._message_queues:
+            return 0
+
+        message_count = len(self._message_queues[connection_id])
+        self._message_queues[connection_id].clear()
+        self.logger.debug(f"Flushed {message_count} messages for connection {connection_id}")
+        return message_count
 
     async def cleanup_resources(self) -> None:
         """Cleanup all resources."""

@@ -7,17 +7,15 @@ with all its dependencies and follows the Controller-Service-Repository pattern.
 Phase 5: Real service-based tests - NO MOCKS allowed except for external APIs.
 """
 
-import pytest
-import pytest_asyncio
 from decimal import Decimal
 
-from tests.integration.infrastructure.service_factory import RealServiceFactory
+import pytest
+import pytest_asyncio
 
-from src.core.dependency_injection import DependencyContainer
-from src.core.types import BotConfiguration, BotPriority, BotStatus, BotType
-from src.bot_management.di_registration import register_bot_management_services
-from src.bot_management.service import BotService
 from src.bot_management.factory import BotManagementFactory
+from src.bot_management.service import BotService
+from src.core.types import BotConfiguration, BotPriority, BotType
+from tests.integration.infrastructure.service_factory import RealServiceFactory
 
 
 @pytest_asyncio.fixture
@@ -47,7 +45,7 @@ def sample_bot_config():
         priority=BotPriority.NORMAL,
         auto_start=False,
         paper_trading=True,
-        strategy_parameters={"lookback_period": 20}
+        strategy_parameters={"lookback_period": 20},
     )
 
 
@@ -55,6 +53,7 @@ class TestBotManagementDependencyValidation:
     """Test bot_management module dependency injection and integration with real services."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_dependency_injection_registration_complete(self, real_bot_services):
         """Test that all bot management services are registered correctly."""
         container = real_bot_services.container
@@ -68,6 +67,7 @@ class TestBotManagementDependencyValidation:
         assert container.get("BotMonitoringService") is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_bot_management_factory_integration(self, real_bot_services):
         """Test that BotManagementFactory creates services with proper dependencies."""
         container = real_bot_services.container
@@ -89,6 +89,7 @@ class TestBotManagementDependencyValidation:
         assert resource_manager is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_bot_service_dependency_injection(self, real_bot_services, sample_bot_config):
         """Test that BotService receives and uses all required dependencies."""
         bot_service = real_bot_services.container.get("BotService")
@@ -102,6 +103,7 @@ class TestBotManagementDependencyValidation:
         assert bot_service._strategy_service is not None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_circular_dependency_prevention(self):
         """Test that TYPE_CHECKING is used to prevent circular dependencies."""
         # Check that critical files use TYPE_CHECKING
@@ -110,20 +112,22 @@ class TestBotManagementDependencyValidation:
         import src.bot_management.service as service_module
 
         # These modules should have TYPE_CHECKING imports
-        assert hasattr(di_module, 'TYPE_CHECKING')
-        assert hasattr(factory_module, 'TYPE_CHECKING')
-        assert hasattr(service_module, 'TYPE_CHECKING')
+        assert hasattr(di_module, "TYPE_CHECKING")
+        assert hasattr(factory_module, "TYPE_CHECKING")
+        assert hasattr(service_module, "TYPE_CHECKING")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_core_module_integration(self, real_bot_services):
         """Test integration with core modules."""
         bot_service = real_bot_services.container.get("BotService")
 
         # Verify core imports are available
-        assert hasattr(BotService, '__bases__')
-        assert any('BaseService' in str(base) for base in BotService.__bases__)
+        assert hasattr(BotService, "__bases__")
+        assert any("BaseService" in str(base) for base in BotService.__bases__)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_database_model_integration(self):
         """Test that bot_management integrates with database models."""
         # Verify database models exist for bot management
@@ -131,52 +135,57 @@ class TestBotManagementDependencyValidation:
         from src.database.models.bot_instance import BotInstance
 
         # Check that models have required fields
-        assert hasattr(Bot, 'id')
-        assert hasattr(Bot, 'name')
-        assert hasattr(Bot, 'status')
-        assert hasattr(Bot, 'allocated_capital')
+        assert hasattr(Bot, "id")
+        assert hasattr(Bot, "name")
+        assert hasattr(Bot, "status")
+        assert hasattr(Bot, "allocated_capital")
 
-        assert hasattr(BotInstance, 'id')
-        assert hasattr(BotInstance, 'bot_id')
-        assert hasattr(BotInstance, 'status')
+        assert hasattr(BotInstance, "id")
+        assert hasattr(BotInstance, "bot_id")
+        assert hasattr(BotInstance, "status")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_execution_service_integration(self, real_bot_services):
         """Test integration with execution service."""
         execution_service = real_bot_services.container.get("execution_service")
         assert execution_service is not None
 
         # Verify service has expected methods
-        assert hasattr(execution_service, 'health_check')
+        assert hasattr(execution_service, "health_check")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_risk_management_integration(self, real_bot_services):
         """Test integration with risk management service."""
         risk_service = real_bot_services.container.get("risk_service")
         assert risk_service is not None
 
         # Verify service has expected methods
-        assert hasattr(risk_service, 'health_check')
+        assert hasattr(risk_service, "health_check")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_strategy_service_integration(self, real_bot_services):
         """Test integration with strategy service."""
         strategy_service = real_bot_services.container.get("strategy_service")
         assert strategy_service is not None
 
         # Verify service has expected methods
-        assert hasattr(strategy_service, 'health_check')
+        assert hasattr(strategy_service, "health_check")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_capital_management_integration(self, real_bot_services):
         """Test integration with capital management service."""
         capital_service = real_bot_services.container.get("capital_service")
         assert capital_service is not None
 
         # Verify service has expected methods
-        assert hasattr(capital_service, 'allocate_capital')
+        assert hasattr(capital_service, "allocate_capital")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_web_interface_integration(self):
         """Test that web interface properly uses bot_management."""
         # Verify web interface imports bot_management correctly
@@ -186,19 +195,21 @@ class TestBotManagementDependencyValidation:
 
             # These imports should work without circular dependency issues
             assert callable(get_bot_service)
-            assert hasattr(WebBotService, '__init__')
+            assert hasattr(WebBotService, "__init__")
         except ImportError as e:
             pytest.skip(f"Web interface bot_management integration not fully implemented: {e}")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_monitoring_integration(self, real_bot_services):
         """Test integration with monitoring service."""
         bot_service = real_bot_services.container.get("BotService")
 
         # Verify bot service has monitoring capabilities
-        assert hasattr(bot_service, 'health_check')
+        assert hasattr(bot_service, "health_check")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_handling_integration(self, real_bot_services, sample_bot_config):
         """Test that error handling decorators work with bot_management."""
         bot_service = real_bot_services.container.get("BotService")

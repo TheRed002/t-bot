@@ -124,9 +124,6 @@ class DependencyRegistrar:
             except Exception as e:
                 self.logger.warning(f"Failed to execute lazy configuration: {e}")
 
-        # Execute any container-level lazy configurations
-        self.injector.execute_lazy_configurations()
-
         self.logger.info("Completed ordered dependency registration")
 
 
@@ -175,7 +172,7 @@ def _register_core_dependencies(registrar: DependencyRegistrar) -> None:
         from src.database.di_registration import register_database_services
 
         try:
-            register_database_services(injector.get_container())
+            register_database_services(injector)
         except Exception as e:
             logger.warning(f"Database registration failed: {e}")
 

@@ -1,8 +1,13 @@
 """Configuration for database module integration tests."""
 
 import os
+
 import pytest
 import pytest_asyncio
+
+# Import the real clean_database fixture from infrastructure tests
+# This ensures database integration tests use the properly configured fixture
+from tests.integration.infrastructure.conftest import clean_database  # noqa: F401
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -35,7 +40,7 @@ async def di_container():
     Uses master DI registration to ensure all dependencies are properly configured
     in the correct order without circular dependency issues.
     """
-    from tests.integration.conftest import register_all_services_for_testing, cleanup_di_container
+    from tests.integration.conftest import cleanup_di_container, register_all_services_for_testing
 
     container = register_all_services_for_testing()
     yield container

@@ -5,15 +5,13 @@ This test suite verifies that the optimization module properly integrates
 with and uses other modules through proper dependency injection patterns.
 """
 
-import asyncio
 from decimal import Decimal
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.core.dependency_injection import DependencyInjector
-from src.core.exceptions import OptimizationError, ValidationError
+from src.core.exceptions import ValidationError
 from src.optimization.analysis_service import AnalysisService
 from src.optimization.backtesting_integration import BacktestIntegrationService
 from src.optimization.controller import OptimizationController
@@ -81,7 +79,7 @@ class TestOptimizationDependencyInjection:
             "OptimizationAnalysisService",
             "OptimizationService",
             "OptimizationController",
-            "OptimizationFactory"
+            "OptimizationFactory",
         ]
 
         for service_name in required_services:
@@ -95,9 +93,8 @@ class TestOptimizationDependencyInjection:
     def test_optimization_service_dependency_injection(self, mock_session):
         """Test OptimizationService properly receives injected dependencies."""
         # Create real dependencies
-        from src.optimization.repository import OptimizationRepository
-        from src.optimization.analysis_service import AnalysisService
         from src.optimization.backtesting_integration import BacktestIntegrationService
+        from src.optimization.repository import OptimizationRepository
 
         repository = OptimizationRepository(session=mock_session)
         analysis_service = AnalysisService()
@@ -107,7 +104,7 @@ class TestOptimizationDependencyInjection:
         service = OptimizationService(
             backtest_integration=backtest_integration,
             optimization_repository=repository,
-            analysis_service=analysis_service
+            analysis_service=analysis_service,
         )
 
         # Verify dependencies are properly stored
@@ -124,15 +121,18 @@ class TestOptimizationDependencyInjection:
 
         # Verify repository inherits from proper base component
         from src.core.base import BaseComponent
+
         assert isinstance(repository, BaseComponent)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_integration_service_dependency_usage(self):
         """Test BacktestIntegrationService properly uses BacktestService."""
         # Create real backtest service if available
         try:
             from src.backtesting.service import BacktestService
             from src.core.config import Config
+
             config = Config()
             backtest_service = BacktestService(config=config)
         except (ImportError, TypeError):
@@ -172,7 +172,7 @@ class TestOptimizationModuleUsage:
             assert container.optimization_service == opt_service
 
             # Verify service status is tracked if method exists
-            if hasattr(container, 'get_service_status'):
+            if hasattr(container, "get_service_status"):
                 status = container.get_service_status()
                 assert status["optimization_service"] is True
         except ImportError:
@@ -182,8 +182,8 @@ class TestOptimizationModuleUsage:
     def test_web_interface_uses_optimization_service(self):
         """Test web interface properly uses optimization service through DI."""
         try:
-            from src.web_interface.api.optimization import get_optimization_service
             from src.core.dependency_injection import DependencyInjector
+            from src.web_interface.api.optimization import get_optimization_service
 
             # Create real injector with optimization service
             injector = DependencyInjector()
@@ -236,12 +236,13 @@ class TestOptimizationIntegrationPatterns:
     """Test optimization module integration patterns."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_optimization_service_uses_repositories_correctly(self):
         """Test optimization service uses repositories through proper service layer."""
-        from src.optimization.repository import OptimizationRepository
         from src.core.config import Config
         from src.database.connection import DatabaseConnectionManager
         from src.database.service import DatabaseService
+        from src.optimization.repository import OptimizationRepository
 
         # Create real repository with database service
         try:
@@ -262,11 +263,13 @@ class TestOptimizationIntegrationPatterns:
             assert service._optimization_repository == repository
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_optimization_uses_backtesting_through_service(self):
         """Test optimization properly uses backtesting through service layer."""
         try:
             from src.backtesting.service import BacktestService
             from src.core.config import Config
+
             config = Config()
             backtest_service = BacktestService(config=config)
         except (ImportError, TypeError):
@@ -300,9 +303,10 @@ class TestOptimizationIntegrationPatterns:
 
     def test_optimization_uses_proper_types(self):
         """Test optimization module uses proper core types."""
-        from src.optimization.core import OptimizationResult, OptimizationStatus
-        from decimal import Decimal
         from datetime import datetime, timezone
+        from decimal import Decimal
+
+        from src.optimization.core import OptimizationStatus
 
         # Create optimization result and verify it uses Decimal for financial values
         result_data = {
@@ -318,7 +322,7 @@ class TestOptimizationIntegrationPatterns:
             "start_time": datetime.now(timezone.utc),
             "end_time": datetime.now(timezone.utc),
             "total_duration_seconds": Decimal("120"),
-            "config_used": {}
+            "config_used": {},
         }
 
         result = OptimizationResult(**result_data)
@@ -335,6 +339,7 @@ class TestOptimizationModuleBoundaries:
         """Test optimization does not directly access other module internals."""
         # Check optimization service imports
         import inspect
+
         from src.optimization import service
 
         # Get all imports from optimization service
@@ -343,8 +348,8 @@ class TestOptimizationModuleBoundaries:
         # Verify it doesn't import internal components of other modules
         forbidden_imports = [
             "from src.backtesting.engine",  # Should use service interface
-            "from src.database.models",     # Should use repository interface
-            "from src.strategies.base",     # Should use service interface
+            "from src.database.models",  # Should use repository interface
+            "from src.strategies.base",  # Should use service interface
         ]
 
         for forbidden in forbidden_imports:
@@ -352,16 +357,16 @@ class TestOptimizationModuleBoundaries:
 
     def test_optimization_uses_proper_interfaces(self):
         """Test optimization uses proper interfaces for external dependencies."""
-        from src.optimization.interfaces import IBacktestIntegrationService
         from src.optimization.backtesting_integration import BacktestIntegrationService
+        from src.optimization.interfaces import IBacktestIntegrationService
 
         # Verify BacktestIntegrationService implements proper interface
         assert issubclass(BacktestIntegrationService, IBacktestIntegrationService)
 
     def test_optimization_repository_uses_proper_protocols(self):
         """Test optimization repository implements proper protocols."""
-        from src.optimization.repository import OptimizationRepository
         from src.optimization.interfaces import OptimizationRepositoryProtocol
+        from src.optimization.repository import OptimizationRepository
 
         # Verify repository implements protocol
         assert issubclass(OptimizationRepository, OptimizationRepositoryProtocol)
@@ -372,14 +377,15 @@ class TestOptimizationModuleBoundaries:
         controller = OptimizationController(mock_service)
 
         # Test validation method exists
-        assert hasattr(controller, '_validate_strategy_optimization_request')
-        assert hasattr(controller, '_validate_parameter_optimization_request')
+        assert hasattr(controller, "_validate_strategy_optimization_request")
+        assert hasattr(controller, "_validate_parameter_optimization_request")
 
 
 class TestOptimizationErrorHandling:
     """Test optimization module error handling integration."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_optimization_service_error_propagation(self):
         """Test optimization service properly propagates errors."""
         mock_backtest_integration = MagicMock()
@@ -391,12 +397,11 @@ class TestOptimizationErrorHandling:
 
         # Test that service inherits proper error handling from ErrorPropagationMixin
         # The service should have logger and error handling capabilities
-        assert hasattr(service, 'logger')  # From BaseService
+        assert hasattr(service, "logger")  # From BaseService
         assert service.logger is not None
 
     def test_optimization_validation_errors(self):
         """Test optimization properly raises validation errors."""
-        from src.core.exceptions import ValidationError
 
         # Test parameter space validation
         builder = ParameterSpaceBuilder()
@@ -419,6 +424,7 @@ class TestOptimizationErrorHandling:
             assert "invalid" in str(e).lower() or "min" in str(e).lower()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_optimization_handles_missing_dependencies(self):
         """Test optimization gracefully handles missing dependencies."""
         # Create service without dependencies
@@ -430,8 +436,8 @@ class TestOptimizationErrorHandling:
         assert service._analysis_service is None
 
         # Test that service can still be used for basic operations
-        assert hasattr(service, 'optimize_strategy')
-        assert hasattr(service, 'optimize_parameters')
+        assert hasattr(service, "optimize_strategy")
+        assert hasattr(service, "optimize_parameters")
 
 
 class TestOptimizationDataFlow:
@@ -439,12 +445,11 @@ class TestOptimizationDataFlow:
 
     def test_optimization_data_transformer_integration(self):
         """Test optimization data transformer properly formats data."""
-        from src.optimization.data_transformer import OptimizationDataTransformer
-        from src.optimization.core import OptimizationResult
+        from datetime import datetime, timezone
 
         # Create mock result with all required fields
         from src.optimization.core import OptimizationStatus
-        from datetime import datetime, timezone
+        from src.optimization.data_transformer import OptimizationDataTransformer
 
         result_data = {
             "optimization_id": "test",
@@ -459,7 +464,7 @@ class TestOptimizationDataFlow:
             "start_time": datetime.now(timezone.utc),
             "end_time": datetime.now(timezone.utc),
             "total_duration_seconds": Decimal("120"),
-            "config_used": {}
+            "config_used": {},
         }
         result = OptimizationResult(**result_data)
 
@@ -553,6 +558,7 @@ class TestOptimizationEndToEndIntegration:
         assert "analysis_service" in stack
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_optimization_service_integration_flow(self, complete_injector):
         """Test optimization service integration flow."""
         service = complete_injector.resolve("OptimizationService")

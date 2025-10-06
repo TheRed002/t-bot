@@ -15,10 +15,8 @@ Key Features:
 
 import time
 from decimal import Decimal
-from typing import Dict, List, Tuple
 
 import numpy as np
-import pandas as pd
 
 from src.core.types import MarketData
 
@@ -32,7 +30,7 @@ class IndicatorValidator:
     """
 
     @staticmethod
-    def calculate_reference_rsi(prices: List[Decimal], period: int = 14) -> Decimal:
+    def calculate_reference_rsi(prices: list[Decimal], period: int = 14) -> Decimal:
         """
         Calculate RSI using reference implementation for validation.
 
@@ -78,7 +76,7 @@ class IndicatorValidator:
         return rsi
 
     @staticmethod
-    def calculate_reference_sma(prices: List[Decimal], period: int) -> Decimal:
+    def calculate_reference_sma(prices: list[Decimal], period: int) -> Decimal:
         """
         Calculate Simple Moving Average using reference implementation.
 
@@ -95,7 +93,7 @@ class IndicatorValidator:
         return sum(prices[-period:]) / period
 
     @staticmethod
-    def calculate_reference_ema(prices: List[Decimal], period: int) -> Decimal:
+    def calculate_reference_ema(prices: list[Decimal], period: int) -> Decimal:
         """
         Calculate Exponential Moving Average using reference implementation.
 
@@ -123,11 +121,11 @@ class IndicatorValidator:
 
     @staticmethod
     def calculate_reference_macd(
-        prices: List[Decimal],
+        prices: list[Decimal],
         fast_period: int = 12,
         slow_period: int = 26,
         signal_period: int = 9,
-    ) -> Dict[str, Decimal]:
+    ) -> dict[str, Decimal]:
         """
         Calculate MACD using reference implementation.
 
@@ -169,7 +167,7 @@ class IndicatorValidator:
     @staticmethod
     def validate_rsi_accuracy(
         calculated_rsi: Decimal,
-        market_data: List[MarketData],
+        market_data: list[MarketData],
         period: int = 14,
         tolerance: Decimal = Decimal("0.01"),
     ) -> bool:
@@ -198,7 +196,7 @@ class IndicatorValidator:
     @staticmethod
     def validate_sma_accuracy(
         calculated_sma: Decimal,
-        market_data: List[MarketData],
+        market_data: list[MarketData],
         period: int,
         tolerance: Decimal = Decimal("0.001"),
     ) -> bool:
@@ -223,7 +221,7 @@ class IndicatorValidator:
     @staticmethod
     def validate_ema_accuracy(
         calculated_ema: Decimal,
-        market_data: List[MarketData],
+        market_data: list[MarketData],
         period: int,
         tolerance: Decimal = Decimal("0.01"),
     ) -> bool:
@@ -256,8 +254,8 @@ class PerformanceBenchmarker:
 
     @staticmethod
     def benchmark_rsi_calculation(
-        indicator_function, market_data: List[MarketData], iterations: int = 100
-    ) -> Dict[str, float]:
+        indicator_function, market_data: list[MarketData], iterations: int = 100
+    ) -> dict[str, float]:
         """
         Benchmark RSI calculation performance.
 
@@ -277,7 +275,7 @@ class PerformanceBenchmarker:
                 result = indicator_function(market_data, period=14)
                 end_time = time.perf_counter()
                 times.append(end_time - start_time)
-            except Exception as e:
+            except Exception:
                 # Record failed calculations
                 times.append(float("inf"))
 
@@ -292,10 +290,10 @@ class PerformanceBenchmarker:
 
     @staticmethod
     def benchmark_multiple_indicators(
-        indicators: Dict[str, callable],
-        market_data: List[MarketData],
+        indicators: dict[str, callable],
+        market_data: list[MarketData],
         iterations: int = 50,
-    ) -> Dict[str, Dict[str, float]]:
+    ) -> dict[str, dict[str, float]]:
         """
         Benchmark multiple indicators for performance comparison.
 
@@ -325,7 +323,7 @@ class PerformanceBenchmarker:
         return results
 
 
-def create_known_test_cases() -> Dict[str, Dict[str, any]]:
+def create_known_test_cases() -> dict[str, dict[str, any]]:
     """
     Create known test cases with expected results for validation.
 
@@ -375,9 +373,9 @@ def create_known_test_cases() -> Dict[str, Dict[str, any]]:
 
 def validate_all_indicators(
     technical_indicators,
-    market_data: List[MarketData],
-    tolerance_overrides: Dict[str, Decimal] = None,
-) -> Dict[str, bool]:
+    market_data: list[MarketData],
+    tolerance_overrides: dict[str, Decimal] = None,
+) -> dict[str, bool]:
     """
     Validate all technical indicators against reference implementations.
 

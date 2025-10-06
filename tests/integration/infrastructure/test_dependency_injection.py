@@ -59,6 +59,7 @@ class RealServiceDependencyInjectionTest:
 
         # Create config for state manager
         from src.core.config import Config
+
         config = Config()
 
         # Register services first so StateManager can find them during initialization
@@ -82,6 +83,7 @@ class RealServiceDependencyInjectionTest:
         logger.info("Real services initialized successfully")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_core_services_resolution(self, clean_database):
         """Test that core services are properly resolved with real implementations."""
         await self.setup_test_services(clean_database)
@@ -110,10 +112,10 @@ class RealServiceDependencyInjectionTest:
         # Test basic cache functionality - verify it exists and has required methods
         # Skip actual cache operations due to TTL parameter implementation details
         # This test focuses on dependency injection, not cache functionality
-        assert hasattr(cache_manager, 'set')
-        assert hasattr(cache_manager, 'get')
-        assert hasattr(cache_manager, 'delete')
-        assert hasattr(cache_manager, 'health_check')
+        assert hasattr(cache_manager, "set")
+        assert hasattr(cache_manager, "get")
+        assert hasattr(cache_manager, "delete")
+        assert hasattr(cache_manager, "health_check")
 
         # Try health check but don't fail if TTL issues occur
         try:
@@ -125,6 +127,7 @@ class RealServiceDependencyInjectionTest:
         logger.info("✅ Real core services resolution test passed")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_service_dependency_chain(self, clean_database):
         """Test complex service dependency chains with real implementations."""
         await self.setup_test_services(clean_database)
@@ -148,6 +151,7 @@ class RealServiceDependencyInjectionTest:
         logger.info("✅ Real service dependency chain test passed")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_business_services_integration(self, clean_database):
         """Test business services integration with real dependencies."""
         await self.setup_test_services(clean_database)
@@ -183,6 +187,7 @@ class RealServiceDependencyInjectionTest:
         logger.info("✅ Real business services integration test passed")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_optional_services(self, clean_database):
         """Test optional services resolution."""
         await self.setup_test_services(clean_database)
@@ -209,6 +214,7 @@ class RealServiceDependencyInjectionTest:
         logger.info("✅ Real optional services test passed")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_service_lifecycle_management(self, clean_database):
         """Test service lifecycle with real resources."""
         await self.setup_test_services(clean_database)
@@ -235,11 +241,7 @@ class RealServiceDependencyInjectionTest:
 
         # Register and initialize service
         test_resource_service = TestResourceService(self.database_service, self.cache_manager)
-        self.container.register(
-            "TestResourceService",
-            test_resource_service,
-            singleton=True
-        )
+        self.container.register("TestResourceService", test_resource_service, singleton=True)
 
         test_service = self.container.get("TestResourceService")
         await test_service.initialize()
@@ -255,6 +257,7 @@ class RealServiceDependencyInjectionTest:
         logger.info("✅ Real service lifecycle management test passed")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_service_health_monitoring(self, clean_database):
         """Test service health checks with real services."""
         await self.setup_test_services(clean_database)
@@ -278,8 +281,8 @@ class RealServiceDependencyInjectionTest:
         # Check cache health - simplified to avoid TTL parameter issues
         try:
             # Just verify cache manager has required methods
-            assert hasattr(self.cache_manager, 'health_check')
-            assert hasattr(self.cache_manager, 'get_stats')
+            assert hasattr(self.cache_manager, "health_check")
+            assert hasattr(self.cache_manager, "get_stats")
             health_status["cache"] = {
                 "status": "healthy",
                 "has_required_methods": True,
@@ -310,6 +313,7 @@ class RealServiceDependencyInjectionTest:
         logger.info("✅ Real service health monitoring test passed")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_transactional_operations(self, clean_database):
         """Test transactional operations across real services."""
         await self.setup_test_services(clean_database)
@@ -323,6 +327,7 @@ class RealServiceDependencyInjectionTest:
             try:
                 # Simple query to test transaction functionality
                 from sqlalchemy import text
+
                 result = await tx.execute(text("SELECT 1 as test_value"))
                 test_result = result.scalar()
                 assert test_result == 1
@@ -341,6 +346,7 @@ class RealServiceDependencyInjectionTest:
         logger.info("✅ Real transactional operations test passed")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_concurrent_service_access(self, clean_database):
         """Test concurrent access to real services."""
         await self.setup_test_services(clean_database)
@@ -362,6 +368,7 @@ class RealServiceDependencyInjectionTest:
         logger.info("✅ Real concurrent service access test passed")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_service_error_handling(self, clean_database):
         """Test error handling with real service failures."""
         await self.setup_test_services(clean_database)
@@ -371,12 +378,15 @@ class RealServiceDependencyInjectionTest:
             # Attempt invalid database operation using proper transaction method
             async with self.database_service.transaction() as tx:
                 from sqlalchemy import text
+
                 await tx.execute(text("INVALID SQL QUERY"))
             assert False, "Should have raised an error"
         except (ServiceError, Exception) as e:
             # Expected error - could be syntax error or other database error
             error_str = str(e).lower()
-            assert any(keyword in error_str for keyword in ["invalid", "syntax", "error", "relation"])  # More flexible error checking
+            assert any(
+                keyword in error_str for keyword in ["invalid", "syntax", "error", "relation"]
+            )  # More flexible error checking
 
         # Verify service is still functional after error
         await self.database_service.health_check()
@@ -457,6 +467,7 @@ class RealServiceDependencyInjectionTest:
                 logger.error(f"❌ {test_name} FAILED: {e}")
                 print(f"DEBUG: {test_name} FAILED: {e}")  # Add debug output
                 import traceback
+
                 print(f"DEBUG: Traceback for {test_name}:")
                 traceback.print_exc()
 
@@ -471,6 +482,7 @@ class RealServiceDependencyInjectionTest:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_real_dependency_injection_comprehensive(clean_database):
     """Comprehensive test of dependency injection with real services."""
     test = RealServiceDependencyInjectionTest()
@@ -493,15 +505,14 @@ async def test_real_dependency_injection_comprehensive(clean_database):
             if results.get(test_name, {}).get("status") != "PASSED":
                 failed_critical.append(test_name)
 
-        assert len(failed_critical) == 0, (
-            f"Critical real service tests failed: {failed_critical}"
-        )
+        assert len(failed_critical) == 0, f"Critical real service tests failed: {failed_critical}"
     finally:
         await test.cleanup()
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_real_service_singleton_behavior(clean_database):
     """Test singleton behavior with real services."""
     test_instance = RealServiceDependencyInjectionTest()
@@ -529,6 +540,7 @@ async def test_real_service_singleton_behavior(clean_database):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_real_service_initialization_order(clean_database):
     """Test that services are initialized in correct dependency order."""
     test_instance = RealServiceDependencyInjectionTest()
@@ -540,10 +552,12 @@ async def test_real_service_initialization_order(clean_database):
 
         # Monkey-patch to track initialization
         original_get = test_instance.container.get
+
         def tracked_get(service_name):
             result = original_get(service_name)
             initialization_order.append(service_name)
             return result
+
         test_instance.container.get = tracked_get
 
         # Request services in order

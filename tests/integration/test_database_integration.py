@@ -29,6 +29,7 @@ from src.database.redis_client import RedisClient
 class TestDatabaseConnection:
     """Test database connection and health check."""
 
+    @pytest.mark.timeout(300)
     async def test_database_connection(self, config, database_setup):
         """Test database connection and health check."""
 
@@ -55,6 +56,7 @@ class TestDatabaseConnection:
 class TestDatabaseModels:
     """Test database model creation and validation."""
 
+    @pytest.mark.timeout(300)
     async def test_user_creation(self, config, database_setup):
         """Test user creation and validation."""
 
@@ -83,6 +85,7 @@ class TestDatabaseModels:
         finally:
             await close_database()
 
+    @pytest.mark.timeout(300)
     async def test_bot_instance_creation(self, config, database_setup):
         """Test bot instance creation and validation."""
 
@@ -123,6 +126,7 @@ class TestDatabaseModels:
         finally:
             await close_database()
 
+    @pytest.mark.timeout(300)
     async def test_trade_creation(self, config, database_setup):
         """Test trade creation and validation."""
 
@@ -179,6 +183,7 @@ class TestDatabaseModels:
         finally:
             await close_database()
 
+    @pytest.mark.timeout(300)
     async def test_position_creation(self, config, database_setup):
         """Test position creation and validation."""
 
@@ -232,6 +237,7 @@ class TestDatabaseModels:
         finally:
             await close_database()
 
+    @pytest.mark.timeout(300)
     async def test_balance_snapshot_creation(self, config, database_setup):
         """Test balance snapshot creation and validation."""
 
@@ -277,6 +283,7 @@ class TestDatabaseModels:
 class TestDatabaseQueries:
     """Test database query operations."""
 
+    @pytest.mark.timeout(300)
     async def test_get_by_id(self, config, database_setup):
         """Test get_by_id query."""
 
@@ -305,6 +312,7 @@ class TestDatabaseQueries:
         finally:
             await close_database()
 
+    @pytest.mark.timeout(300)
     async def test_get_all(self, config, database_setup):
         """Test get_all query."""
 
@@ -340,6 +348,7 @@ class TestDatabaseQueries:
         finally:
             await close_database()
 
+    @pytest.mark.timeout(300)
     async def test_get_trades_by_bot(self, config, database_setup):
         """Test get_trades_by_bot query."""
 
@@ -412,6 +421,7 @@ class TestDatabaseQueries:
         finally:
             await close_database()
 
+    @pytest.mark.timeout(300)
     async def test_get_positions_by_bot(self, config, database_setup):
         """Test get_positions_by_bot query."""
 
@@ -483,6 +493,7 @@ class TestDatabaseQueries:
 class TestRedisIntegration:
     """Test Redis client integration."""
 
+    @pytest.mark.timeout(300)
     async def test_redis_basic_operations(self, config):
         """Test Redis basic operations."""
         redis_client = RedisClient(config)
@@ -500,6 +511,7 @@ class TestRedisIntegration:
         hash_value = await redis_client.hget("test_hash", "field1")
         assert hash_value == "value1"
 
+    @pytest.mark.timeout(300)
     async def test_redis_trading_operations(self, config):
         """Test Redis trading-specific operations."""
         redis_client = RedisClient(config)
@@ -537,6 +549,7 @@ class TestRedisIntegration:
 class TestInfluxDBIntegration:
     """Test InfluxDB client integration."""
 
+    @pytest.mark.timeout(300)
     async def test_influxdb_connection(self, config):
         """Test InfluxDB connection."""
         influx_client = InfluxDBClientWrapper(
@@ -555,6 +568,7 @@ class TestInfluxDBIntegration:
 
         influx_client.disconnect()
 
+    @pytest.mark.timeout(300)
     async def test_influxdb_data_writing(self, config):
         """Test InfluxDB data writing."""
         influx_client = InfluxDBClientWrapper(
@@ -608,6 +622,7 @@ class TestInfluxDBIntegration:
 class TestMigrationSystem:
     """Test database migration system."""
 
+    @pytest.mark.timeout(300)
     async def test_migration_configuration(self):
         """Test migration configuration."""
         from alembic.config import Config as AlembicConfig
@@ -627,6 +642,7 @@ class TestMigrationSystem:
         revisions = list(script_dir.walk_revisions())
         assert len(revisions) > 0
 
+    @pytest.mark.timeout(300)
     async def test_migration_file_structure(self):
         """Test migration file structure."""
         migration_file = "src/database/migrations/versions/001_initial_schema.py"

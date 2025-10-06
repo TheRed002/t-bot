@@ -18,10 +18,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
-
 import pytest_asyncio
-# pytestmark = pytest.mark.skip("Real execution integration tests need comprehensive setup")  # ENABLED for real services testing
 
+# pytestmark = pytest.mark.skip("Real execution integration tests need comprehensive setup")  # ENABLED for real services testing
 from src.core.config import get_config
 from src.core.types import (
     ExecutionAlgorithm,
@@ -34,20 +33,15 @@ from src.core.types import (
     OrderType,
 )
 from src.execution.service import ExecutionService
-from src.execution.execution_engine import ExecutionEngine
-from src.execution.types import ExecutionInstruction
-from src.risk_management.service import RiskService
-from tests.integration.infrastructure.conftest import clean_database
 
 
 @pytest_asyncio.fixture
 async def real_database_service(clean_database):
     """Create and manage a real DatabaseService for testing."""
     from src.database.service import DatabaseService
+
     database_service = DatabaseService(
-        connection_manager=clean_database,
-        config_service=None,
-        validation_service=None
+        connection_manager=clean_database, config_service=None, validation_service=None
     )
     await database_service.start()
     yield database_service
@@ -59,17 +53,18 @@ class TestRealExecutionServiceIntegration:
     """Real execution service integration tests with actual database connections."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_execution_service_with_database(self, real_database_service):
         """Test ExecutionService with real database operations."""
         config = get_config()
 
         # Create the proper ExecutionRepositoryService
-        from src.execution.repository_service import ExecutionRepositoryService
         from src.execution.repository import (
+            DatabaseExecutionAuditRepository,
             DatabaseExecutionRepository,
             DatabaseOrderRepository,
-            DatabaseExecutionAuditRepository
         )
+        from src.execution.repository_service import ExecutionRepositoryService
 
         # Create repositories
         execution_repo = DatabaseExecutionRepository(database_service=real_database_service)
@@ -80,13 +75,13 @@ class TestRealExecutionServiceIntegration:
         repository_service = ExecutionRepositoryService(
             execution_repository=execution_repo,
             order_repository=order_repo,
-            audit_repository=audit_repo
+            audit_repository=audit_repo,
         )
 
         # Create real ExecutionService with proper repository service
         execution_service = ExecutionService(
             repository_service=repository_service,  # Proper execution repository service
-            correlation_id=f"test-exec-{uuid.uuid4()}"
+            correlation_id=f"test-exec-{uuid.uuid4()}",
         )
 
         try:
@@ -110,14 +105,14 @@ class TestRealExecutionServiceIntegration:
             await execution_service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_execution_engine_initialization(self, real_database_service):
         """Test ExecutionService initialization for engine use."""
         config = get_config()
 
         # Create execution service (simplified - no complex engine creation)
         execution_service = ExecutionService(
-            repository_service=real_database_service,
-            correlation_id=f"test-engine-{uuid.uuid4()}"
+            repository_service=real_database_service, correlation_id=f"test-engine-{uuid.uuid4()}"
         )
 
         try:
@@ -138,14 +133,14 @@ class TestRealExecutionServiceIntegration:
             await execution_service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_end_to_end_execution_workflow(self, real_database_service):
         """Test basic execution workflow initialization with real services."""
         config = get_config()
 
         # Setup real execution service (simplified)
         execution_service = ExecutionService(
-            repository_service=real_database_service,
-            correlation_id=f"test-e2e-{uuid.uuid4()}"
+            repository_service=real_database_service, correlation_id=f"test-e2e-{uuid.uuid4()}"
         )
 
         try:
@@ -165,14 +160,14 @@ class TestRealExecutionServiceIntegration:
             await execution_service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_execution_error_handling(self, real_database_service):
         """Test execution service error handling with real database connections."""
         config = get_config()
 
         # Create service for error testing
         execution_service = ExecutionService(
-            repository_service=real_database_service,
-            correlation_id=f"test-error-{uuid.uuid4()}"
+            repository_service=real_database_service, correlation_id=f"test-error-{uuid.uuid4()}"
         )
 
         try:
@@ -190,13 +185,13 @@ class TestRealExecutionServiceIntegration:
             await execution_service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_execution_service_health_check(self, real_database_service):
         """Test execution service health check with real dependencies."""
         config = get_config()
 
         execution_service = ExecutionService(
-            repository_service=real_database_service,
-            correlation_id=f"test-health-{uuid.uuid4()}"
+            repository_service=real_database_service, correlation_id=f"test-health-{uuid.uuid4()}"
         )
 
         try:
@@ -213,6 +208,7 @@ class TestRealExecutionServiceIntegration:
             await execution_service.stop()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_concurrent_executions(self, real_database_service):
         """Test concurrent execution service startup/shutdown with real database connections."""
         config = get_config()
@@ -221,7 +217,7 @@ class TestRealExecutionServiceIntegration:
         async def create_and_test_service(service_id: str):
             execution_service = ExecutionService(
                 repository_service=real_database_service,
-                correlation_id=f"test-concurrent-{service_id}"
+                correlation_id=f"test-concurrent-{service_id}",
             )
             try:
                 await execution_service.start()
@@ -277,7 +273,7 @@ def create_sample_execution_result():
         started_at=datetime.now(timezone.utc),
         completed_at=datetime.now(timezone.utc),
         fills=[],
-        metadata={}
+        metadata={},
     )
 
     # Create the original order with exchange in metadata
@@ -287,14 +283,12 @@ def create_sample_execution_result():
         order_type=OrderType.MARKET,
         quantity=Decimal("0.001"),
         price=Decimal("50000"),
-        metadata={"exchange": "binance"}
+        metadata={"exchange": "binance"},
     )
 
     # Wrap it for backward compatibility
     return ExecutionResultWrapper(
-        core_result=core_result,
-        original_order=original_order,
-        algorithm=ExecutionAlgorithm.MARKET
+        core_result=core_result, original_order=original_order, algorithm=ExecutionAlgorithm.MARKET
     )
 
 
@@ -310,7 +304,7 @@ def create_sample_market_data():
         volume=Decimal("1000"),
         exchange="binance",
         bid_price=Decimal("49999"),
-        ask_price=Decimal("50001")
+        ask_price=Decimal("50001"),
     )
 
 
@@ -327,7 +321,7 @@ def create_sample_order_response():
         filled_quantity=Decimal("0.001"),
         status=OrderStatus.FILLED,
         created_at=datetime.now(timezone.utc),
-        exchange="binance"
+        exchange="binance",
     )
 
 

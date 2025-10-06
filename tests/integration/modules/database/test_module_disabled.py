@@ -10,26 +10,20 @@ This module validates:
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
 
-from src.bot_management.bot_instance import BotInstance
 from src.core.base.interfaces import HealthStatus
-from src.core.config.service import ConfigService
 from src.core.dependency_injection import DependencyInjector
-from src.core.exceptions import DatabaseError, ServiceError, ValidationError
 from src.database.di_registration import configure_database_dependencies
-from src.database.models import Order, Trade
-from src.database.service import DatabaseService
 from src.execution.service import ExecutionService
-from src.utils.validation.service import ValidationService
-from tests.integration.infrastructure.service_factory import RealServiceFactory
+
 # Import the correct fixtures from infrastructure
 from tests.integration.infrastructure.conftest import clean_database, real_test_config  # noqa: F401
-
+from tests.integration.infrastructure.service_factory import RealServiceFactory
 
 
 @pytest_asyncio.fixture
@@ -67,6 +61,7 @@ class TestDatabaseDependencyInjectionReal:
     """Test database service dependency injection patterns with real services."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_database_service_registration_real(self, clean_database):
         """Test that DatabaseService is properly registered with real dependencies."""
         service_factory = RealServiceFactory()
@@ -93,6 +88,7 @@ class TestDatabaseDependencyInjectionReal:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_repository_factory_registration_real(self, clean_database):
         """Test that RepositoryFactory works with real database connections."""
         service_factory = RealServiceFactory()
@@ -116,6 +112,7 @@ class TestDatabaseDependencyInjectionReal:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_uow_factory_registration_real(self, clean_database):
         """Test that UnitOfWorkFactory works with real database transactions."""
         service_factory = RealServiceFactory()
@@ -137,9 +134,7 @@ class TestDatabaseDependencyInjectionReal:
                 await session.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
 
                 # Test real transaction operations
-                await session.execute(
-                    text(f"CREATE TABLE {table_name} (id INTEGER, name TEXT)")
-                )
+                await session.execute(text(f"CREATE TABLE {table_name} (id INTEGER, name TEXT)"))
                 await session.execute(
                     text(f"INSERT INTO {table_name} (id, name) VALUES (1, 'test')")
                 )
@@ -158,6 +153,7 @@ class TestDatabaseDependencyInjectionReal:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_specialized_service_registration_real(self, clean_database):
         """Test that specialized database services work with real database."""
         service_factory = RealServiceFactory()
@@ -185,6 +181,7 @@ class TestServiceIntegrationPatternsReal:
     """Test proper service integration patterns with real database operations."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_execution_service_database_integration_real(self, clean_database):
         """Test ExecutionService properly uses DatabaseService with real database."""
         service_factory = RealServiceFactory()
@@ -231,10 +228,11 @@ class TestServiceIntegrationPatternsReal:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_bot_instance_database_integration_real(self, clean_database):
         """Test BotInstance properly integrates with real DatabaseService."""
         from src.core.config import Config
-        from src.core.types import BotConfiguration, StrategyType
+        from src.core.types import BotConfiguration
 
         service_factory = RealServiceFactory()
         try:
@@ -245,7 +243,7 @@ class TestServiceIntegrationPatternsReal:
                 bot_id="test-bot-real",
                 name="Test Bot Real",
                 bot_type="trading",  # Add required bot_type field
-                version="1.0.0",     # Add required version field
+                version="1.0.0",  # Add required version field
                 enabled=True,
             )
 
@@ -279,6 +277,7 @@ class TestErrorHandlingIntegrationReal:
     """Test error handling and propagation between modules with real services."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_database_error_propagation_real(self, clean_database):
         """Test that database errors propagate correctly with real database failures."""
         service_factory = RealServiceFactory()
@@ -295,12 +294,17 @@ class TestErrorHandlingIntegrationReal:
             # Verify service can handle real database issues gracefully
             health_status = await database_service.get_health_status()
             # Should still be healthy for connection issues vs. structural problems
-            assert health_status in [HealthStatus.HEALTHY, HealthStatus.DEGRADED, HealthStatus.UNHEALTHY]
+            assert health_status in [
+                HealthStatus.HEALTHY,
+                HealthStatus.DEGRADED,
+                HealthStatus.UNHEALTHY,
+            ]
 
         finally:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_validation_error_handling_real(self, clean_database):
         """Test validation error handling with real database operations."""
         service_factory = RealServiceFactory()
@@ -332,8 +336,10 @@ class TestErrorHandlingIntegrationReal:
                     # Test constraint violation with real database
                     with pytest.raises(Exception):  # Database constraint error
                         await session.execute(
-                            text(f"INSERT INTO {table_name} (amount, symbol) VALUES (:amount, :symbol)"),
-                            {"amount": Decimal("-100.0"), "symbol": "BTC/USDT"}
+                            text(
+                                f"INSERT INTO {table_name} (amount, symbol) VALUES (:amount, :symbol)"
+                            ),
+                            {"amount": Decimal("-100.0"), "symbol": "BTC/USDT"},
                         )
                         await session.commit()
 
@@ -349,6 +355,7 @@ class TestErrorHandlingIntegrationReal:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_circuit_breaker_integration_real(self, clean_database):
         """Test circuit breaker patterns with real database service integration."""
         service_factory = RealServiceFactory()
@@ -363,7 +370,9 @@ class TestErrorHandlingIntegrationReal:
             # Test multiple rapid database operations to potentially trigger circuit breaker
             for i in range(5):
                 async with clean_database.get_async_session() as session:
-                    result = await session.execute(text("SELECT :test_id as circuit_test"), {"test_id": str(i)})
+                    result = await session.execute(
+                        text("SELECT :test_id as circuit_test"), {"test_id": str(i)}
+                    )
                     test_value = result.scalar()
                     assert test_value == str(i)
 
@@ -398,9 +407,10 @@ class TestModuleBoundaryValidationReal:
         # ExecutionService uses repository_service which is correct architecture
         assert "repository_service" in exec_source
         # Should have repository method calls like list_orders, etc.
-        assert ("list_orders" in exec_source or "repository_service." in exec_source)
+        assert "list_orders" in exec_source or "repository_service." in exec_source
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_proper_interface_usage_real(self, clean_database):
         """Test that services use interfaces rather than concrete implementations with real services."""
         service_factory = RealServiceFactory()
@@ -409,8 +419,12 @@ class TestModuleBoundaryValidationReal:
 
             injector = DependencyInjector()
             # Register the initialized connection manager BEFORE configuring dependencies
-            injector.register_service("DatabaseConnectionManager", service_factory.connection_manager, singleton=True)
-            injector.register_service("DatabaseService", service_factory.database_service, singleton=True)
+            injector.register_service(
+                "DatabaseConnectionManager", service_factory.connection_manager, singleton=True
+            )
+            injector.register_service(
+                "DatabaseService", service_factory.database_service, singleton=True
+            )
             configure_database_dependencies(injector)
 
             # Services should be registered to resolve interfaces
@@ -428,7 +442,11 @@ class TestModuleBoundaryValidationReal:
             # Test real interface functionality
             if hasattr(database_service, "get_health_status"):
                 health_status = await database_service.get_health_status()
-                assert health_status in [HealthStatus.HEALTHY, HealthStatus.DEGRADED, HealthStatus.UNHEALTHY]
+                assert health_status in [
+                    HealthStatus.HEALTHY,
+                    HealthStatus.DEGRADED,
+                    HealthStatus.UNHEALTHY,
+                ]
 
         finally:
             await service_factory.cleanup()
@@ -462,6 +480,7 @@ class TestPerformanceIntegrationReal:
     """Test performance aspects of database integration with real services."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_connection_pooling_integration_real(self, clean_database):
         """Test that connection pooling works correctly with real database service integration."""
         service_factory = RealServiceFactory()
@@ -477,6 +496,7 @@ class TestPerformanceIntegrationReal:
             import asyncio
 
             @pytest.mark.asyncio
+            @pytest.mark.timeout(300)
             async def test_connection():
                 async with clean_database.get_async_session() as session:
                     result = await session.execute(text("SELECT 1 as pool_test"))
@@ -489,8 +509,11 @@ class TestPerformanceIntegrationReal:
         finally:
             await service_factory.cleanup()
 
-    @pytest.mark.skip(reason="Transaction rollback test with same-session table creation is complex and not needed for core functionality validation")
+    @pytest.mark.skip(
+        reason="Transaction rollback test with same-session table creation is complex and not needed for core functionality validation"
+    )
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_transaction_management_integration_real(self, clean_database):
         """Test transaction management across service boundaries with real database."""
         service_factory = RealServiceFactory()
@@ -520,9 +543,7 @@ class TestPerformanceIntegrationReal:
                 await session.commit()
 
                 # Verify data was committed
-                result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {table_name}")
-                )
+                result = await session.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
                 count = result.scalar()
                 assert count == 1
 
@@ -534,9 +555,7 @@ class TestPerformanceIntegrationReal:
                 await session.rollback()
 
                 # Verify rollback worked - should still only have 1 record
-                result = await session.execute(
-                    text(f"SELECT COUNT(*) FROM {table_name}")
-                )
+                result = await session.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
                 count = result.scalar()
                 assert count == 1  # Still only the first record
 
@@ -552,6 +571,7 @@ class TestDataConsistencyIntegrationReal:
     """Test data consistency across module boundaries with real database operations."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_decimal_precision_consistency_real(self, clean_database):
         """Test that Decimal precision is maintained across real database operations."""
         service_factory = RealServiceFactory()
@@ -584,14 +604,12 @@ class TestDataConsistencyIntegrationReal:
                 # Insert with high precision
                 await session.execute(
                     text(f"INSERT INTO {table_name} (price, quantity) VALUES (:price, :quantity)"),
-                    {"price": test_price, "quantity": test_quantity}
+                    {"price": test_price, "quantity": test_quantity},
                 )
                 await session.commit()
 
                 # Retrieve and verify precision maintained
-                result = await session.execute(
-                    text(f"SELECT price, quantity FROM {table_name}")
-                )
+                result = await session.execute(text(f"SELECT price, quantity FROM {table_name}"))
                 row = result.first()
 
                 assert isinstance(row.price, Decimal)
@@ -607,6 +625,7 @@ class TestDataConsistencyIntegrationReal:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_timestamp_consistency_real(self, clean_database):
         """Test timestamp consistency across real database operations."""
         service_factory = RealServiceFactory()
@@ -637,14 +656,12 @@ class TestDataConsistencyIntegrationReal:
                 # Insert timestamp
                 await session.execute(
                     text(f"INSERT INTO {table_name} (created_at) VALUES (:timestamp)"),
-                    {"timestamp": test_timestamp}
+                    {"timestamp": test_timestamp},
                 )
                 await session.commit()
 
                 # Retrieve and verify timezone information preserved
-                result = await session.execute(
-                    text(f"SELECT created_at FROM {table_name}")
-                )
+                result = await session.execute(text(f"SELECT created_at FROM {table_name}"))
                 stored_timestamp = result.scalar()
 
                 # Verify timezone information is preserved
@@ -666,6 +683,7 @@ class TestFullIntegrationScenarioReal:
     """Test complete integration scenarios with real database services."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_order_execution_full_integration_real(self, clean_database):
         """Test complete order execution flow through all integrated real services."""
         service_factory = RealServiceFactory()
@@ -713,7 +731,7 @@ class TestFullIntegrationScenarioReal:
                     "side": "buy",
                     "quantity": Decimal("1.0"),
                     "price": Decimal("50000.0"),
-                    "status": "pending"
+                    "status": "pending",
                 }
 
                 await session.execute(
@@ -721,14 +739,14 @@ class TestFullIntegrationScenarioReal:
                     INSERT INTO {table_name} (bot_id, symbol, side, quantity, price, status)
                     VALUES (:bot_id, :symbol, :side, :quantity, :price, :status)
                     """),
-                    order_data
+                    order_data,
                 )
                 await session.commit()
 
                 # Verify order was created successfully
                 result = await session.execute(
                     text(f"SELECT COUNT(*) FROM {table_name} WHERE bot_id = :bot_id"),
-                    {"bot_id": "integration-test-bot"}
+                    {"bot_id": "integration-test-bot"},
                 )
                 count = result.scalar()
                 assert count == 1
@@ -736,7 +754,7 @@ class TestFullIntegrationScenarioReal:
                 # Verify data integrity
                 result = await session.execute(
                     text(f"SELECT * FROM {table_name} WHERE bot_id = :bot_id"),
-                    {"bot_id": "integration-test-bot"}
+                    {"bot_id": "integration-test-bot"},
                 )
                 order = result.first()
                 assert order.symbol == "BTC/USDT"
@@ -753,6 +771,7 @@ class TestFullIntegrationScenarioReal:
             await service_factory.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_multi_service_coordination_real(self, clean_database):
         """Test coordination between multiple services with real database."""
         service_factory = RealServiceFactory()
@@ -791,7 +810,7 @@ class TestFullIntegrationScenarioReal:
 
                 await session.execute(
                     text(f"INSERT INTO {table_name} (redis_key, db_value) VALUES (:key, :value)"),
-                    {"key": test_key, "value": test_value}
+                    {"key": test_key, "value": test_value},
                 )
                 await session.commit()
 
@@ -801,7 +820,7 @@ class TestFullIntegrationScenarioReal:
 
                 result = await session.execute(
                     text(f"SELECT db_value FROM {table_name} WHERE redis_key = :key"),
-                    {"key": test_key}
+                    {"key": test_key},
                 )
                 db_value = result.scalar()
                 assert db_value == test_value

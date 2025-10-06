@@ -5,14 +5,15 @@ Tests that optimization module components are properly integrated with dependenc
 injection patterns and module boundaries are respected.
 """
 
-import pytest
 from decimal import Decimal
-from unittest.mock import Mock, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, Mock
+
+import pytest
 
 from src.core.dependency_injection import DependencyInjector
-from src.core.exceptions import RepositoryError, OptimizationError
-from src.optimization.di_registration import register_optimization_dependencies
+from src.core.exceptions import OptimizationError, RepositoryError
 from src.optimization.core import OptimizationResult, OptimizationStatus
+from src.optimization.di_registration import register_optimization_dependencies
 from src.optimization.parameter_space import ParameterSpaceBuilder
 
 
@@ -57,7 +58,7 @@ class TestOptimizationDependencyInjectionValidation:
             "OptimizationFactory",
             "OptimizationComponentFactory",
             "OptimizationService",
-            "OptimizationController"
+            "OptimizationController",
         ]
 
         for factory_name in required_factories:
@@ -90,6 +91,7 @@ class TestOptimizationDependencyInjectionValidation:
         assert "AsyncSession" not in repo._dependencies
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_repository_save_without_session_fails(self):
         """Test repository operations fail gracefully without session."""
         from src.optimization.repository import OptimizationRepository
@@ -98,6 +100,7 @@ class TestOptimizationDependencyInjectionValidation:
 
         # Create mock optimization result
         from datetime import datetime
+
         result = OptimizationResult(
             optimization_id="test-id",
             algorithm_name="test",
@@ -111,7 +114,7 @@ class TestOptimizationDependencyInjectionValidation:
             optimal_objective_value=Decimal("1.0"),
             objective_values={},
             convergence_achieved=True,
-            config_used={}
+            config_used={},
         )
 
         # Attempt to save should raise RepositoryError
@@ -119,6 +122,7 @@ class TestOptimizationDependencyInjectionValidation:
             await repo.save_optimization_result(result)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_repository_get_without_session_returns_none(self):
         """Test repository get operations return None without session."""
         from src.optimization.repository import OptimizationRepository
@@ -130,6 +134,7 @@ class TestOptimizationDependencyInjectionValidation:
         assert result is None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_repository_list_without_session_returns_empty(self):
         """Test repository list operations return empty list without session."""
         from src.optimization.repository import OptimizationRepository
@@ -151,22 +156,24 @@ class TestOptimizationDependencyInjectionValidation:
         assert "BacktestService" not in service._dependencies
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_backtest_integration_simulate_without_service(self):
         """Test backtest integration uses simulation when service unavailable."""
-        from src.optimization.backtesting_integration import BacktestIntegrationService
         from src.core.types import StrategyConfig
+        from src.optimization.backtesting_integration import BacktestIntegrationService
 
         service = BacktestIntegrationService(backtest_service=None)
 
         # Create mock strategy config
-        from src.core.types import StrategyType, TradingMode
+        from src.core.types import StrategyType
+
         strategy_config = StrategyConfig(
             strategy_id="test-id",
             name="test_strategy",
             strategy_type=StrategyType.MOMENTUM,
             symbol="BTC-USD",
             timeframe="1h",
-            parameters={"param1": 1.0}
+            parameters={"param1": 1.0},
         )
 
         # Should use simulation instead of actual backtesting
@@ -190,7 +197,13 @@ class TestOptimizationDependencyInjectionValidation:
         factory = OptimizationFactory(injector=mock_injector)
 
         # Verify factory can create all components without errors
-        components = ["service", "controller", "repository", "backtest_integration", "analysis_service"]
+        components = [
+            "service",
+            "controller",
+            "repository",
+            "backtest_integration",
+            "analysis_service",
+        ]
 
         for component_name in components:
             component = factory.create(component_name)
@@ -227,6 +240,7 @@ class TestOptimizationDependencyInjectionValidation:
         assert service._analysis_service is None
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_service_optimization_with_missing_dependencies(self):
         """Test service handles missing dependencies during optimization."""
         from src.optimization.service import OptimizationService
@@ -234,17 +248,16 @@ class TestOptimizationDependencyInjectionValidation:
         service = OptimizationService()
 
         # Build simple parameter space
-        parameter_space = ParameterSpaceBuilder().add_continuous(
-            name="test_param",
-            min_value=1.0,
-            max_value=10.0
-        ).build()
+        parameter_space = (
+            ParameterSpaceBuilder()
+            .add_continuous(name="test_param", min_value=1.0, max_value=10.0)
+            .build()
+        )
 
         # Should handle missing dependencies gracefully
         try:
             result = await service.optimize_strategy(
-                strategy_name="test_strategy",
-                parameter_space=parameter_space
+                strategy_name="test_strategy", parameter_space=parameter_space
             )
             # Should return some result even with missing dependencies
             assert isinstance(result, dict)
@@ -266,29 +279,31 @@ class TestOptimizationDependencyInjectionValidation:
 
     def test_module_boundary_respect(self):
         """Test optimization module respects boundaries with other modules."""
-        from src.optimization import service, repository, controller
+        from src.optimization import service
 
         # Check that optimization doesn't import internals from other modules
         # All imports should be through interfaces or service layers
 
         # Verify main service imports
         service_imports = [
-            attr for attr in dir(service)
-            if not attr.startswith('_') and 'src.' in str(getattr(service, attr, ''))
+            attr
+            for attr in dir(service)
+            if not attr.startswith("_") and "src." in str(getattr(service, attr, ""))
         ]
 
         # Should not directly import internal classes from other modules
-        prohibited_patterns = ['._internal', '.impl', '.private']
+        prohibited_patterns = ["._internal", ".impl", ".private"]
 
         for import_name in service_imports:
             for pattern in prohibited_patterns:
                 assert pattern not in import_name, f"Improper internal import: {import_name}"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_integration_error_propagation(self):
         """Test that errors are properly propagated through integration layers."""
-        from src.optimization.service import OptimizationService
         from src.optimization.backtesting_integration import BacktestIntegrationService
+        from src.optimization.service import OptimizationService
 
         # Create service with failing backtest integration
         mock_backtest_service = Mock()
@@ -298,17 +313,16 @@ class TestOptimizationDependencyInjectionValidation:
         service = OptimizationService(backtest_integration=backtest_integration)
 
         # Should propagate errors properly
-        parameter_space = ParameterSpaceBuilder().add_continuous(
-            name="test_param",
-            min_value=1.0,
-            max_value=10.0
-        ).build()
+        parameter_space = (
+            ParameterSpaceBuilder()
+            .add_continuous(name="test_param", min_value=1.0, max_value=10.0)
+            .build()
+        )
 
         # Error should be caught and handled appropriately
         try:
             await service.optimize_strategy(
-                strategy_name="test_strategy",
-                parameter_space=parameter_space
+                strategy_name="test_strategy", parameter_space=parameter_space
             )
         except (OptimizationError, Exception):
             # Should either handle gracefully or propagate with proper error type
@@ -320,8 +334,9 @@ class TestOptimizationDependencyInjectionValidation:
 
         # Check that key services are registered as singletons
         singleton_calls = [
-            call for call in mock_injector.register_factory.call_args_list
-            if call.kwargs.get('singleton') is True
+            call
+            for call in mock_injector.register_factory.call_args_list
+            if call.kwargs.get("singleton") is True
         ]
 
         singleton_names = [call[0][0] for call in singleton_calls]
@@ -334,8 +349,10 @@ class TestOptimizationDependencyInjectionValidation:
             "OptimizationFactory",
             "OptimizationComponentFactory",
             "OptimizationService",
-            "OptimizationController"
+            "OptimizationController",
         ]
 
         for singleton_name in expected_singletons:
-            assert singleton_name in singleton_names, f"Service {singleton_name} should be singleton"
+            assert singleton_name in singleton_names, (
+                f"Service {singleton_name} should be singleton"
+            )

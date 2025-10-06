@@ -10,29 +10,18 @@ Tests the new functionality added for:
 Phase 5: Real service-based tests - NO MOCKS allowed except for external APIs.
 """
 
+import asyncio
+from decimal import Decimal
+
 import pytest
 import pytest_asyncio
-import asyncio
-from datetime import datetime, timezone
-from decimal import Decimal
-from typing import Any, Dict, List
 
-from tests.integration.infrastructure.service_factory import RealServiceFactory
-
-from src.bot_management.service import BotService
-from src.core.events import BotEvent, BotEventType
-from src.core.exceptions import ServiceError, ValidationError
 from src.core.types import (
     BotConfiguration,
-    BotMetrics,
     BotPriority,
-    BotStatus,
     BotType,
-    OrderSide,
-    OrderType,
-    RiskLevel,
-    StateType,
 )
+from tests.integration.infrastructure.service_factory import RealServiceFactory
 
 
 @pytest_asyncio.fixture
@@ -64,7 +53,7 @@ def sample_bot_config():
         max_positions=5,
         priority=BotPriority.NORMAL,
         auto_start=False,
-        bot_name="Test Bot"
+        bot_name="Test Bot",
     )
 
 
@@ -72,9 +61,8 @@ class TestEnhancedBotServiceIntegration:
     """Test enhanced BotService features with real services."""
 
     @pytest.mark.asyncio
-    async def test_bot_creation_with_real_services(
-        self, real_bot_services, sample_bot_config
-    ):
+    @pytest.mark.timeout(300)
+    async def test_bot_creation_with_real_services(self, real_bot_services, sample_bot_config):
         """Test bot creation flow with real service integration."""
         bot_service = real_bot_services.container.get("BotService")
         await bot_service.start()
@@ -87,6 +75,7 @@ class TestEnhancedBotServiceIntegration:
         assert bot_id in bot_service._bots
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_bot_lifecycle_with_real_state_persistence(
         self, real_bot_services, sample_bot_config
     ):
@@ -106,9 +95,8 @@ class TestEnhancedBotServiceIntegration:
         await bot_service.stop_bot(bot_id)
 
     @pytest.mark.asyncio
-    async def test_bot_metrics_tracking(
-        self, real_bot_services, sample_bot_config
-    ):
+    @pytest.mark.timeout(300)
+    async def test_bot_metrics_tracking(self, real_bot_services, sample_bot_config):
         """Test bot metrics tracking with real services."""
         bot_service = real_bot_services.container.get("BotService")
         await bot_service.start()
@@ -127,9 +115,8 @@ class TestEnhancedBotServiceIntegration:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_multiple_bots_coordination(
-        self, real_bot_services
-    ):
+    @pytest.mark.timeout(300)
+    async def test_multiple_bots_coordination(self, real_bot_services):
         """Test coordination between multiple bots with real services."""
         bot_service = real_bot_services.container.get("BotService")
         await bot_service.start()
@@ -160,9 +147,8 @@ class TestEnhancedRiskManagement:
     """Test enhanced risk management features with real services."""
 
     @pytest.mark.asyncio
-    async def test_portfolio_risk_assessment(
-        self, real_bot_services, sample_bot_config
-    ):
+    @pytest.mark.timeout(300)
+    async def test_portfolio_risk_assessment(self, real_bot_services, sample_bot_config):
         """Test portfolio-level risk assessment with real risk service."""
         bot_service = real_bot_services.container.get("BotService")
         risk_service = real_bot_services.container.get("risk_service")
@@ -176,9 +162,8 @@ class TestEnhancedRiskManagement:
         assert risk_service is not None
 
     @pytest.mark.asyncio
-    async def test_risk_limit_validation(
-        self, real_bot_services, sample_bot_config
-    ):
+    @pytest.mark.timeout(300)
+    async def test_risk_limit_validation(self, real_bot_services, sample_bot_config):
         """Test risk limit validation during bot operations."""
         bot_service = real_bot_services.container.get("BotService")
         await bot_service.start()
@@ -194,9 +179,8 @@ class TestEnhancedExchangeValidation:
     """Test enhanced exchange validation with real services."""
 
     @pytest.mark.asyncio
-    async def test_exchange_availability_check(
-        self, real_bot_services, sample_bot_config
-    ):
+    @pytest.mark.timeout(300)
+    async def test_exchange_availability_check(self, real_bot_services, sample_bot_config):
         """Test exchange availability validation with real exchange service."""
         bot_service = real_bot_services.container.get("BotService")
         exchange_service = real_bot_services.container.get("exchange_service")
@@ -214,9 +198,8 @@ class TestEnhancedStateManagement:
     """Test enhanced state management features with real state service."""
 
     @pytest.mark.asyncio
-    async def test_state_persistence_and_recovery(
-        self, real_bot_services, sample_bot_config
-    ):
+    @pytest.mark.timeout(300)
+    async def test_state_persistence_and_recovery(self, real_bot_services, sample_bot_config):
         """Test state persistence and recovery with real state service."""
         bot_service = real_bot_services.container.get("BotService")
         state_service = real_bot_services.container.get("state_service")
@@ -231,9 +214,8 @@ class TestEnhancedStateManagement:
         assert state_service is not None
 
     @pytest.mark.asyncio
-    async def test_concurrent_state_operations(
-        self, real_bot_services
-    ):
+    @pytest.mark.timeout(300)
+    async def test_concurrent_state_operations(self, real_bot_services):
         """Test concurrent state operations with real state service."""
         bot_service = real_bot_services.container.get("BotService")
         await bot_service.start()
@@ -267,9 +249,8 @@ class TestEnhancedCapitalManagement:
     """Test enhanced capital management integration with real services."""
 
     @pytest.mark.asyncio
-    async def test_capital_allocation_and_tracking(
-        self, real_bot_services, sample_bot_config
-    ):
+    @pytest.mark.timeout(300)
+    async def test_capital_allocation_and_tracking(self, real_bot_services, sample_bot_config):
         """Test capital allocation and tracking with real capital service."""
         bot_service = real_bot_services.container.get("BotService")
         capital_service = real_bot_services.container.get("capital_service")
@@ -289,9 +270,8 @@ class TestEnhancedHealthMonitoring:
     """Test enhanced health monitoring with real monitoring service."""
 
     @pytest.mark.asyncio
-    async def test_comprehensive_health_check(
-        self, real_bot_services, sample_bot_config
-    ):
+    @pytest.mark.timeout(300)
+    async def test_comprehensive_health_check(self, real_bot_services, sample_bot_config):
         """Test comprehensive health check with real services."""
         bot_service = real_bot_services.container.get("BotService")
         await bot_service.start()
@@ -308,9 +288,8 @@ class TestEnhancedHealthMonitoring:
         assert "checks" in health
 
     @pytest.mark.asyncio
-    async def test_system_wide_health_monitoring(
-        self, real_bot_services
-    ):
+    @pytest.mark.timeout(300)
+    async def test_system_wide_health_monitoring(self, real_bot_services):
         """Test system-wide health monitoring with real services."""
         bot_service = real_bot_services.container.get("BotService")
         await bot_service.start()
@@ -320,4 +299,4 @@ class TestEnhancedHealthMonitoring:
 
         # Verify health status
         assert health is not None
-        assert hasattr(health, 'status')
+        assert hasattr(health, "status")

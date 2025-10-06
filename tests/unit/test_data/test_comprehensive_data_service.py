@@ -253,7 +253,8 @@ class TestDataServiceRetrieval:
         request = DataRequest(symbol="BTCUSDT", exchange="binance", use_cache=False)
         result = await service.get_market_data(request)
 
-        assert result == mock_records
+        # Data service reverses records to chronological order
+        assert result == list(reversed(mock_records))
         mock_database_service.list_entities.assert_called_once()
 
     @pytest.mark.asyncio

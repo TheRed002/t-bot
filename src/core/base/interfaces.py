@@ -11,7 +11,7 @@ import abc
 import builtins
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Protocol, TypeVar
+from typing import Any, Protocol, TypeVar, runtime_checkable
 
 from pydantic import ConfigDict
 
@@ -569,6 +569,7 @@ class CacheClientInterface(Protocol):
         ...
 
 
+@runtime_checkable
 class DatabaseServiceInterface(Protocol):
     """Interface for database service implementations."""
 

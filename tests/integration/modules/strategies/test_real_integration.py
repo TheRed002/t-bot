@@ -247,6 +247,7 @@ class TestRealStrategyServiceIntegration:
     """Integration tests using real StrategyService with actual dependencies."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_strategy_service_initialization(self, real_strategy_service):
         """Test real strategy service initialization with dependencies."""
         # Verify service is properly initialized
@@ -264,6 +265,7 @@ class TestRealStrategyServiceIntegration:
         # (BaseService doesn't have get_status() method, so we just verify is_running)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_strategy_creation_and_registration(
         self, strategy_factory, real_strategy_service, real_mean_reversion_config
     ):
@@ -302,6 +304,7 @@ class TestRealStrategyServiceIntegration:
         await strategy.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_strategy_database_persistence(
         self, strategy_factory, real_strategy_service, real_mean_reversion_config, clean_database
     ):
@@ -457,6 +460,7 @@ class TestRealTechnicalIndicatorCalculations:
         return rsi
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_sma_calculation_accuracy(
         self, real_mean_reversion_strategy, realistic_market_data_series
     ):
@@ -487,6 +491,7 @@ class TestRealTechnicalIndicatorCalculations:
         assert abs(sma_20 - expected_sma) <= tolerance
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_ema_calculation_accuracy(
         self, real_mean_reversion_strategy, realistic_market_data_series
     ):
@@ -516,6 +521,7 @@ class TestRealTechnicalIndicatorCalculations:
         assert abs(ema_20 - expected_ema) <= tolerance
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_rsi_calculation_accuracy(
         self, real_mean_reversion_strategy, realistic_market_data_series
     ):
@@ -545,6 +551,7 @@ class TestRealTechnicalIndicatorCalculations:
         assert abs(rsi_14 - expected_rsi) <= tolerance
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_macd_calculation_accuracy(
         self, real_mean_reversion_strategy, realistic_market_data_series
     ):
@@ -579,6 +586,7 @@ class TestRealTechnicalIndicatorCalculations:
         assert abs(calculated_histogram - macd_result["histogram"]) < Decimal("0.01")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_bollinger_bands_calculation(
         self, real_mean_reversion_strategy, realistic_market_data_series
     ):
@@ -694,6 +702,7 @@ class TestRealSignalGenerationIntegration:
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_mean_reversion_signal_generation(self, real_strategies):
         """Test real mean reversion signal generation."""
         mean_reversion_strategy = real_strategies[0]  # First strategy is mean reversion
@@ -744,6 +753,7 @@ class TestRealSignalGenerationIntegration:
                 assert isinstance(z_score, (Decimal, float))
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_trend_following_signal_generation(self, real_strategies):
         """Test real trend following signal generation."""
         trend_following_strategy = real_strategies[1]  # Second strategy is trend following
@@ -791,6 +801,7 @@ class TestRealSignalGenerationIntegration:
             assert isinstance(signal.metadata, dict)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_multi_strategy_signal_coordination(self, real_strategies):
         """Test real coordination between multiple strategies."""
         # Create market data that could trigger multiple strategies
@@ -846,6 +857,7 @@ class TestRealStrategyPerformanceIntegration:
     """Test performance characteristics of real strategy implementations."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_service_performance_requirements(
         self, strategy_factory, real_strategy_service, realistic_market_data_series
     ):
@@ -903,6 +915,7 @@ class TestRealStrategyPerformanceIntegration:
         await strategy.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_indicator_calculation_performance(
         self, strategy_factory, real_mean_reversion_config
     ):
@@ -958,6 +971,7 @@ class TestRealStrategyPerformanceIntegration:
         await strategy.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_strategy_memory_usage(self, strategy_factory):
         """Test memory usage of real strategy implementations."""
         import os

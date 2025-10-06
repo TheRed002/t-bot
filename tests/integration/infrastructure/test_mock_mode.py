@@ -13,12 +13,12 @@ import pytest
 os.environ["MOCK_MODE"] = "true"
 
 from src.core.config import Config
-from src.core.types import OrderSide, OrderType
 from src.exchanges import register_exchanges
 from src.exchanges.factory import ExchangeFactory
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_mock_exchange():
     """Test mock exchange functionality."""
     print("Testing T-Bot mock mode...")
@@ -29,7 +29,7 @@ async def test_mock_exchange():
 
     # Initialize exchange factory
     factory = ExchangeFactory(config)
-    register_exchanges(factory, config=config)
+    register_exchanges(factory)
 
     supported = factory.get_supported_exchanges()
     print(f"✓ Supported exchanges: {supported}")
@@ -52,7 +52,11 @@ async def test_mock_exchange():
     # Get ticker
     ticker = await exchange.get_ticker("BTCUSDT")
     # Handle both dict and object responses
-    price = ticker.get('last_price') if isinstance(ticker, dict) else getattr(ticker, 'last_price', 'N/A')
+    price = (
+        ticker.get("last_price")
+        if isinstance(ticker, dict)
+        else getattr(ticker, "last_price", "N/A")
+    )
     print(f"✓ BTCUSDT ticker: ${price}")
 
     # Get order book
@@ -65,16 +69,22 @@ async def test_mock_exchange():
         side="BUY",
         order_type="MARKET",
         quantity=Decimal("0.001"),
-        price=Decimal("50000")  # Price needed even for market orders in mock
+        price=Decimal("50000"),  # Price needed even for market orders in mock
     )
     # Handle both dict and object responses for order
-    order_id = order.get('order_id') if isinstance(order, dict) else getattr(order, 'order_id', 'N/A')
-    status = order.get('status') if isinstance(order, dict) else getattr(order, 'status', 'N/A')
+    order_id = (
+        order.get("order_id") if isinstance(order, dict) else getattr(order, "order_id", "N/A")
+    )
+    status = order.get("status") if isinstance(order, dict) else getattr(order, "status", "N/A")
     print(f"✓ Order placed: {order_id} - {status}")
 
     # Get order status
     updated_order = await exchange.get_order_status("BTCUSDT", order_id)
-    updated_status = updated_order.get('status') if isinstance(updated_order, dict) else getattr(updated_order, 'status', 'N/A')
+    updated_status = (
+        updated_order.get("status")
+        if isinstance(updated_order, dict)
+        else getattr(updated_order, "status", "N/A")
+    )
     print(f"✓ Order status: {updated_status}")
 
     # Check updated balances

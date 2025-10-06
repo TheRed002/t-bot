@@ -11,21 +11,18 @@ for financial accuracy and regulatory compliance.
 
 import asyncio
 import time
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, getcontext
-from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional, Tuple
 
+import numpy as np
 import pytest
 import pytest_asyncio
-import numpy as np
 
 from src.core.types import MarketData, StrategyConfig, StrategyType
-from src.data.services.data_service import DataService
 from src.strategies.static.mean_reversion import MeanReversionStrategy
 from src.strategies.static.trend_following import TrendFollowingStrategy
 
-from .fixtures.real_service_fixtures import generate_realistic_market_data_sequence
-from .utils.indicator_validation import IndicatorValidator, IndicatorAccuracyTester
+from .utils.indicator_validation import IndicatorValidator
 
 # Set high precision for Decimal calculations
 getcontext().prec = 28
@@ -41,8 +38,8 @@ class MarketDataPipelineGenerator:
         base_price: Decimal = Decimal("50000.00"),
         volatility: Decimal = Decimal("0.02"),
         trend_strength: Decimal = Decimal("0.0"),
-        volume_pattern: str = "normal"
-    ) -> List[MarketData]:
+        volume_pattern: str = "normal",
+    ) -> list[MarketData]:
         """
         Generate realistic cryptocurrency market data.
 
@@ -83,7 +80,9 @@ class MarketDataPipelineGenerator:
 
             # High and low with realistic spreads
             intraday_volatility = volatility * Decimal("0.5")
-            high_offset = new_price * intraday_volatility * Decimal(str(abs(np.random.normal(0, 1))))
+            high_offset = (
+                new_price * intraday_volatility * Decimal(str(abs(np.random.normal(0, 1))))
+            )
             low_offset = new_price * intraday_volatility * Decimal(str(abs(np.random.normal(0, 1))))
 
             high_price = max(open_price, close_price) + high_offset
@@ -126,9 +125,8 @@ class MarketDataPipelineGenerator:
 
     @staticmethod
     def generate_market_regime_data(
-        symbol: str = "BTC/USDT",
-        regime: str = "bull_market"
-    ) -> List[MarketData]:
+        symbol: str = "BTC/USDT", regime: str = "bull_market"
+    ) -> list[MarketData]:
         """
         Generate market data for specific market regimes.
 
@@ -145,7 +143,7 @@ class MarketDataPipelineGenerator:
                 periods=50,
                 trend_strength=Decimal("0.8"),
                 volatility=Decimal("0.015"),
-                volume_pattern="increasing"
+                volume_pattern="increasing",
             )
         elif regime == "bear_market":
             return MarketDataPipelineGenerator.generate_crypto_market_data(
@@ -153,7 +151,7 @@ class MarketDataPipelineGenerator:
                 periods=50,
                 trend_strength=Decimal("-0.6"),
                 volatility=Decimal("0.025"),
-                volume_pattern="decreasing"
+                volume_pattern="decreasing",
             )
         elif regime == "sideways":
             return MarketDataPipelineGenerator.generate_crypto_market_data(
@@ -161,7 +159,7 @@ class MarketDataPipelineGenerator:
                 periods=60,
                 trend_strength=Decimal("0.0"),
                 volatility=Decimal("0.01"),
-                volume_pattern="normal"
+                volume_pattern="normal",
             )
         else:  # volatile
             return MarketDataPipelineGenerator.generate_crypto_market_data(
@@ -169,14 +167,13 @@ class MarketDataPipelineGenerator:
                 periods=40,
                 trend_strength=Decimal("0.2"),
                 volatility=Decimal("0.05"),
-                volume_pattern="volatile"
+                volume_pattern="volatile",
             )
 
     @staticmethod
     def generate_indicator_test_data(
-        indicator_type: str,
-        symbol: str = "BTC/USDT"
-    ) -> List[MarketData]:
+        indicator_type: str, symbol: str = "BTC/USDT"
+    ) -> list[MarketData]:
         """
         Generate market data optimized for testing specific indicators.
 
@@ -195,58 +192,53 @@ class MarketDataPipelineGenerator:
             # Phase 1: Declining prices (oversold RSI)
             for i in range(15):
                 price = base_price - Decimal(str(i * 200))
-                data.append(MarketData(
-                    symbol=symbol,
-                    open=price + Decimal("50"),
-                    high=price + Decimal("100"),
-                    low=price - Decimal("50"),
-                    close=price,
-                    volume=Decimal("1500.0"),
-                    timestamp=datetime.now(timezone.utc) - timedelta(hours=20 - i),
-                    exchange="binance"
-                ))
+                data.append(
+                    MarketData(
+                        symbol=symbol,
+                        open=price + Decimal("50"),
+                        high=price + Decimal("100"),
+                        low=price - Decimal("50"),
+                        close=price,
+                        volume=Decimal("1500.0"),
+                        timestamp=datetime.now(timezone.utc) - timedelta(hours=20 - i),
+                        exchange="binance",
+                    )
+                )
 
             # Phase 2: Rising prices (overbought RSI)
             for i in range(10):
                 price = data[-1].close + Decimal(str(i * 300))
-                data.append(MarketData(
-                    symbol=symbol,
-                    open=data[-1].close,
-                    high=price + Decimal("100"),
-                    low=data[-1].close - Decimal("50"),
-                    close=price,
-                    volume=Decimal("2000.0"),
-                    timestamp=datetime.now(timezone.utc) - timedelta(hours=5 - i),
-                    exchange="binance"
-                ))
+                data.append(
+                    MarketData(
+                        symbol=symbol,
+                        open=data[-1].close,
+                        high=price + Decimal("100"),
+                        low=data[-1].close - Decimal("50"),
+                        close=price,
+                        volume=Decimal("2000.0"),
+                        timestamp=datetime.now(timezone.utc) - timedelta(hours=5 - i),
+                        exchange="binance",
+                    )
+                )
 
             return data
 
         elif indicator_type == "macd":
             # Generate data with clear trend changes for MACD crossovers
             return MarketDataPipelineGenerator.generate_crypto_market_data(
-                symbol=symbol,
-                periods=50,
-                trend_strength=Decimal("0.5"),
-                volatility=Decimal("0.02")
+                symbol=symbol, periods=50, trend_strength=Decimal("0.5"), volatility=Decimal("0.02")
             )
 
         elif indicator_type == "bollinger":
             # Generate data with varying volatility for Bollinger Bands
             return MarketDataPipelineGenerator.generate_crypto_market_data(
-                symbol=symbol,
-                periods=40,
-                volatility=Decimal("0.03"),
-                volume_pattern="volatile"
+                symbol=symbol, periods=40, volatility=Decimal("0.03"), volume_pattern="volatile"
             )
 
         else:  # sma/ema
             # Generate smooth trending data for moving averages
             return MarketDataPipelineGenerator.generate_crypto_market_data(
-                symbol=symbol,
-                periods=30,
-                trend_strength=Decimal("0.3"),
-                volatility=Decimal("0.01")
+                symbol=symbol, periods=30, trend_strength=Decimal("0.3"), volatility=Decimal("0.01")
             )
 
 
@@ -264,14 +256,17 @@ class TestRealMarketDataPipeline:
         return MarketDataPipelineGenerator()
 
     @pytest.mark.asyncio
-    async def test_decimal_precision_throughout_pipeline(self, real_data_service, market_data_generator):
+    @pytest.mark.timeout(300)
+    async def test_decimal_precision_throughout_pipeline(
+        self, real_data_service, market_data_generator
+    ):
         """Test that Decimal precision is maintained throughout the market data pipeline."""
         # Generate market data with high precision Decimal values
         market_data_series = market_data_generator.generate_crypto_market_data(
             symbol="BTC/USDT",
             periods=25,
             base_price=Decimal("50123.45678901"),  # High precision
-            volatility=Decimal("0.0234567890"),    # High precision
+            volatility=Decimal("0.0234567890"),  # High precision
         )
 
         # Store market data in pipeline
@@ -289,13 +284,12 @@ class TestRealMarketDataPipeline:
 
         # Retrieve market data and verify precision preservation
         retrieved_data = await real_data_service.get_market_data_history(
-            symbol="BTC/USDT",
-            limit=25
+            symbol="BTC/USDT", limit=25
         )
 
         assert len(retrieved_data) == 25
 
-        for original, retrieved in zip(market_data_series, retrieved_data):
+        for original, retrieved in zip(market_data_series, retrieved_data, strict=False):
             # Verify Decimal type preservation
             assert isinstance(retrieved.close, Decimal)
             assert isinstance(retrieved.volume, Decimal)
@@ -304,6 +298,7 @@ class TestRealMarketDataPipeline:
             assert abs(retrieved.close - original.close) < Decimal("0.000000000000000001")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_market_regime_data_processing(self, real_data_service, market_data_generator):
         """Test processing of different market regime data."""
         regimes = ["bull_market", "bear_market", "sideways", "volatile"]
@@ -311,13 +306,14 @@ class TestRealMarketDataPipeline:
         for regime in regimes:
             # Generate regime-specific data
             regime_data = market_data_generator.generate_market_regime_data(
-                symbol=f"TEST_{regime.upper()}/USDT",
-                regime=regime
+                symbol=f"TEST_{regime.upper()}/USDT", regime=regime
             )
 
             # Store regime data
             for market_data in regime_data:
-                await real_data_service.store_market_data(market_data, exchange=market_data.exchange)
+                await real_data_service.store_market_data(
+                    market_data, exchange=market_data.exchange
+                )
 
             # Verify data characteristics
             prices = [md.close for md in regime_data]
@@ -348,6 +344,7 @@ class TestRealMarketDataPipeline:
                 assert md.low <= min(md.open, md.close)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_high_frequency_data_processing(self, real_data_service, market_data_generator):
         """Test processing of high-frequency market data."""
         # Generate high-frequency data (1-minute intervals)
@@ -387,8 +384,7 @@ class TestRealMarketDataPipeline:
         # Test data retrieval performance
         start_time = time.time()
         retrieved_hf_data = await real_data_service.get_market_data_history(
-            symbol="BTC/USDT",
-            limit=1440
+            symbol="BTC/USDT", limit=1440
         )
         retrieval_time = time.time() - start_time
 
@@ -402,13 +398,14 @@ class TestRealMarketDataPipeline:
             assert isinstance(md.volume, Decimal)
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_market_data_aggregation_pipeline(self, real_data_service, market_data_generator):
         """Test market data aggregation for different timeframes."""
         # Generate 1-hour data
         hourly_data = market_data_generator.generate_crypto_market_data(
             symbol="BTC/USDT",
             periods=24,  # 24 hours
-            base_price=Decimal("50000.00")
+            base_price=Decimal("50000.00"),
         )
 
         # Store hourly data
@@ -420,7 +417,7 @@ class TestRealMarketDataPipeline:
             symbol="BTC/USDT",
             source_timeframe="1h",
             target_timeframe="4h",
-            periods=6  # 6 * 4h = 24h
+            periods=6,  # 6 * 4h = 24h
         )
 
         assert len(aggregated_4h) == 6
@@ -460,7 +457,9 @@ class TestRealIndicatorPipelineIntegration:
     @pytest_asyncio.fixture
     async def strategy_with_real_data(self, strategy_service_container):
         """Create strategy with real market data pipeline."""
-        from tests.integration.modules.strategies.fixtures.market_data_generators import MarketDataGenerator
+        from tests.integration.modules.strategies.fixtures.market_data_generators import (
+            MarketDataGenerator,
+        )
 
         # Create market data generator
         market_data_generator = MarketDataGenerator(seed=42)
@@ -476,38 +475,42 @@ class TestRealIndicatorPipelineIntegration:
                 "entry_threshold": Decimal("2.0"),
                 "rsi_period": 14,
                 "atr_period": 14,
-            }
+            },
         )
 
         strategy = MeanReversionStrategy(
-            config=config.model_dump(),
-            services=strategy_service_container
+            config=config.model_dump(), services=strategy_service_container
         )
         await strategy.initialize(config)
 
         # Pre-load market data for indicators
         print("[STRATEGY FIXTURE] Generating 50 market data records")
         market_data = market_data_generator.generate_trending_data(
-            periods=50,
-            trend_strength=0.001,
-            direction=1
+            periods=50, trend_strength=0.001, direction=1
         )
 
         print(f"[STRATEGY FIXTURE] Storing {len(market_data)} records to database")
         stored_count = 0
         for i, md in enumerate(market_data):
-            result = await strategy.services.data_service.store_market_data(md, exchange=md.exchange)
+            result = await strategy.services.data_service.store_market_data(
+                md, exchange=md.exchange
+            )
             if result:
                 stored_count += 1
             if i == 0:
-                print(f"[STRATEGY FIXTURE] First record: symbol={md.symbol}, exchange={md.exchange}, close={md.close}")
-        print(f"[STRATEGY FIXTURE] Data stored successfully: {stored_count}/{len(market_data)} records")
+                print(
+                    f"[STRATEGY FIXTURE] First record: symbol={md.symbol}, exchange={md.exchange}, close={md.close}"
+                )
+        print(
+            f"[STRATEGY FIXTURE] Data stored successfully: {stored_count}/{len(market_data)} records"
+        )
 
         yield strategy, market_data
         print("[STRATEGY FIXTURE] Test completed, cleaning up strategy")
         await strategy.cleanup()
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_rsi_pipeline_accuracy(self, strategy_with_real_data):
         """Test RSI calculation pipeline with mathematical validation."""
         strategy, market_data = strategy_with_real_data
@@ -523,17 +526,18 @@ class TestRealIndicatorPipelineIntegration:
         expected_rsi = IndicatorValidator.calculate_rsi(prices, 14)
 
         # Debug output
-        print(f"\n=== RSI Debug Info ===")
+        print("\n=== RSI Debug Info ===")
         print(f"Total market_data records: {len(market_data)}")
         print(f"Total prices for validator: {len(prices)}")
         print(f"First 5 prices: {prices[:5]}")
         print(f"Last 5 prices: {prices[-5:]}")
         print(f"Calculated RSI (from DB): {calculated_rsi}")
         print(f"Expected RSI (from fixture): {expected_rsi}")
-        print(f"Difference: {abs(calculated_rsi - expected_rsi) if calculated_rsi and expected_rsi else 'N/A'}")
+        print(
+            f"Difference: {abs(calculated_rsi - expected_rsi) if calculated_rsi and expected_rsi else 'N/A'}"
+        )
 
         # Get data that was actually used by the strategy
-        from src.data.types import DataRequest
         db_data = await strategy.services.data_service.get_recent_data("BTC/USDT", limit=1000)
         db_prices = [d.close for d in db_data]
         print(f"Total DB records retrieved: {len(db_data)}")
@@ -544,7 +548,7 @@ class TestRealIndicatorPipelineIntegration:
         if len(db_prices) >= 15:
             db_rsi = IndicatorValidator.calculate_rsi(db_prices, 14)
             print(f"RSI calculated on DB data: {db_rsi}")
-        print(f"======================\n")
+        print("======================\n")
 
         # Verify calculation accuracy
         assert calculated_rsi is not None, "Calculated RSI is None"
@@ -555,12 +559,15 @@ class TestRealIndicatorPipelineIntegration:
         # Allow reasonable tolerance for database precision limitations and algorithm variations
         # DB stores DECIMAL(20,8) while app uses 18 decimals - expect some rounding differences
         rsi_difference = abs(calculated_rsi - expected_rsi)
-        assert rsi_difference < Decimal("0.1"), f"RSI calculation difference: {rsi_difference} (tolerance: 0.1)"
+        assert rsi_difference < Decimal("0.1"), (
+            f"RSI calculation difference: {rsi_difference} (tolerance: 0.1)"
+        )
 
         # Verify RSI is within valid range
         assert Decimal("0") <= calculated_rsi <= Decimal("100")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_moving_average_pipeline_accuracy(self, strategy_with_real_data):
         """Test moving average calculation pipeline."""
         strategy, market_data = strategy_with_real_data
@@ -594,6 +601,7 @@ class TestRealIndicatorPipelineIntegration:
         assert ema_difference < Decimal("50.0"), f"EMA calculation difference: {ema_difference}"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_bollinger_bands_pipeline(self, strategy_with_real_data):
         """Test Bollinger Bands calculation pipeline."""
         strategy, market_data = strategy_with_real_data
@@ -633,6 +641,7 @@ class TestRealIndicatorPipelineIntegration:
             assert middle_diff < Decimal("10.0"), f"Bollinger middle band difference: {middle_diff}"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_atr_pipeline_accuracy(self, strategy_with_real_data):
         """Test ATR (Average True Range) calculation pipeline."""
         strategy, market_data = strategy_with_real_data
@@ -655,9 +664,12 @@ class TestRealIndicatorPipelineIntegration:
         if expected_atr:
             atr_difference = abs(calculated_atr - expected_atr)
             # ATR calculations can vary based on implementation details
-            assert atr_difference < calculated_atr * Decimal("0.1"), f"ATR calculation difference: {atr_difference}"
+            assert atr_difference < calculated_atr * Decimal("0.1"), (
+                f"ATR calculation difference: {atr_difference}"
+            )
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_indicator_pipeline_performance(self, strategy_with_real_data):
         """Test performance of indicator calculation pipeline."""
         strategy, market_data = strategy_with_real_data
@@ -706,6 +718,7 @@ class TestRealIndicatorPipelineIntegration:
         assert parallel_time <= calculation_time + 1.0  # Allow small overhead
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_cross_timeframe_indicator_pipeline(self, strategy_service_container):
         """Test indicator calculations across different timeframes."""
         # Create market data for multiple timeframes
@@ -715,13 +728,13 @@ class TestRealIndicatorPipelineIntegration:
         hourly_data = generator.generate_crypto_market_data(
             symbol="BTC/USDT",
             periods=48,  # 48 hours
-            base_price=Decimal("50000.00")
+            base_price=Decimal("50000.00"),
         )
 
         # Generate 4h data (aggregated)
         four_hour_data = []
         for i in range(0, len(hourly_data), 4):
-            chunk = hourly_data[i:i+4]
+            chunk = hourly_data[i : i + 4]
             if len(chunk) == 4:
                 aggregated = MarketData(
                     symbol="BTC/USDT",
@@ -731,7 +744,7 @@ class TestRealIndicatorPipelineIntegration:
                     close=chunk[-1].close,
                     volume=sum(md.volume for md in chunk),
                     timestamp=chunk[-1].timestamp,
-                    exchange="binance"
+                    exchange="binance",
                 )
                 four_hour_data.append(aggregated)
 
@@ -751,7 +764,7 @@ class TestRealIndicatorPipelineIntegration:
             strategy_type=StrategyType.TREND_FOLLOWING,
             symbol="BTC/USDT",
             timeframe="1h",
-            parameters={"fast_ma_period": 10, "slow_ma_period": 20}
+            parameters={"fast_ma_period": 10, "slow_ma_period": 20},
         )
 
         config_4h = StrategyConfig(
@@ -760,18 +773,16 @@ class TestRealIndicatorPipelineIntegration:
             strategy_type=StrategyType.TREND_FOLLOWING,
             symbol="BTC/USDT",
             timeframe="4h",
-            parameters={"fast_ma_period": 10, "slow_ma_period": 20}
+            parameters={"fast_ma_period": 10, "slow_ma_period": 20},
         )
 
         strategy_1h = TrendFollowingStrategy(
-            config=config_1h.model_dump(),
-            services=strategy_service_container
+            config=config_1h.model_dump(), services=strategy_service_container
         )
         await strategy_1h.initialize(config_1h)
 
         strategy_4h = TrendFollowingStrategy(
-            config=config_4h.model_dump(),
-            services=strategy_service_container
+            config=config_4h.model_dump(), services=strategy_service_container
         )
         await strategy_4h.initialize(config_4h)
 

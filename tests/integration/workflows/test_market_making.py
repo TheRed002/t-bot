@@ -137,6 +137,7 @@ class TestMarketMakingIntegration:
         return strategy
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_complete_market_making_workflow(self, strategy, market_data_sequence):
         """Test the complete market making workflow."""
         # Step 1: Generate signals from market data
@@ -178,6 +179,7 @@ class TestMarketMakingIntegration:
         assert should_rebalance is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_signal_generation_with_volatility(self, strategy):
         """Test signal generation with varying volatility."""
         # Create market data with increasing volatility
@@ -211,6 +213,7 @@ class TestMarketMakingIntegration:
                 assert spread > 0.001  # Should be wider than base spread
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_inventory_management_integration(self, strategy):
         """Test inventory management integration."""
         # Create inventory manager
@@ -254,6 +257,7 @@ class TestMarketMakingIntegration:
         assert orders[0].side == OrderSide.SELL
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_spread_optimization_integration(self, strategy):
         """Test spread optimization integration."""
         # Create spread optimizer
@@ -313,6 +317,7 @@ class TestMarketMakingIntegration:
         assert ask_spread > 0
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_risk_management_integration(self, strategy, mock_risk_manager):
         """Test risk management integration."""
         # Test signal validation with risk manager
@@ -338,6 +343,7 @@ class TestMarketMakingIntegration:
         assert is_valid is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_exchange_integration(self, strategy, mock_exchange):
         """Test exchange integration."""
         # Test order placement
@@ -373,6 +379,7 @@ class TestMarketMakingIntegration:
         assert cancelled is True
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_performance_tracking_integration(self, strategy):
         """Test performance tracking integration."""
         # Simulate multiple trades
@@ -399,6 +406,7 @@ class TestMarketMakingIntegration:
         assert float(info["total_pnl"]) == 29.4
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_emergency_liquidation_integration(self, strategy):
         """Test emergency liquidation integration."""
         # Create inventory manager
@@ -440,6 +448,7 @@ class TestMarketMakingIntegration:
         assert emergency_orders[0].quantity == Decimal("0.9")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_market_conditions_adaptation(self, strategy):
         """Test adaptation to changing market conditions."""
         # Create market data with changing conditions
@@ -484,6 +493,7 @@ class TestMarketMakingIntegration:
                         assert spread > 0.001
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_error_handling_integration(self, strategy, mock_exchange):
         """Test error handling integration."""
         # Test exchange error handling

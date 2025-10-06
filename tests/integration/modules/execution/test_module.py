@@ -17,7 +17,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 # pytestmark = pytest.mark.skip("Execution module tests need comprehensive setup")  # ENABLED for real services testing
-
 from src.core.types import (
     ExecutionAlgorithm,
     ExecutionStatus,
@@ -116,7 +115,7 @@ def mock_config():
         values = {
             "max_order_value": Decimal("100000"),
             "default_slippage_tolerance": Decimal("0.001"),
-            "default_daily_volume": "1000000"
+            "default_daily_volume": "1000000",
         }
         return values.get(key, default)
 
@@ -148,6 +147,7 @@ def container_with_mocks(
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_execution_service_dependency_injection(
     container_with_mocks, mock_database_service, mock_risk_service
 ):
@@ -177,6 +177,7 @@ async def test_execution_service_dependency_injection(
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_execution_di_registration(container_with_mocks, mock_config):
     """Test execution module DI registration creates proper service layer."""
 
@@ -200,6 +201,7 @@ async def test_execution_di_registration(container_with_mocks, mock_config):
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_service_layer_boundaries_respected():
     """Test that service layer boundaries are properly respected."""
 
@@ -255,13 +257,16 @@ async def test_service_layer_boundaries_respected():
     # Verify database service was called (proper abstraction)
     # Should call list_orders and create_order_record, not create_entity
     assert len(mock_db.method_calls) > 0, "Database service should have been called"
-    assert any("list_orders" in str(call) or "create_order_record" in str(call) for call in mock_db.method_calls), \
-        f"Expected list_orders or create_order_record calls, got: {mock_db.method_calls}"
+    assert any(
+        "list_orders" in str(call) or "create_order_record" in str(call)
+        for call in mock_db.method_calls
+    ), f"Expected list_orders or create_order_record calls, got: {mock_db.method_calls}"
 
     await execution_service.stop()
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_error_handling_propagation():
     """Test that error handling properly propagates through service layers."""
 
@@ -321,6 +326,7 @@ async def test_error_handling_propagation():
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_orchestration_service_coordinates_properly(container_with_mocks, mock_config):
     """Test that ExecutionOrchestrationService properly coordinates service calls."""
 
@@ -348,6 +354,7 @@ async def test_orchestration_service_coordinates_properly(container_with_mocks, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(300)
 async def test_no_direct_database_access():
     """Test that execution module doesn't bypass service layer for database access."""
 

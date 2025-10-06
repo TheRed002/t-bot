@@ -4,16 +4,15 @@ Tests focus on dependency injection configuration, service registration,
 and interface compliance without requiring database connections.
 """
 
-from decimal import Decimal
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import pytest
 
 from src.core.config import Config
 from src.core.dependency_injection import DependencyInjector
-from src.data.di_registration import configure_data_dependencies
-from src.data.interfaces import DataServiceInterface, DataStorageInterface
 from src.core.types.market import MarketData
+from src.data.di_registration import configure_data_dependencies
 
 
 @pytest.mark.asyncio
@@ -66,6 +65,7 @@ class TestDataModuleIntegration:
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_dependency_injection_configuration(self, injector):
         """Test that all required dependencies are properly configured."""
         # Test that core interfaces are registered
@@ -80,6 +80,7 @@ class TestDataModuleIntegration:
         assert injector.is_registered("DataServiceFactory")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_data_service_factory_creation(self, injector):
         """Test that data service factories are properly configured."""
         # Test that all required factories are registered
@@ -90,13 +91,14 @@ class TestDataModuleIntegration:
             "DataValidatorInterface",
             "MarketDataSource",
             "VectorizedProcessor",
-            "DataServiceFactory"
+            "DataServiceFactory",
         ]
 
         for factory_name in required_factories:
             assert injector.is_registered(factory_name), f"Factory {factory_name} not registered"
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_data_module_configuration_completeness(self, injector):
         """Test that the data module has all necessary configuration."""
         # Verify all data interfaces are properly registered
@@ -105,7 +107,7 @@ class TestDataModuleIntegration:
             "DataStorageInterface",
             "DataCacheInterface",
             "DataValidatorInterface",
-            "ServiceDataValidatorInterface"
+            "ServiceDataValidatorInterface",
         ]
 
         for interface in data_interfaces:
@@ -116,18 +118,22 @@ class TestDataModuleIntegration:
         assert injector.is_registered("data_service")  # Lowercase alias
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_specialized_services_registration(self, injector):
         """Test that specialized data services are properly registered."""
         specialized_services = [
             "DataPipelineIngestion",
             "StreamingDataService",
-            "DataServiceRegistry"
+            "DataServiceRegistry",
         ]
 
         for service_name in specialized_services:
-            assert injector.is_registered(service_name), f"Specialized service {service_name} not registered"
+            assert injector.is_registered(service_name), (
+                f"Specialized service {service_name} not registered"
+            )
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_market_data_model_validation(self, sample_market_data):
         """Test that market data model is properly structured."""
         # Test that sample data has all required fields

@@ -29,6 +29,7 @@ class TestWebSocketConnections:
 
     @pytest.mark.asyncio
     @performance_test(max_duration=45.0)
+    @pytest.mark.timeout(300)
     async def test_multi_exchange_websocket_stability(self, performance_monitor):
         """Test stability of WebSocket connections across multiple exchanges."""
 
@@ -213,6 +214,7 @@ class TestWebSocketConnections:
         logger.info(f"WebSocket stability test completed: {total_received} messages received")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_websocket_failover_mechanisms(self):
         """Test WebSocket failover and backup connection mechanisms."""
 
@@ -316,6 +318,7 @@ class TestWebSocketConnections:
         logger.info(f"Failover test completed with {ws_manager.failover_count} failovers")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_websocket_message_ordering_and_deduplication(self):
         """Test message ordering and deduplication in WebSocket streams."""
 
@@ -417,6 +420,7 @@ class TestMarketDataPipeline:
 
     @pytest.mark.asyncio
     @performance_test(max_duration=20.0)
+    @pytest.mark.timeout(300)
     async def test_data_processing_pipeline_throughput(self, performance_monitor):
         """Test data processing pipeline throughput under load."""
 
@@ -600,6 +604,7 @@ class TestMarketDataPipeline:
         logger.info("Data processing pipeline throughput test completed")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_data_pipeline_backpressure_handling(self):
         """Test data pipeline handling of backpressure and queue management."""
 
@@ -759,6 +764,7 @@ class TestRealTimeRiskMonitoring:
     """Test real-time risk monitoring integration."""
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_real_time_portfolio_risk_updates(self):
         """Test real-time portfolio risk calculation updates."""
 

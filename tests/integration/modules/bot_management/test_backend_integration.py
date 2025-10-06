@@ -5,20 +5,19 @@ Tests real backend services integration for bot_management module.
 Focuses on identifying and fixing actual backend implementation issues.
 """
 
-import asyncio
-import pytest
-from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
-from src.bot_management.di_registration import configure_bot_management_dependencies
-from src.bot_management.service import BotService
+import pytest
+
 from src.bot_management.bot_coordinator import BotCoordinator
+from src.bot_management.di_registration import configure_bot_management_dependencies
 from src.bot_management.resource_manager import ResourceManager
+from src.bot_management.service import BotService
+from src.core.config import get_config
 from src.core.dependency_injection import DependencyInjector
-from src.core.config import get_config, Config
 from src.core.exceptions import ValidationError
-from src.core.types.bot import BotConfiguration, BotPriority, BotStatus, BotType
+from src.core.types.bot import BotConfiguration, BotPriority, BotType
 
 
 class TestBotManagementBackendIntegration:
@@ -35,14 +34,14 @@ class TestBotManagementBackendIntegration:
     def test_config_integration(self):
         """Test that bot management configuration is properly loaded."""
         # Test that BotManagementConfig exists and is accessible
-        assert hasattr(self.config, 'bot_management')
+        assert hasattr(self.config, "bot_management")
         bot_config = self.config.bot_management
 
         # Test key configuration attributes exist
-        assert hasattr(bot_config, 'max_symbol_exposure')
-        assert hasattr(bot_config, 'coordination_interval')
-        assert hasattr(bot_config, 'signal_retention_minutes')
-        assert hasattr(bot_config, 'arbitrage_detection_enabled')
+        assert hasattr(bot_config, "max_symbol_exposure")
+        assert hasattr(bot_config, "coordination_interval")
+        assert hasattr(bot_config, "signal_retention_minutes")
+        assert hasattr(bot_config, "arbitrage_detection_enabled")
 
         # Test configuration values are reasonable
         assert bot_config.max_symbol_exposure > 0
@@ -62,8 +61,14 @@ class TestBotManagementBackendIntegration:
         # Test configuration was loaded correctly
         assert coordinator.max_symbol_exposure == self.config.bot_management.max_symbol_exposure
         assert coordinator.coordination_interval == self.config.bot_management.coordination_interval
-        assert coordinator.signal_retention_minutes == self.config.bot_management.signal_retention_minutes
-        assert coordinator.arbitrage_detection_enabled == self.config.bot_management.arbitrage_detection_enabled
+        assert (
+            coordinator.signal_retention_minutes
+            == self.config.bot_management.signal_retention_minutes
+        )
+        assert (
+            coordinator.arbitrage_detection_enabled
+            == self.config.bot_management.arbitrage_detection_enabled
+        )
 
     def test_resource_manager_initialization(self):
         """Test ResourceManager can be initialized with real dependencies."""
@@ -89,6 +94,7 @@ class TestBotManagementBackendIntegration:
             pytest.fail(f"Failed to resolve BotService from DI container: {e}")
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_bot_service_basic_operations(self):
         """Test basic BotService operations work with real dependencies."""
         bot_service = self.injector.resolve("BotService")
@@ -110,10 +116,7 @@ class TestBotManagementBackendIntegration:
             priority=BotPriority.NORMAL,
             bot_type=BotType.TRADING,
             allocated_capital=Decimal("1000.0"),
-            strategy_parameters={
-                "lookback_period": 20,
-                "momentum_threshold": Decimal("0.02")
-            }
+            strategy_parameters={"lookback_period": 20, "momentum_threshold": Decimal("0.02")},
         )
 
         # Test configuration is valid
@@ -124,6 +127,7 @@ class TestBotManagementBackendIntegration:
         assert bot_config.bot_type == BotType.TRADING
 
     @pytest.mark.asyncio
+    @pytest.mark.timeout(300)
     async def test_bot_lifecycle_basic_flow(self):
         """Test basic bot lifecycle operations."""
         from src.bot_management.bot_lifecycle import BotLifecycle
@@ -139,7 +143,7 @@ class TestBotManagementBackendIntegration:
             await lifecycle.create_bot_from_template(
                 template_name="momentum_trader",  # Non-existent template
                 bot_name="test_lifecycle_bot",
-                custom_config={"capital": Decimal("1000.0")}
+                custom_config={"capital": Decimal("1000.0")},
             )
 
         # This validates that the system correctly checks for template existence
