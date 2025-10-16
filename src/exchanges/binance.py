@@ -116,6 +116,58 @@ class BinanceExchange(BaseExchange):
 
         self.logger.info(f"Binance exchange initialized (testnet={self.testnet})")
 
+    def get_symbol_precision(self, symbol: str) -> tuple[int, int]:
+        """
+        Get price and quantity precision for a symbol.
+
+        Returns:
+            tuple: (price_precision, quantity_precision)
+        """
+        if symbol not in self._symbol_info_cache:
+            # Default fallback precision
+            self.logger.warning(f"Symbol {symbol} not in cache, using default precision 8")
+            return (8, 8)
+
+        symbol_info = self._symbol_info_cache[symbol]
+        filters = symbol_info.get("filters", [])
+
+        price_precision = 8  # Default
+        quantity_precision = 8  # Default
+
+        for f in filters:
+            if f.get("filterType") == "PRICE_FILTER":
+                tick_size_str = f.get("tickSize", "0.00000001")
+                tick_size = Decimal(str(tick_size_str))
+                # Normalize to remove trailing zeros, then calculate precision
+                normalized = tick_size.normalize()
+                price_precision = abs(normalized.as_tuple().exponent)
+            elif f.get("filterType") == "LOT_SIZE":
+                step_size_str = f.get("stepSize", "0.00000001")
+                step_size = Decimal(str(step_size_str))
+                # Normalize to remove trailing zeros, then calculate precision
+                normalized = step_size.normalize()
+                quantity_precision = abs(normalized.as_tuple().exponent)
+
+        return (price_precision, quantity_precision)
+
+    def round_price(self, price: Decimal, symbol: str) -> Decimal:
+        """Round price to exchange-specific precision."""
+        if price is None:
+            return price
+
+        price_precision, _ = self.get_symbol_precision(symbol)
+        quantizer = Decimal(10) ** -price_precision
+        return price.quantize(quantizer)
+
+    def round_quantity(self, quantity: Decimal, symbol: str) -> Decimal:
+        """Round quantity to exchange-specific precision."""
+        if quantity is None:
+            return quantity
+
+        _, quantity_precision = self.get_symbol_precision(symbol)
+        quantizer = Decimal(10) ** -quantity_precision
+        return quantity.quantize(quantizer)
+
     def _validate_service_config(self, config: dict[str, Any]) -> bool:
         """Validate Binance-specific configuration."""
         if not config:
@@ -306,9 +358,9 @@ class BinanceExchange(BaseExchange):
             ticker = Ticker(
                 symbol=symbol,
                 bid_price=standardize_decimal_precision(validated_data["bid"]),
-                bid_quantity=Decimal(ticker_data["bidQty"]),
+                bid_quantity=Decimal(ticker_data.get("bidQty", "0")),
                 ask_price=standardize_decimal_precision(validated_data["ask"]),
-                ask_quantity=Decimal(ticker_data["askQty"]),
+                ask_quantity=Decimal(ticker_data.get("askQty", "0")),
                 last_price=standardize_decimal_precision(validated_data["price"]),
                 open_price=standardize_decimal_precision(validated_data["open"]),
                 high_price=standardize_decimal_precision(validated_data["high"]),
@@ -520,15 +572,20 @@ class BinanceExchange(BaseExchange):
                 "type": binance_type,
             }
 
+            # Round quantity to exchange precision
+            rounded_quantity = self.round_quantity(order_request.quantity, order_request.symbol)
+
             # Add quantity or quote quantity
             if order_request.quote_quantity is not None:
                 order_params["quoteOrderQty"] = str(order_request.quote_quantity)
             else:
-                order_params["quantity"] = str(order_request.quantity)
+                order_params["quantity"] = str(rounded_quantity)
 
             # Add price and other parameters based on order type
             if order_request.order_type == OrderType.LIMIT:
-                order_params["price"] = str(order_request.price)
+                # Round price to exchange precision
+                rounded_price = self.round_price(order_request.price, order_request.symbol)
+                order_params["price"] = str(rounded_price)
                 # Use time_in_force from request, default to GTC if not specified
                 tif_mapping = {"GTC": "GTC", "IOC": "IOC", "FOK": "FOK"}
                 tif_value = (
@@ -539,9 +596,11 @@ class BinanceExchange(BaseExchange):
                 order_params["timeInForce"] = tif_mapping.get(tif_value, "GTC")
             elif order_request.order_type == OrderType.STOP_LOSS:
                 if order_request.price:
-                    order_params["price"] = str(order_request.price)
+                    rounded_price = self.round_price(order_request.price, order_request.symbol)
+                    order_params["price"] = str(rounded_price)
                 if order_request.stop_price:
-                    order_params["stopPrice"] = str(order_request.stop_price)
+                    rounded_stop_price = self.round_price(order_request.stop_price, order_request.symbol)
+                    order_params["stopPrice"] = str(rounded_stop_price)
                 # Use time_in_force from request, default to GTC if not specified
                 tif_mapping = {"GTC": "GTC", "IOC": "IOC", "FOK": "FOK"}
                 tif_value = (
@@ -552,9 +611,11 @@ class BinanceExchange(BaseExchange):
                 order_params["timeInForce"] = tif_mapping.get(tif_value, "GTC")
             elif order_request.order_type == OrderType.TAKE_PROFIT:
                 if order_request.price:
-                    order_params["price"] = str(order_request.price)
+                    rounded_price = self.round_price(order_request.price, order_request.symbol)
+                    order_params["price"] = str(rounded_price)
                 if order_request.stop_price:
-                    order_params["stopPrice"] = str(order_request.stop_price)
+                    rounded_stop_price = self.round_price(order_request.stop_price, order_request.symbol)
+                    order_params["stopPrice"] = str(rounded_stop_price)
                 # Use time_in_force from request, default to GTC if not specified
                 tif_mapping = {"GTC": "GTC", "IOC": "IOC", "FOK": "FOK"}
                 tif_value = (
