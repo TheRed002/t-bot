@@ -357,8 +357,8 @@ class ResourceManager(BaseComponent):
             ExecutionError: If release fails
         """
         if bot_id not in self.resource_allocations:
-            self._logger.warning("No resources allocated for bot", bot_id=bot_id)
-            return False
+            self._logger.info("No resources allocated for bot (already released)", bot_id=bot_id)
+            return True  # Idempotent - nothing to release is success
 
         allocations = self.resource_allocations[bot_id]
 

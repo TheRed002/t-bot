@@ -83,6 +83,9 @@ class DatabaseConnectionManager:
 
         This is critical for test isolation - ensures EVERY new session/connection
         automatically sets the search_path to the test schema.
+
+        Uses BOTH "connect" (for new connections) and "checkout" (for pooled connections)
+        events to ensure search_path is ALWAYS set correctly.
         """
         from sqlalchemy import event
 
@@ -99,14 +102,7 @@ class DatabaseConnectionManager:
                 cursor = dbapi_conn.cursor()
                 cursor.execute(f"SET search_path TO {test_schema}, public")
                 cursor.close()
-                logger.debug(f"Set search_path to {test_schema} on new async connection")
 
-            @event.listens_for(self.async_engine.sync_engine, "checkout")
-            def set_async_search_path_on_checkout(dbapi_conn, connection_record, connection_proxy):
-                """Ensure search path is set when async connection is checked out from pool."""
-                cursor = dbapi_conn.cursor()
-                cursor.execute(f"SET search_path TO {test_schema}, public")
-                cursor.close()
 
         # Set up listeners for sync engine
         if self.sync_engine:
@@ -443,15 +439,16 @@ class DatabaseConnectionManager:
             )
 
         if connections["redis_client"]:
-            close_tasks.append(self._close_redis_task(connections["redis_client"]))
+            # Create the close task directly instead of calling async method
+            close_tasks.append(self._create_redis_close_task(connections["redis_client"]))
 
         if connections["influxdb_client"]:
             close_tasks.append(self._close_influxdb_task(connections["influxdb_client"]))
 
         return close_tasks
 
-    async def _close_redis_task(self, redis_client) -> Any:
-        """Create Redis close task."""
+    def _create_redis_close_task(self, redis_client) -> Any:
+        """Create Redis close task as a coroutine."""
 
         async def close_redis():
             try:

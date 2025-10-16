@@ -74,15 +74,22 @@ def convert_pydantic_to_dict_with_decimals(data: Any) -> dict[str, Any]:
 def prepare_dataframe_from_market_data(market_data: dict[str, Any] | Any, apply_decimal_transform: bool = True) -> pd.DataFrame:
     """
     Convert market data to DataFrame with consistent transformations.
-    
+
     Args:
-        market_data: Market data as dict, DataFrame, or pydantic model
+        market_data: Market data as dict, list of dicts, DataFrame, or pydantic model
         apply_decimal_transform: Whether to apply decimal transformations
-        
+
     Returns:
         DataFrame ready for ML processing
     """
-    if isinstance(market_data, dict):
+    # Handle list of dicts (e.g., from df.to_dict('records'))
+    if isinstance(market_data, list):
+        df = pd.DataFrame(market_data)
+        if apply_decimal_transform:
+            return transform_market_data_to_decimal(df)
+        return df
+
+    elif isinstance(market_data, dict):
         if apply_decimal_transform:
             transformed_data = transform_market_data_to_decimal(market_data)
         else:

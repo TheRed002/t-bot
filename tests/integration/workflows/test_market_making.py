@@ -20,7 +20,11 @@ from src.core.types import (
     OrderRequest,
     OrderResponse,
     OrderSide,
+    OrderStatus,
+    OrderType,
     Position,
+    PositionSide,
+    PositionStatus,
     Signal,
     SignalDirection,
 )
@@ -44,10 +48,11 @@ class TestMarketMakingIntegration:
     def strategy_config(self):
         """Create a comprehensive test configuration."""
         return {
+            "strategy_id": "test_mm_001",
             "name": "test_market_making_integration",
             "strategy_type": "market_making",
             "enabled": True,
-            "symbols": ["BTCUSDT"],
+            "symbol": "BTC/USDT",
             "timeframe": "1m",
             "min_confidence": 0.8,
             "max_positions": 10,
@@ -83,15 +88,16 @@ class TestMarketMakingIntegration:
         base_price = 50000
         return [
             MarketData(
-                symbol="BTCUSDT",
-                price=Decimal(str(base_price + i * 10)),
-                volume=Decimal("100"),
+                symbol="BTC/USDT",
                 timestamp=datetime.now(timezone.utc) + timedelta(minutes=i),
-                bid=Decimal(str(base_price + i * 10 - 1)),
-                ask=Decimal(str(base_price + i * 10 + 1)),
-                open_price=Decimal(str(base_price + i * 10 - 50)),
-                high_price=Decimal(str(base_price + i * 10 + 50)),
-                low_price=Decimal(str(base_price + i * 10 - 50)),
+                open=Decimal(str(base_price + i * 10 - 50)),
+                high=Decimal(str(base_price + i * 10 + 50)),
+                low=Decimal(str(base_price + i * 10 - 50)),
+                close=Decimal(str(base_price + i * 10)),
+                volume=Decimal("100"),
+                exchange="binance",
+                bid_price=Decimal(str(base_price + i * 10 - 1)),
+                ask_price=Decimal(str(base_price + i * 10 + 1)),
             )
             for i in range(10)
         ]
@@ -100,18 +106,21 @@ class TestMarketMakingIntegration:
     def mock_exchange(self):
         """Create a mock exchange for testing."""
         exchange = Mock(spec=BaseExchange)
+        exchange.name = "binance"
+        now = datetime.now(timezone.utc)
         exchange.place_order = AsyncMock(
             return_value=OrderResponse(
                 id="test_order_123",
                 client_order_id="test_client_123",
-                symbol="BTCUSDT",
+                symbol="BTC/USDT",
                 side=OrderSide.BUY,
-                order_type="limit",
+                order_type=OrderType.LIMIT,
                 quantity=Decimal("0.01"),
                 price=Decimal("50000"),
                 filled_quantity=Decimal("0.01"),
-                status="filled",
-                timestamp=datetime.now(timezone.utc),
+                status=OrderStatus.FILLED,
+                created_at=now,
+                exchange="binance",
             )
         )
         exchange.get_market_data = AsyncMock()
@@ -161,12 +170,15 @@ class TestMarketMakingIntegration:
 
         # Step 4: Update inventory state
         position = Position(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             quantity=Decimal("0.3"),
             entry_price=Decimal("50000"),
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
+            opened_at=datetime.now(timezone.utc),
+            exchange="binance",
             timestamp=datetime.now(timezone.utc),
         )
 
@@ -190,18 +202,18 @@ class TestMarketMakingIntegration:
             # Simulate increasing volatility
             price_change = i * 2  # Increasing price changes
             market_data = MarketData(
-                symbol="BTCUSDT",
-                price=Decimal(str(base_price + price_change)),
+                symbol="BTC/USDT",
+                open=Decimal(str(base_price + price_change - 10)),
+                high=Decimal(str(base_price + price_change + 10)),
+                low=Decimal(str(base_price + price_change - 10)),
+                close=Decimal(str(base_price + price_change)),
                 volume=Decimal("100"),
                 timestamp=datetime.now(timezone.utc) + timedelta(minutes=i),
-                bid=Decimal(str(base_price + price_change - 1)),
-                ask=Decimal(str(base_price + price_change + 1)),
+                exchange="binance",
+                bid_price=Decimal(str(base_price + price_change - 1)),
+                ask_price=Decimal(str(base_price + price_change + 1)),
             )
             market_data_list.append(market_data)
-
-        # Update strategy with volatile data
-        for data in market_data_list:
-            strategy._update_price_history(data)
 
         # Generate signals with high volatility
         signals = await strategy._generate_signals_impl(market_data_list[-1])
@@ -209,8 +221,8 @@ class TestMarketMakingIntegration:
         # Should have wider spreads due to volatility
         for signal in signals:
             if "spread" in signal.metadata:
-                spread = signal.metadata["spread"]
-                assert spread > 0.001  # Should be wider than base spread
+                spread = Decimal(str(signal.metadata["spread"]))
+                assert spread > Decimal("0.001")  # Should be wider than base spread
 
     @pytest.mark.asyncio
     @pytest.mark.timeout(300)
@@ -233,12 +245,15 @@ class TestMarketMakingIntegration:
 
         # Test inventory update
         position = Position(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             quantity=Decimal("0.7"),
             entry_price=Decimal("50000"),
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
+            opened_at=datetime.now(timezone.utc),
+            exchange="binance",
             timestamp=datetime.now(timezone.utc),
         )
 
@@ -281,16 +296,20 @@ class TestMarketMakingIntegration:
 
         # Create market data with order book
         market_data = MarketData(
-            symbol="BTCUSDT",
-            price=Decimal("50000"),
+            symbol="BTC/USDT",
+            open=Decimal("49950"),
+            high=Decimal("50050"),
+            low=Decimal("49950"),
+            close=Decimal("50000"),
             volume=Decimal("100"),
             timestamp=datetime.now(timezone.utc),
-            bid=Decimal("49999"),
-            ask=Decimal("50001"),
+            exchange="binance",
+            bid_price=Decimal("49999"),
+            ask_price=Decimal("50001"),
         )
 
         order_book = {
-            "symbol": "BTCUSDT",
+            "symbol": "BTC/USDT",
             "bids": [[Decimal("49999"), Decimal("2.0")], [Decimal("49998"), Decimal("1.0")]],
             "asks": [[Decimal("50001"), Decimal("1.0")], [Decimal("50002"), Decimal("2.0")]],
             "timestamp": datetime.now(timezone.utc),
@@ -322,12 +341,16 @@ class TestMarketMakingIntegration:
         """Test risk management integration."""
         # Test signal validation with risk manager
         signal = Signal(
-            direction=SignalDirection.BUY,
-            confidence=0.9,
-            timestamp=datetime.now(timezone.utc),
-            symbol="BTCUSDT",
+            signal_id="sig_test_001",
+            strategy_id="test_mm_001",
             strategy_name=strategy.name,
-            metadata={"price": 50000.0, "size": 0.01, "level": 1, "spread": 0.001, "side": "bid"},
+            direction=SignalDirection.BUY,
+            strength=Decimal("0.9"),
+            confidence=Decimal("0.9"),
+            timestamp=datetime.now(timezone.utc),
+            symbol="BTC/USDT",
+            source="test",
+            metadata={"price": "50000.0", "size": "0.01", "level": 1, "spread": "0.001", "side": "bid"},
         )
 
         # Mock risk manager to reject signal
@@ -348,7 +371,7 @@ class TestMarketMakingIntegration:
         """Test exchange integration."""
         # Test order placement
         order_request = OrderRequest(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             side=OrderSide.BUY,
             order_type="limit",
             quantity=Decimal("0.01"),
@@ -360,18 +383,20 @@ class TestMarketMakingIntegration:
         mock_exchange.place_order.return_value = OrderResponse(
             id="test_order_123",
             client_order_id="test_order",
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             side=OrderSide.BUY,
             order_type="limit",
             quantity=Decimal("0.01"),
             price=Decimal("50000"),
             filled_quantity=Decimal("0.01"),
-            status="filled",
+            status=OrderStatus.FILLED,
             timestamp=datetime.now(timezone.utc),
+            created_at=datetime.now(timezone.utc),
+            exchange="binance",
         )
 
         response = await mock_exchange.place_order(order_request)
-        assert response.status == "filled"
+        assert response.status == OrderStatus.FILLED
         assert response.filled_quantity == Decimal("0.01")
 
         # Test order cancellation
@@ -426,12 +451,15 @@ class TestMarketMakingIntegration:
 
         # Set inventory to emergency level
         position = Position(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             quantity=Decimal("0.9"),  # 90% of max inventory
             entry_price=Decimal("50000"),
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
+            opened_at=datetime.now(timezone.utc),
+            exchange="binance",
             timestamp=datetime.now(timezone.utc),
         )
 
@@ -465,16 +493,17 @@ class TestMarketMakingIntegration:
 
         for i, condition in enumerate(market_conditions):
             market_data = MarketData(
-                symbol="BTCUSDT",
-                price=Decimal(str(condition["price"])),
+                symbol="BTC/USDT",
+                open=Decimal(str(condition["price"] - 10)),
+                high=Decimal(str(condition["price"] + 10)),
+                low=Decimal(str(condition["price"] - 10)),
+                close=Decimal(str(condition["price"])),
                 volume=Decimal("100"),
                 timestamp=datetime.now(timezone.utc) + timedelta(minutes=i),
-                bid=Decimal(str(condition["bid"])),
-                ask=Decimal(str(condition["ask"])),
+                exchange="binance",
+                bid_price=Decimal(str(condition["bid"])),
+                ask_price=Decimal(str(condition["ask"])),
             )
-
-            # Update strategy with new market data
-            strategy._update_price_history(market_data)
 
             # Generate signals
             signals = await strategy._generate_signals_impl(market_data)
@@ -482,15 +511,15 @@ class TestMarketMakingIntegration:
             # Check that signals adapt to market conditions
             for signal in signals:
                 if "spread" in signal.metadata:
-                    spread = signal.metadata["spread"]
+                    spread = Decimal(str(signal.metadata["spread"]))
 
                     if condition["volatility"] > 0.03:  # High volatility
                         # Spreads should be wider in high volatility
-                        assert spread > 0.001
+                        assert spread > Decimal("0.001")
 
                     if condition["ask"] - condition["bid"] > 50:  # Wide spread
                         # Should adapt to wide market spread
-                        assert spread > 0.001
+                        assert spread > Decimal("0.001")
 
     @pytest.mark.asyncio
     @pytest.mark.timeout(300)
@@ -500,7 +529,7 @@ class TestMarketMakingIntegration:
         mock_exchange.place_order.side_effect = Exception("Exchange error")
 
         order_request = OrderRequest(
-            symbol="BTCUSDT",
+            symbol="BTC/USDT",
             side=OrderSide.BUY,
             order_type="limit",
             quantity=Decimal("0.01"),
@@ -513,12 +542,16 @@ class TestMarketMakingIntegration:
 
         # Test signal generation with invalid data
         invalid_data = MarketData(
-            symbol="BTCUSDT",
-            price=Decimal("50000"),
+            symbol="BTC/USDT",
+            open=Decimal("49950"),
+            high=Decimal("50050"),
+            low=Decimal("49950"),
+            close=Decimal("50000"),
             volume=Decimal("100"),
             timestamp=datetime.now(timezone.utc),
-            bid=None,  # Invalid data
-            ask=None,
+            exchange="binance",
+            bid_price=None,  # Invalid data
+            ask_price=None,
         )
 
         signals = await strategy._generate_signals_impl(invalid_data)
@@ -526,11 +559,15 @@ class TestMarketMakingIntegration:
 
         # Test validation with invalid signal
         invalid_signal = Signal(
-            direction=SignalDirection.BUY,
-            confidence=0.1,  # Too low
-            timestamp=datetime.now(timezone.utc),
-            symbol="BTCUSDT",
+            signal_id="sig_invalid_001",
+            strategy_id="test_mm_001",
             strategy_name=strategy.name,
+            direction=SignalDirection.BUY,
+            strength=Decimal("0.1"),  # Too low
+            confidence=Decimal("0.1"),  # Too low
+            timestamp=datetime.now(timezone.utc),
+            symbol="BTC/USDT",
+            source="test",
             metadata={},  # Missing required metadata
         )
 

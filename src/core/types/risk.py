@@ -228,6 +228,7 @@ class CapitalAllocation(BaseModel):
 
     allocation_id: str
     strategy_id: str | None = None
+    exchange: str | None = None
     symbol: str | None = None
     allocated_amount: Decimal
     utilized_amount: Decimal
@@ -238,6 +239,8 @@ class CapitalAllocation(BaseModel):
     max_allocation: Decimal
     last_rebalance: datetime
     next_rebalance: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

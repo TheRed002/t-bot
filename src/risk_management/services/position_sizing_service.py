@@ -108,30 +108,14 @@ class PositionSizingService(BaseService):
             if method is None:
                 method = PositionSizeMethod.FIXED_PERCENTAGE
 
-            # Get risk per trade from config with data transformation consistency
+            # Get risk per trade from config
             risk_per_trade = to_decimal("0.02")  # Default 2%
             if self.config and hasattr(self.config, "risk"):
-                config_risk = to_decimal(str(getattr(self.config.risk, "risk_per_trade", "0.02")))
-
-                # Apply consistent data transformation patterns matching monitoring module
-                from src.utils.messaging_patterns import (
-                    MessagingCoordinator,
-                    ProcessingParadigmAligner,
-                )
-
-                coordinator = MessagingCoordinator("PositionSizingTransform")
-                transformed_config = coordinator._apply_data_transformation(
-                    {"risk_per_trade": config_risk}
-                )
-
-                # Align processing modes for consistency with monitoring module
-                aligned_config = ProcessingParadigmAligner.align_processing_modes(
-                    source_mode="sync", target_mode="batch", data=transformed_config
-                )
-                risk_per_trade = aligned_config.get("risk_per_trade", risk_per_trade)
+                risk_per_trade = to_decimal(str(getattr(self.config.risk, "risk_per_trade", "0.02")))
 
             # Use centralized position sizing utility
             try:
+                self.logger.info(f"Attempting centralized position sizing: method={method}, risk_per_trade={risk_per_trade}")
                 position_size = calculate_position_size(
                     method=method,
                     signal=signal,
@@ -140,20 +124,24 @@ class PositionSizingService(BaseService):
                     current_price=current_price,
                     atr=to_decimal("0.02"),  # Default ATR if not available
                 )
+                self.logger.info(f"Centralized calculation returned: {position_size} USD")
 
                 # Validate using centralized utility
                 is_valid, validated_size = validate_position_size(position_size, available_capital)
+                self.logger.info(f"Validation result: is_valid={is_valid}, validated_size={validated_size}")
                 if not is_valid:
                     self.logger.warning("Position size failed validation, returning zero")
                     return ZERO
 
                 position_size = validated_size
+                self.logger.info(f"Using centralized calculation result: {position_size} USD")
 
             except Exception as e:
-                self.logger.error(f"Centralized position sizing error: {e}")
+                self.logger.error(f"Centralized position sizing error: {e}, falling back to local calculation")
                 # Fall back to local calculation
                 if method == PositionSizeMethod.FIXED_PERCENTAGE:
                     position_size = await self._fixed_percentage_sizing(signal, available_capital)
+                    self.logger.info(f"Fallback calculation returned: {position_size} USD")
                 elif method == PositionSizeMethod.KELLY_CRITERION:
                     position_size = await self._kelly_criterion_sizing(signal, available_capital)
                 elif method == PositionSizeMethod.VOLATILITY_ADJUSTED:

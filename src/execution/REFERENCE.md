@@ -2,7 +2,7 @@
 
 ## INTEGRATION
 **Dependencies**: core, error_handling, monitoring, state, utils
-**Used By**: strategies
+**Used By**: error_handling
 **Provides**: ExecutionController, ExecutionEngine, ExecutionOrchestrationService, ExecutionRepositoryService, ExecutionService, OrderIdempotencyManager, OrderManager
 **Patterns**: Async Operations, Circuit Breaker, Component Architecture, Service Layer
 
@@ -201,10 +201,10 @@
 - `async stop(self) -> None` - Line 249
 - `async execute_order(self, ...) -> ExecutionResultWrapper` - Line 329
 - `async execute_instruction(self, ...) -> ExecutionResult` - Line 425
-- `async cancel_execution(self, execution_id: str) -> bool` - Line 823
-- `async get_execution_metrics(self) -> dict[str, Any]` - Line 862
-- `async get_active_executions(self) -> dict[str, ExecutionResultWrapper]` - Line 911
-- `async get_algorithm_performance(self) -> dict[str, Any]` - Line 1133
+- `async cancel_execution(self, execution_id: str) -> bool` - Line 833
+- `async get_execution_metrics(self) -> dict[str, Any]` - Line 872
+- `async get_active_executions(self) -> dict[str, ExecutionResultWrapper]` - Line 921
+- `async get_algorithm_performance(self) -> dict[str, Any]` - Line 1143
 
 ### Implementation: `ExecutionOrchestrationService` ✅
 
@@ -214,11 +214,11 @@
 
 **Implemented Methods:**
 - `async execute_order(self, ...) -> ExecutionResult` - Line 86
-- `async get_comprehensive_metrics(self, ...) -> dict[str, Any]` - Line 252
-- `async cancel_execution(self, execution_id: str, reason: str = 'user_request') -> bool` - Line 335
-- `async get_active_executions(self) -> dict[str, Any]` - Line 374
-- `async execute_order_from_data(self, ...) -> ExecutionResult` - Line 388
-- `async health_check(self) -> dict[str, Any]` - Line 431
+- `async get_comprehensive_metrics(self, ...) -> dict[str, Any]` - Line 262
+- `async cancel_execution(self, execution_id: str, reason: str = 'user_request') -> bool` - Line 345
+- `async get_active_executions(self) -> dict[str, Any]` - Line 384
+- `async execute_order_from_data(self, ...) -> ExecutionResult` - Line 398
+- `async health_check(self) -> dict[str, Any]` - Line 441
 
 ### Implementation: `ExecutionResultWrapper` ✅
 
@@ -285,22 +285,22 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async start(self) -> None` - Line 183
-- `async mark_order_completed(self, client_order_id: str, order_response_or_id: OrderResponse | str) -> bool` - Line 398
-- `async mark_order_failed(self, client_order_id: str, error_message: str) -> bool` - Line 453
-- `async can_retry_order(self, client_order_id: str) -> tuple[bool, int]` - Line 511
-- `get_statistics(self) -> dict[str, Any]` - Line 706
-- `async get_active_keys(self, include_metadata: bool = False) -> list[dict[str, Any]]` - Line 728
-- `async force_expire_key(self, client_order_id: str) -> bool` - Line 759
-- `async stop(self) -> None` - Line 778
-- `async shutdown(self) -> None` - Line 834
-- `async check_and_store_order(self, ...) -> dict[str, Any] | None` - Line 840
-- `async get_order_status(self, client_order_id: str) -> dict[str, Any] | None` - Line 904
-- `async cleanup_expired_orders(self) -> int` - Line 931
-- `memory_store(self) -> dict[str, Any]` - Line 957
-- `ttl_seconds(self) -> int` - Line 967
-- `running(self) -> bool` - Line 977
-- `async get_or_create_idempotency_key(self, ...) -> Union[tuple[str, bool], 'IdempotencyKey']` - Line 1016
+- `async start(self) -> None` - Line 184
+- `async mark_order_completed(self, client_order_id: str, order_response_or_id: OrderResponse | str) -> bool` - Line 399
+- `async mark_order_failed(self, client_order_id: str, error_message: str) -> bool` - Line 454
+- `async can_retry_order(self, client_order_id: str) -> tuple[bool, int]` - Line 512
+- `get_statistics(self) -> dict[str, Any]` - Line 707
+- `async get_active_keys(self, include_metadata: bool = False) -> list[dict[str, Any]]` - Line 729
+- `async force_expire_key(self, client_order_id: str) -> bool` - Line 760
+- `async stop(self) -> None` - Line 779
+- `async shutdown(self) -> None` - Line 835
+- `async check_and_store_order(self, ...) -> dict[str, Any] | None` - Line 841
+- `async get_order_status(self, client_order_id: str) -> dict[str, Any] | None` - Line 935
+- `async cleanup_expired_orders(self) -> int` - Line 962
+- `memory_store(self) -> dict[str, Any]` - Line 988
+- `ttl_seconds(self) -> int` - Line 998
+- `running(self) -> bool` - Line 1008
+- `async get_or_create_idempotency_key(self, ...) -> Union[tuple[str, bool], 'IdempotencyKey']` - Line 1047
 
 ### Implementation: `ExecutionServiceInterface` ✅
 
@@ -512,26 +512,26 @@
 
 **Implemented Methods:**
 - `async start(self) -> None` - Line 379
-- `async submit_order(self, ...) -> ManagedOrder` - Line 432
-- `async submit_order_with_routing(self, ...) -> ManagedOrder` - Line 726
-- `async modify_order(self, modification_request: OrderModificationRequest) -> bool` - Line 821
-- `async aggregate_orders(self, symbol: str, force_aggregation: bool = False) -> ManagedOrder | None` - Line 902
-- `async cancel_order(self, order_id: str, reason: str = 'manual') -> bool` - Line 1834
-- `async get_order_status(self, order_id: str) -> OrderStatus | None` - Line 1939
-- `async get_managed_order(self, order_id: str) -> ManagedOrder | None` - Line 1945
-- `async get_execution_orders(self, execution_id: str) -> list[ManagedOrder]` - Line 1957
-- `async get_order_audit_trail(self, order_id: str) -> list[dict[str, Any]]` - Line 2025
-- `async set_aggregation_rule(self, ...) -> None` - Line 2065
-- `async get_orders_by_symbol(self, symbol: str) -> list[ManagedOrder]` - Line 2095
-- `async get_orders_by_status(self, status: OrderStatus) -> list[ManagedOrder]` - Line 2110
-- `async get_routing_statistics(self) -> dict[str, Any]` - Line 2124
-- `async get_aggregation_opportunities(self) -> dict[str, dict[str, Any]]` - Line 2165
-- `async export_order_history(self, ...) -> list[dict[str, Any]]` - Line 2229
-- `async get_order_manager_summary(self) -> dict[str, Any]` - Line 2312
-- `async stop(self) -> None` - Line 2643
-- `async shutdown(self) -> None` - Line 2760
-- `get_position(self, symbol: str) -> Position | None` - Line 2833
-- `get_all_positions(self) -> list[Position]` - Line 2838
+- `async submit_order(self, ...) -> ManagedOrder` - Line 436
+- `async submit_order_with_routing(self, ...) -> ManagedOrder` - Line 730
+- `async modify_order(self, modification_request: OrderModificationRequest) -> bool` - Line 825
+- `async aggregate_orders(self, symbol: str, force_aggregation: bool = False) -> ManagedOrder | None` - Line 906
+- `async cancel_order(self, order_id: str, reason: str = 'manual') -> bool` - Line 1838
+- `async get_order_status(self, order_id: str) -> OrderStatus | None` - Line 1943
+- `async get_managed_order(self, order_id: str) -> ManagedOrder | None` - Line 1949
+- `async get_execution_orders(self, execution_id: str) -> list[ManagedOrder]` - Line 1961
+- `async get_order_audit_trail(self, order_id: str) -> list[dict[str, Any]]` - Line 2029
+- `async set_aggregation_rule(self, ...) -> None` - Line 2069
+- `async get_orders_by_symbol(self, symbol: str) -> list[ManagedOrder]` - Line 2099
+- `async get_orders_by_status(self, status: OrderStatus) -> list[ManagedOrder]` - Line 2114
+- `async get_routing_statistics(self) -> dict[str, Any]` - Line 2128
+- `async get_aggregation_opportunities(self) -> dict[str, dict[str, Any]]` - Line 2169
+- `async export_order_history(self, ...) -> list[dict[str, Any]]` - Line 2233
+- `async get_order_manager_summary(self) -> dict[str, Any]` - Line 2316
+- `async stop(self) -> None` - Line 2647
+- `async shutdown(self) -> None` - Line 2764
+- `get_position(self, symbol: str) -> Position | None` - Line 2837
+- `get_all_positions(self) -> list[Position]` - Line 2842
 
 ### Implementation: `ExecutionRepositoryInterface` 🔧
 
@@ -655,17 +655,17 @@
 - `async validate_order_pre_execution(self, ...) -> dict[str, Any]` - Line 535
 - `async validate_order_pre_execution_from_data(self, ...) -> dict[str, Any]` - Line 695
 - `async get_execution_metrics(self, ...) -> dict[str, Any]` - Line 737
-- `get_performance_metrics(self) -> dict[str, Any]` - Line 1781
-- `reset_metrics(self) -> None` - Line 1791
-- `async health_check(self) -> dict[str, Any]` - Line 1810
-- `async cancel_orders_by_symbol(self, symbol: str) -> None` - Line 1846
-- `async cancel_all_orders(self) -> None` - Line 1876
-- `async initialize(self) -> None` - Line 1903
-- `async cleanup(self) -> None` - Line 1921
-- `async update_order_status(self, ...) -> None` - Line 1935
-- `async start_bot_execution(self, bot_id: str, bot_config: dict[str, Any]) -> bool` - Line 1969
-- `async stop_bot_execution(self, bot_id: str) -> bool` - Line 2004
-- `async get_bot_execution_status(self, bot_id: str) -> dict[str, Any]` - Line 2035
+- `get_performance_metrics(self) -> dict[str, Any]` - Line 1786
+- `reset_metrics(self) -> None` - Line 1796
+- `async health_check(self) -> dict[str, Any]` - Line 1815
+- `async cancel_orders_by_symbol(self, symbol: str) -> None` - Line 1851
+- `async cancel_all_orders(self) -> None` - Line 1881
+- `async initialize(self) -> None` - Line 1908
+- `async cleanup(self) -> None` - Line 1926
+- `async update_order_status(self, ...) -> None` - Line 1940
+- `async start_bot_execution(self, bot_id: str, bot_config: dict[str, Any]) -> bool` - Line 1974
+- `async stop_bot_execution(self, bot_id: str) -> bool` - Line 2009
+- `async get_bot_execution_status(self, bot_id: str) -> dict[str, Any]` - Line 2040
 
 ### Implementation: `CostAnalyzer` ✅
 
@@ -1070,16 +1070,16 @@ class ExecutionEngine(BaseComponent, ExecutionEngineServiceInterface):
     async def execute_order(self, ...) -> ExecutionResultWrapper  # Line 329
     async def execute_instruction(self, ...) -> ExecutionResult  # Line 425
     async def _execute_order_legacy(self, ...) -> ExecutionResultWrapper  # Line 459
-    async def cancel_execution(self, execution_id: str) -> bool  # Line 823
-    async def get_execution_metrics(self) -> dict[str, Any]  # Line 862
-    async def get_active_executions(self) -> dict[str, ExecutionResultWrapper]  # Line 911
-    async def _select_algorithm(self, ...) -> BaseAlgorithm  # Line 922
-    async def _perform_post_trade_analysis(self, ...) -> dict[str, Any]  # Line 995
-    def _generate_execution_recommendations(self, ...) -> list[str]  # Line 1093
-    async def get_algorithm_performance(self) -> dict[str, Any]  # Line 1133
-    async def _do_start(self) -> None  # Line 1165
-    async def _do_stop(self) -> None  # Line 1171
-    async def _health_check_internal(self) -> Any  # Line 1177
+    async def cancel_execution(self, execution_id: str) -> bool  # Line 833
+    async def get_execution_metrics(self) -> dict[str, Any]  # Line 872
+    async def get_active_executions(self) -> dict[str, ExecutionResultWrapper]  # Line 921
+    async def _select_algorithm(self, ...) -> BaseAlgorithm  # Line 932
+    async def _perform_post_trade_analysis(self, ...) -> dict[str, Any]  # Line 1005
+    def _generate_execution_recommendations(self, ...) -> list[str]  # Line 1103
+    async def get_algorithm_performance(self) -> dict[str, Any]  # Line 1143
+    async def _do_start(self) -> None  # Line 1175
+    async def _do_stop(self) -> None  # Line 1181
+    async def _health_check_internal(self) -> Any  # Line 1187
 ```
 
 ### File: execution_orchestration_service.py
@@ -1101,11 +1101,11 @@ class ExecutionOrchestrationService(BaseService, ExecutionOrchestrationServiceIn
     def __init__(self, ...) -> None  # Line 41
     async def _do_start(self) -> None  # Line 73
     async def execute_order(self, ...) -> ExecutionResult  # Line 86
-    async def get_comprehensive_metrics(self, ...) -> dict[str, Any]  # Line 252
-    async def cancel_execution(self, execution_id: str, reason: str = 'user_request') -> bool  # Line 335
-    async def get_active_executions(self) -> dict[str, Any]  # Line 374
-    async def execute_order_from_data(self, ...) -> ExecutionResult  # Line 388
-    async def health_check(self) -> dict[str, Any]  # Line 431
+    async def get_comprehensive_metrics(self, ...) -> dict[str, Any]  # Line 262
+    async def cancel_execution(self, execution_id: str, reason: str = 'user_request') -> bool  # Line 345
+    async def get_active_executions(self) -> dict[str, Any]  # Line 384
+    async def execute_order_from_data(self, ...) -> ExecutionResult  # Line 398
+    async def health_check(self) -> dict[str, Any]  # Line 441
 ```
 
 ### File: execution_result_wrapper.py
@@ -1206,36 +1206,36 @@ class IdempotencyKey:
 ```python
 class OrderIdempotencyManager(BaseComponent):
     def __init__(self, config: Config, redis_client: Any = None)  # Line 116
-    async def start(self) -> None  # Line 183
-    def _start_cleanup_task(self) -> None  # Line 191
-    def _generate_order_hash(self, order: OrderRequest) -> str  # Line 215
-    def _generate_client_order_id(self, order: OrderRequest) -> str  # Line 243
-    def _generate_idempotency_key_from_hash(self, order_hash: str) -> str  # Line 263
-    async def _get_or_create_idempotency_key_original(self, ...) -> tuple[str, bool]  # Line 277
-    async def mark_order_completed(self, client_order_id: str, order_response_or_id: OrderResponse | str) -> bool  # Line 398
-    async def mark_order_failed(self, client_order_id: str, error_message: str) -> bool  # Line 453
-    async def can_retry_order(self, client_order_id: str) -> tuple[bool, int]  # Line 511
-    async def _get_idempotency_key(self, key: str) -> IdempotencyKey | None  # Line 559
-    async def _store_idempotency_key(self, idempotency_key: IdempotencyKey) -> bool  # Line 601
-    async def _delete_idempotency_key(self, key: str) -> bool  # Line 632
-    async def _find_key_by_client_order_id(self, client_order_id: str) -> IdempotencyKey | None  # Line 656
-    async def _cleanup_expired_keys(self) -> int  # Line 675
-    def get_statistics(self) -> dict[str, Any]  # Line 706
-    async def get_active_keys(self, include_metadata: bool = False) -> list[dict[str, Any]]  # Line 728
-    async def force_expire_key(self, client_order_id: str) -> bool  # Line 759
-    async def stop(self) -> None  # Line 778
-    async def shutdown(self) -> None  # Line 834
-    async def check_and_store_order(self, ...) -> dict[str, Any] | None  # Line 840
-    async def get_order_status(self, client_order_id: str) -> dict[str, Any] | None  # Line 904
-    async def cleanup_expired_orders(self) -> int  # Line 931
-    def _generate_idempotency_key(self, client_order_id: str) -> str  # Line 944
-    def memory_store(self) -> dict[str, Any]  # Line 957
-    def ttl_seconds(self) -> int  # Line 967
-    def running(self) -> bool  # Line 977
-    def _hash_order_data(self, order_data: dict[str, Any]) -> str  # Line 986
-    def _generate_key(self, client_order_id: str, order_hash: str) -> str  # Line 1003
-    async def get_or_create_idempotency_key(self, ...) -> Union[tuple[str, bool], 'IdempotencyKey']  # Line 1016
-    def _cleanup_on_del(self) -> None  # Line 1084
+    async def start(self) -> None  # Line 184
+    def _start_cleanup_task(self) -> None  # Line 192
+    def _generate_order_hash(self, order: OrderRequest) -> str  # Line 216
+    def _generate_client_order_id(self, order: OrderRequest) -> str  # Line 244
+    def _generate_idempotency_key_from_hash(self, order_hash: str) -> str  # Line 264
+    async def _get_or_create_idempotency_key_original(self, ...) -> tuple[str, bool]  # Line 278
+    async def mark_order_completed(self, client_order_id: str, order_response_or_id: OrderResponse | str) -> bool  # Line 399
+    async def mark_order_failed(self, client_order_id: str, error_message: str) -> bool  # Line 454
+    async def can_retry_order(self, client_order_id: str) -> tuple[bool, int]  # Line 512
+    async def _get_idempotency_key(self, key: str) -> IdempotencyKey | None  # Line 560
+    async def _store_idempotency_key(self, idempotency_key: IdempotencyKey) -> bool  # Line 602
+    async def _delete_idempotency_key(self, key: str) -> bool  # Line 633
+    async def _find_key_by_client_order_id(self, client_order_id: str) -> IdempotencyKey | None  # Line 657
+    async def _cleanup_expired_keys(self) -> int  # Line 676
+    def get_statistics(self) -> dict[str, Any]  # Line 707
+    async def get_active_keys(self, include_metadata: bool = False) -> list[dict[str, Any]]  # Line 729
+    async def force_expire_key(self, client_order_id: str) -> bool  # Line 760
+    async def stop(self) -> None  # Line 779
+    async def shutdown(self) -> None  # Line 835
+    async def check_and_store_order(self, ...) -> dict[str, Any] | None  # Line 841
+    async def get_order_status(self, client_order_id: str) -> dict[str, Any] | None  # Line 935
+    async def cleanup_expired_orders(self) -> int  # Line 962
+    def _generate_idempotency_key(self, client_order_id: str) -> str  # Line 975
+    def memory_store(self) -> dict[str, Any]  # Line 988
+    def ttl_seconds(self) -> int  # Line 998
+    def running(self) -> bool  # Line 1008
+    def _hash_order_data(self, order_data: dict[str, Any]) -> str  # Line 1017
+    def _generate_key(self, client_order_id: str, order_hash: str) -> str  # Line 1034
+    async def get_or_create_idempotency_key(self, ...) -> Union[tuple[str, bool], 'IdempotencyKey']  # Line 1047
+    def _cleanup_on_del(self) -> None  # Line 1115
 ```
 
 ### File: interfaces.py
@@ -1491,52 +1491,52 @@ class ManagedOrder:
 class OrderManager(BaseComponent):
     def __init__(self, ...)  # Line 254
     async def start(self) -> None  # Line 379
-    def _start_cleanup_task(self) -> None  # Line 404
-    async def submit_order(self, ...) -> ManagedOrder  # Line 432
-    async def submit_order_with_routing(self, ...) -> ManagedOrder  # Line 726
-    async def modify_order(self, modification_request: OrderModificationRequest) -> bool  # Line 821
-    async def aggregate_orders(self, symbol: str, force_aggregation: bool = False) -> ManagedOrder | None  # Line 902
-    async def _initialize_websocket_connections(self) -> None  # Line 1014
-    async def _initialize_single_websocket(self, exchange: str) -> None  # Line 1041
-    async def _perform_websocket_connection(self, exchange: str) -> None  # Line 1057
-    async def _handle_websocket_messages(self, exchange: str) -> None  # Line 1093
-    async def _attempt_websocket_reconnect(self, exchange: str, connection_info: dict) -> bool  # Line 1165
-    async def _perform_reconnection(self, exchange: str, connection_info: dict) -> None  # Line 1194
-    async def _send_websocket_heartbeat(self, exchange: str, connection_info: dict) -> None  # Line 1203
-    async def _process_message_queue(self, exchange: str, message_queue: asyncio.Queue) -> None  # Line 1213
-    async def _cleanup_websocket_connection(self, exchange: str, connection_info: dict) -> None  # Line 1228
-    async def _shutdown_websocket_connection(self, exchange: str, connection_info: dict) -> None  # Line 1244
-    async def _process_websocket_order_update(self, update: WebSocketOrderUpdate) -> None  # Line 1294
-    async def _select_optimal_exchange_via_service(self, ...) -> OrderRouteInfo  # Line 1332
-    async def _select_optimal_exchange(self, ...) -> OrderRouteInfo  # Line 1395
-    async def _start_order_monitoring(self, managed_order: ManagedOrder, exchange: ExchangeInterface) -> None  # Line 1465
-    async def _check_order_status(self, managed_order: ManagedOrder, exchange: ExchangeInterface) -> None  # Line 1564
-    async def _handle_status_change(self, ...) -> None  # Line 1662
-    async def _handle_partial_fill(self, managed_order: ManagedOrder) -> None  # Line 1754
-    async def _add_order_event(self, managed_order: ManagedOrder, event_type: str, data: dict[str, Any]) -> None  # Line 1811
-    async def cancel_order(self, order_id: str, reason: str = 'manual') -> bool  # Line 1834
-    async def get_order_status(self, order_id: str) -> OrderStatus | None  # Line 1939
-    async def get_managed_order(self, order_id: str) -> ManagedOrder | None  # Line 1945
-    async def get_execution_orders(self, execution_id: str) -> list[ManagedOrder]  # Line 1957
-    async def _update_average_fill_time(self, fill_time_seconds: float) -> None  # Line 1962
-    async def _cleanup_old_orders(self) -> None  # Line 1979
-    async def get_order_audit_trail(self, order_id: str) -> list[dict[str, Any]]  # Line 2025
-    async def set_aggregation_rule(self, ...) -> None  # Line 2065
-    async def get_orders_by_symbol(self, symbol: str) -> list[ManagedOrder]  # Line 2095
-    async def get_orders_by_status(self, status: OrderStatus) -> list[ManagedOrder]  # Line 2110
-    async def get_routing_statistics(self) -> dict[str, Any]  # Line 2124
-    async def get_aggregation_opportunities(self) -> dict[str, dict[str, Any]]  # Line 2165
-    async def export_order_history(self, ...) -> list[dict[str, Any]]  # Line 2229
-    async def get_order_manager_summary(self) -> dict[str, Any]  # Line 2312
-    async def _check_alert_conditions(self) -> list[str]  # Line 2402
-    async def _persist_order_state(self, managed_order: ManagedOrder) -> None  # Line 2432
-    async def _restore_orders_from_state(self) -> None  # Line 2518
-    async def stop(self) -> None  # Line 2643
-    async def shutdown(self) -> None  # Line 2760
-    async def _update_position_on_fill(self, order) -> None  # Line 2765
-    def get_position(self, symbol: str) -> Position | None  # Line 2833
-    def get_all_positions(self) -> list[Position]  # Line 2838
-    def _cleanup_on_del(self) -> None  # Line 2843
+    def _start_cleanup_task(self) -> None  # Line 408
+    async def submit_order(self, ...) -> ManagedOrder  # Line 436
+    async def submit_order_with_routing(self, ...) -> ManagedOrder  # Line 730
+    async def modify_order(self, modification_request: OrderModificationRequest) -> bool  # Line 825
+    async def aggregate_orders(self, symbol: str, force_aggregation: bool = False) -> ManagedOrder | None  # Line 906
+    async def _initialize_websocket_connections(self) -> None  # Line 1018
+    async def _initialize_single_websocket(self, exchange: str) -> None  # Line 1045
+    async def _perform_websocket_connection(self, exchange: str) -> None  # Line 1061
+    async def _handle_websocket_messages(self, exchange: str) -> None  # Line 1097
+    async def _attempt_websocket_reconnect(self, exchange: str, connection_info: dict) -> bool  # Line 1169
+    async def _perform_reconnection(self, exchange: str, connection_info: dict) -> None  # Line 1198
+    async def _send_websocket_heartbeat(self, exchange: str, connection_info: dict) -> None  # Line 1207
+    async def _process_message_queue(self, exchange: str, message_queue: asyncio.Queue) -> None  # Line 1217
+    async def _cleanup_websocket_connection(self, exchange: str, connection_info: dict) -> None  # Line 1232
+    async def _shutdown_websocket_connection(self, exchange: str, connection_info: dict) -> None  # Line 1248
+    async def _process_websocket_order_update(self, update: WebSocketOrderUpdate) -> None  # Line 1298
+    async def _select_optimal_exchange_via_service(self, ...) -> OrderRouteInfo  # Line 1336
+    async def _select_optimal_exchange(self, ...) -> OrderRouteInfo  # Line 1399
+    async def _start_order_monitoring(self, managed_order: ManagedOrder, exchange: ExchangeInterface) -> None  # Line 1469
+    async def _check_order_status(self, managed_order: ManagedOrder, exchange: ExchangeInterface) -> None  # Line 1568
+    async def _handle_status_change(self, ...) -> None  # Line 1666
+    async def _handle_partial_fill(self, managed_order: ManagedOrder) -> None  # Line 1758
+    async def _add_order_event(self, managed_order: ManagedOrder, event_type: str, data: dict[str, Any]) -> None  # Line 1815
+    async def cancel_order(self, order_id: str, reason: str = 'manual') -> bool  # Line 1838
+    async def get_order_status(self, order_id: str) -> OrderStatus | None  # Line 1943
+    async def get_managed_order(self, order_id: str) -> ManagedOrder | None  # Line 1949
+    async def get_execution_orders(self, execution_id: str) -> list[ManagedOrder]  # Line 1961
+    async def _update_average_fill_time(self, fill_time_seconds: float) -> None  # Line 1966
+    async def _cleanup_old_orders(self) -> None  # Line 1983
+    async def get_order_audit_trail(self, order_id: str) -> list[dict[str, Any]]  # Line 2029
+    async def set_aggregation_rule(self, ...) -> None  # Line 2069
+    async def get_orders_by_symbol(self, symbol: str) -> list[ManagedOrder]  # Line 2099
+    async def get_orders_by_status(self, status: OrderStatus) -> list[ManagedOrder]  # Line 2114
+    async def get_routing_statistics(self) -> dict[str, Any]  # Line 2128
+    async def get_aggregation_opportunities(self) -> dict[str, dict[str, Any]]  # Line 2169
+    async def export_order_history(self, ...) -> list[dict[str, Any]]  # Line 2233
+    async def get_order_manager_summary(self) -> dict[str, Any]  # Line 2316
+    async def _check_alert_conditions(self) -> list[str]  # Line 2406
+    async def _persist_order_state(self, managed_order: ManagedOrder) -> None  # Line 2436
+    async def _restore_orders_from_state(self) -> None  # Line 2522
+    async def stop(self) -> None  # Line 2647
+    async def shutdown(self) -> None  # Line 2764
+    async def _update_position_on_fill(self, order) -> None  # Line 2769
+    def get_position(self, symbol: str) -> Position | None  # Line 2837
+    def get_all_positions(self) -> list[Position]  # Line 2842
+    def _cleanup_on_del(self) -> None  # Line 2847
 ```
 
 ### File: repository.py
@@ -1721,25 +1721,25 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
     def _map_execution_status_to_order_status(self, execution_status: ExecutionStatus) -> OrderStatus  # Line 980
     async def _perform_basic_order_validation(self, order: OrderRequest, market_data: MarketData) -> dict[str, Any]  # Line 993
     async def _validate_position_size(self, order: OrderRequest, bot_id: str | None) -> dict[str, Any]  # Line 1088
-    async def _validate_market_conditions(self, order: OrderRequest, market_data: MarketData) -> dict[str, Any]  # Line 1213
-    async def _perform_risk_assessment(self, ...) -> dict[str, Any]  # Line 1263
-    def _generate_order_recommendations(self, ...) -> list[str]  # Line 1408
-    async def _create_execution_audit_log(self, ...) -> None  # Line 1437
-    async def _create_risk_audit_log(self, ...) -> None  # Line 1561
-    async def _update_execution_metrics(self, ...) -> None  # Line 1620
-    def _get_empty_metrics(self) -> dict[str, Any]  # Line 1730
-    async def _service_health_check(self) -> HealthStatus  # Line 1748
-    def get_performance_metrics(self) -> dict[str, Any]  # Line 1781
-    def reset_metrics(self) -> None  # Line 1791
-    async def health_check(self) -> dict[str, Any]  # Line 1810
-    async def cancel_orders_by_symbol(self, symbol: str) -> None  # Line 1846
-    async def cancel_all_orders(self) -> None  # Line 1876
-    async def initialize(self) -> None  # Line 1903
-    async def cleanup(self) -> None  # Line 1921
-    async def update_order_status(self, ...) -> None  # Line 1935
-    async def start_bot_execution(self, bot_id: str, bot_config: dict[str, Any]) -> bool  # Line 1969
-    async def stop_bot_execution(self, bot_id: str) -> bool  # Line 2004
-    async def get_bot_execution_status(self, bot_id: str) -> dict[str, Any]  # Line 2035
+    async def _validate_market_conditions(self, order: OrderRequest, market_data: MarketData) -> dict[str, Any]  # Line 1222
+    async def _perform_risk_assessment(self, ...) -> dict[str, Any]  # Line 1272
+    def _generate_order_recommendations(self, ...) -> list[str]  # Line 1417
+    async def _create_execution_audit_log(self, ...) -> None  # Line 1446
+    async def _create_risk_audit_log(self, ...) -> None  # Line 1566
+    async def _update_execution_metrics(self, ...) -> None  # Line 1625
+    def _get_empty_metrics(self) -> dict[str, Any]  # Line 1735
+    async def _service_health_check(self) -> HealthStatus  # Line 1753
+    def get_performance_metrics(self) -> dict[str, Any]  # Line 1786
+    def reset_metrics(self) -> None  # Line 1796
+    async def health_check(self) -> dict[str, Any]  # Line 1815
+    async def cancel_orders_by_symbol(self, symbol: str) -> None  # Line 1851
+    async def cancel_all_orders(self) -> None  # Line 1881
+    async def initialize(self) -> None  # Line 1908
+    async def cleanup(self) -> None  # Line 1926
+    async def update_order_status(self, ...) -> None  # Line 1940
+    async def start_bot_execution(self, bot_id: str, bot_config: dict[str, Any]) -> bool  # Line 1974
+    async def stop_bot_execution(self, bot_id: str) -> bool  # Line 2009
+    async def get_bot_execution_status(self, bot_id: str) -> dict[str, Any]  # Line 2040
 ```
 
 ### File: cost_analyzer.py

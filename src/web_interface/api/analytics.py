@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from src.core.exceptions import ServiceError, ValidationError
 from src.core.logging import get_logger
 from src.utils.decorators import monitored
-from src.web_interface.auth.middleware import get_current_user
+from src.web_interface.security.auth import get_current_user
 from src.web_interface.dependencies import get_web_analytics_service, get_web_auth_service
 
 logger = get_logger(__name__)

@@ -50,14 +50,15 @@ class MockExchange(BaseMockExchange):
     It follows all the project standards including Decimal precision.
     """
 
-    def __init__(self, config: dict[str, Any] | None = None):
+    def __init__(self, config: dict[str, Any] | None = None, name: str = "mock_exchange"):
         """
         Initialize mock exchange.
 
         Args:
             config: Exchange configuration (optional for mock)
+            name: Exchange name (default: "mock_exchange")
         """
-        super().__init__(name="mock", config=config)
+        super().__init__(name=name, config=config)
         # BaseService already provides self.logger, don't override it
 
         # Enhanced mock data with more realistic scenarios
@@ -147,8 +148,9 @@ class MockExchange(BaseMockExchange):
         """Load enhanced mock exchange information."""
         self.logger.info("Loading mock exchange info")
 
-        # Initialize supported trading symbols directly
-        self._trading_symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT"]
+        # Only initialize trading symbols if not already set (allow tests to pre-configure)
+        if not self._trading_symbols:
+            self._trading_symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT"]
 
         # For single symbol ExchangeInfo, we can create a default one for BTCUSDT
         self._exchange_info = ExchangeInfo(
@@ -162,25 +164,16 @@ class MockExchange(BaseMockExchange):
             min_quantity=Decimal("0.00001000"),
             max_quantity=Decimal("1000000.00000000"),
             step_size=Decimal("0.00001000"),
-            exchange="mock",
+            exchange=self.exchange_name,
         )
 
         self.logger.info(f"Loaded {len(self._trading_symbols)} trading symbols")
         return self._exchange_info
 
-    async def get_ticker(self, symbol: str) -> dict[str, Any]:
-        """Get mock ticker with realistic price simulation (returns dict for backward compatibility)."""
+    async def get_ticker(self, symbol: str) -> Ticker:
+        """Get mock ticker with realistic price simulation."""
         self._ensure_connected()
-        ticker = await self._get_ticker_impl(symbol)
-        return {
-            "symbol": ticker.symbol,
-            "price": ticker.last_price,
-            "bid": ticker.bid_price,
-            "ask": ticker.ask_price,
-            "volume": ticker.volume,
-            "timestamp": ticker.timestamp,
-            "last": ticker.last_price,  # Some tests expect 'last' field
-        }
+        return await self._get_ticker_impl(symbol)
 
     async def get_order_book(self, symbol: str, limit: int = 100) -> OrderBook:
         """Get mock order book with realistic spread."""
@@ -208,7 +201,7 @@ class MockExchange(BaseMockExchange):
             bids=bids,
             asks=asks,
             timestamp=self._get_current_time(),
-            exchange="mock"
+            exchange=self.exchange_name
         )
 
     async def _place_order_impl(self, order_request: OrderRequest) -> OrderResponse:
@@ -288,7 +281,7 @@ class MockExchange(BaseMockExchange):
             status=status,
             filled_quantity=filled_qty,
             created_at=self._get_current_time(),
-            exchange="mock",
+            exchange=self.exchange_name,
         )
 
         self._mock_orders[order_id] = order_response
@@ -362,7 +355,7 @@ class MockExchange(BaseMockExchange):
                 fee=Decimal("0.001"),
                 fee_currency="USDT",
                 timestamp=self._get_current_time(),
-                exchange="mock",
+                exchange=self.exchange_name,
                 is_maker=True,
             )
             for i in range(min(limit, 5))  # Generate up to 5 mock trades
@@ -506,7 +499,7 @@ class MockExchange(BaseMockExchange):
             low_price=current_price * Decimal("0.96"),  # 4% lower than current
             volume=Decimal("1000.00000000"),
             timestamp=self._get_current_time(),
-            exchange="mock",
+            exchange=self.exchange_name,
         )
 
     # Helper methods

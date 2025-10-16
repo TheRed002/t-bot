@@ -78,16 +78,18 @@ class BotLifecycle:
 
         # Event tracking
         self.lifecycle_events: list[dict[str, Any]] = []
-        self.event_retention_hours = config.bot_management.get(
-            "event_retention_hours", 168
-        )  # 7 days
-
-        # Configuration
-        self.graceful_shutdown_timeout = config.bot_management.get(
-            "graceful_shutdown_timeout", 300
-        )  # 5 minutes
-        self.restart_max_attempts = config.bot_management.get("restart_max_attempts", 3)
-        self.restart_delay_seconds = config.bot_management.get("restart_delay_seconds", 60)
+        # Safe access to config.bot_management (could be object or dict)
+        bot_mgmt = config.bot_management
+        if isinstance(bot_mgmt, dict):
+            self.event_retention_hours = bot_mgmt.get("event_retention_hours", 24)
+            self.graceful_shutdown_timeout = bot_mgmt.get("graceful_shutdown_timeout", 30)
+            self.restart_max_attempts = bot_mgmt.get("restart_max_attempts", 3)
+            self.restart_delay_seconds = bot_mgmt.get("restart_delay_seconds", 5)
+        else:
+            self.event_retention_hours = getattr(bot_mgmt, "event_retention_hours", 24)
+            self.graceful_shutdown_timeout = getattr(bot_mgmt, "graceful_shutdown_timeout", 30)
+            self.restart_max_attempts = getattr(bot_mgmt, "restart_max_attempts", 3)
+            self.restart_delay_seconds = getattr(bot_mgmt, "restart_delay_seconds", 5)
 
         # Initialize built-in templates and strategies
         self._initialize_bot_templates()

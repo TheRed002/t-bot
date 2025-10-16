@@ -2,7 +2,7 @@
 
 ## INTEGRATION
 **Dependencies**: core, database, error_handling, risk_management, state, utils
-**Used By**: strategies
+**Used By**: None
 **Provides**: AbstractCapitalService, AbstractCurrencyManagementService, AbstractExchangeDistributionService, AbstractFundFlowManagementService, CapitalService, CurrencyManager, FundFlowManager, MinimalValidationService
 **Patterns**: Async Operations, Circuit Breaker, Component Architecture
 
@@ -166,17 +166,17 @@
 - `async get_exchange_allocation(self, exchange: str) -> ExchangeAllocation | None` - Line 257
 - `async update_exchange_utilization(self, exchange: str, utilized_amount: Decimal) -> None` - Line 270
 - `async calculate_optimal_distribution(self, total_capital: Decimal) -> dict[str, Decimal]` - Line 300
-- `supported_exchanges(self) -> list[str]` - Line 845
-- `total_capital(self) -> Decimal` - Line 850
-- `async get_exchange_metrics(self) -> dict[str, dict[str, float]]` - Line 856
-- `async get_distribution_summary(self) -> dict[str, Any]` - Line 877
-- `async handle_failed_exchange(self, exchange_name: str) -> None` - Line 1029
-- `async get_available_exchanges(self) -> list[str]` - Line 1075
-- `async emergency_redistribute(self, from_exchange: str) -> list[Any]` - Line 1089
-- `get_allocation_history(self, exchange: str) -> list[dict]` - Line 1220
-- `async check_exchange_health(self) -> dict[str, bool]` - Line 1240
-- `async check_individual_exchange_health(self, exchange: str) -> bool` - Line 1256
-- `async cleanup_resources(self) -> None` - Line 1275
+- `supported_exchanges(self) -> list[str]` - Line 858
+- `total_capital(self) -> Decimal` - Line 863
+- `async get_exchange_metrics(self) -> dict[str, dict[str, float]]` - Line 869
+- `async get_distribution_summary(self) -> dict[str, Any]` - Line 890
+- `async handle_failed_exchange(self, exchange_name: str) -> None` - Line 1042
+- `async get_available_exchanges(self) -> list[str]` - Line 1088
+- `async emergency_redistribute(self, from_exchange: str) -> list[Any]` - Line 1102
+- `get_allocation_history(self, exchange: str) -> list[dict]` - Line 1233
+- `async check_exchange_health(self) -> dict[str, bool]` - Line 1253
+- `async check_individual_exchange_health(self, exchange: str) -> bool` - Line 1269
+- `async cleanup_resources(self) -> None` - Line 1288
 
 ### Implementation: `CapitalServiceFactory` ✅
 
@@ -465,13 +465,13 @@ class CapitalDataTransformer:
 
 ```python
 def register_capital_management_services(container: Any) -> None  # Line 29
-def _register_fallback_services(container: Any) -> None  # Line 237
-def _setup_cross_dependencies(container: Any) -> None  # Line 257
-def _has_service(container: Any, service_name: str) -> bool  # Line 269
-def _register_capital_repositories(container: Any) -> None  # Line 278
-def _create_repository_with_fallback(container: Any, repo_class_name: str, db_repo_class_name: str, fallback_creator)  # Line 307
-def _create_minimal_capital_repository()  # Line 342
-def _create_minimal_audit_repository()  # Line 367
+def _register_fallback_services(container: Any) -> None  # Line 148
+def _setup_cross_dependencies(container: Any) -> None  # Line 168
+def _has_service(container: Any, service_name: str) -> bool  # Line 180
+def _register_capital_repositories(container: Any) -> None  # Line 189
+def _create_repository_with_fallback(container: Any, repo_class_name: str, db_repo_class_name: str, fallback_creator)  # Line 218
+def _create_minimal_capital_repository()  # Line 253
+def _create_minimal_audit_repository()  # Line 278
 ```
 
 ### File: exchange_distributor.py
@@ -500,35 +500,35 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
     async def get_exchange_allocation(self, exchange: str) -> ExchangeAllocation | None  # Line 257
     async def update_exchange_utilization(self, exchange: str, utilized_amount: Decimal) -> None  # Line 270
     async def calculate_optimal_distribution(self, total_capital: Decimal) -> dict[str, Decimal]  # Line 300
-    async def _initialize_exchange_allocations(self) -> None  # Line 369
-    async def _update_exchange_metrics(self) -> None  # Line 384
-    async def _calculate_liquidity_score(self, exchange_name: str) -> Decimal  # Line 427
-    async def _calculate_fee_efficiency(self, exchange_name: str) -> Decimal  # Line 519
-    async def _calculate_reliability_score(self, exchange_name: str) -> Decimal  # Line 572
-    async def _update_slippage_data(self, exchange_name: str) -> None  # Line 637
-    async def _dynamic_distribution(self, total_amount: Decimal) -> dict[str, ExchangeAllocation]  # Line 709
-    async def _weighted_distribution(self, total_amount: Decimal, weights: dict[str, Decimal]) -> dict[str, ExchangeAllocation]  # Line 733
-    async def _apply_minimum_balances(self, allocations: dict[str, ExchangeAllocation]) -> dict[str, ExchangeAllocation]  # Line 756
-    async def _calculate_optimal_distribution(self, total_amount: Decimal) -> dict[str, ExchangeAllocation]  # Line 777
-    async def _apply_rebalancing_limits(self, new_allocations: dict[str, ExchangeAllocation]) -> dict[str, ExchangeAllocation]  # Line 805
-    def supported_exchanges(self) -> list[str]  # Line 845
-    def total_capital(self) -> Decimal  # Line 850
-    async def get_exchange_metrics(self) -> dict[str, dict[str, float]]  # Line 856
-    async def get_distribution_summary(self) -> dict[str, Any]  # Line 877
-    def _validate_distribution_constraints(self, distribution: list[Any], total_capital: Decimal) -> None  # Line 906
-    def _should_rebalance(self) -> bool  # Line 932
-    def _calculate_distribution_efficiency(self, allocations: list[Any]) -> float  # Line 959
-    def _apply_exchange_weights(self, weights: dict[str, float], total_capital: Decimal) -> list[Any]  # Line 997
-    async def handle_failed_exchange(self, exchange_name: str) -> None  # Line 1029
-    async def get_available_exchanges(self) -> list[str]  # Line 1075
-    async def emergency_redistribute(self, from_exchange: str) -> list[Any]  # Line 1089
-    async def _calculate_equal_distribution(self, total_capital: Decimal) -> list[Any]  # Line 1113
-    async def _calculate_performance_based_distribution(self, total_capital: Decimal) -> list[Any]  # Line 1137
-    def _add_to_allocation_history(self, allocation: Any) -> None  # Line 1186
-    def get_allocation_history(self, exchange: str) -> list[dict]  # Line 1220
-    async def check_exchange_health(self) -> dict[str, bool]  # Line 1240
-    async def check_individual_exchange_health(self, exchange: str) -> bool  # Line 1256
-    async def cleanup_resources(self) -> None  # Line 1275
+    async def _initialize_exchange_allocations(self) -> None  # Line 382
+    async def _update_exchange_metrics(self) -> None  # Line 397
+    async def _calculate_liquidity_score(self, exchange_name: str) -> Decimal  # Line 440
+    async def _calculate_fee_efficiency(self, exchange_name: str) -> Decimal  # Line 532
+    async def _calculate_reliability_score(self, exchange_name: str) -> Decimal  # Line 585
+    async def _update_slippage_data(self, exchange_name: str) -> None  # Line 650
+    async def _dynamic_distribution(self, total_amount: Decimal) -> dict[str, ExchangeAllocation]  # Line 722
+    async def _weighted_distribution(self, total_amount: Decimal, weights: dict[str, Decimal]) -> dict[str, ExchangeAllocation]  # Line 746
+    async def _apply_minimum_balances(self, allocations: dict[str, ExchangeAllocation]) -> dict[str, ExchangeAllocation]  # Line 769
+    async def _calculate_optimal_distribution(self, total_amount: Decimal) -> dict[str, ExchangeAllocation]  # Line 790
+    async def _apply_rebalancing_limits(self, new_allocations: dict[str, ExchangeAllocation]) -> dict[str, ExchangeAllocation]  # Line 818
+    def supported_exchanges(self) -> list[str]  # Line 858
+    def total_capital(self) -> Decimal  # Line 863
+    async def get_exchange_metrics(self) -> dict[str, dict[str, float]]  # Line 869
+    async def get_distribution_summary(self) -> dict[str, Any]  # Line 890
+    def _validate_distribution_constraints(self, distribution: list[Any], total_capital: Decimal) -> None  # Line 919
+    def _should_rebalance(self) -> bool  # Line 945
+    def _calculate_distribution_efficiency(self, allocations: list[Any]) -> float  # Line 972
+    def _apply_exchange_weights(self, weights: dict[str, float], total_capital: Decimal) -> list[Any]  # Line 1010
+    async def handle_failed_exchange(self, exchange_name: str) -> None  # Line 1042
+    async def get_available_exchanges(self) -> list[str]  # Line 1088
+    async def emergency_redistribute(self, from_exchange: str) -> list[Any]  # Line 1102
+    async def _calculate_equal_distribution(self, total_capital: Decimal) -> list[Any]  # Line 1126
+    async def _calculate_performance_based_distribution(self, total_capital: Decimal) -> list[Any]  # Line 1150
+    def _add_to_allocation_history(self, allocation: Any) -> None  # Line 1199
+    def get_allocation_history(self, exchange: str) -> list[dict]  # Line 1233
+    async def check_exchange_health(self) -> dict[str, bool]  # Line 1253
+    async def check_individual_exchange_health(self, exchange: str) -> bool  # Line 1269
+    async def cleanup_resources(self) -> None  # Line 1288
 ```
 
 ### File: factory.py

@@ -22,11 +22,15 @@ def coordinator_config():
     """Create optimized test configuration for coordinator."""
     config = MagicMock(spec=Config)
     config.error_handling = MagicMock()
-    config.bot_management = {
-        "signal_retention_hours": 1,  # Minimal for performance
-        "coordination_check_interval": 60,  # Longer to avoid loops
-        "max_signal_recipients": 5,  # Reduced
-    }
+
+    # Create bot_management as MagicMock with required attributes
+    config.bot_management = MagicMock()
+    config.bot_management.max_symbol_exposure = Decimal("0.3")  # 30% max per symbol
+    config.bot_management.coordination_interval = 60  # Longer to avoid loops
+    config.bot_management.signal_retention_minutes = 60  # 1 hour
+    config.bot_management.arbitrage_detection_enabled = False  # Disabled for tests
+    config.bot_management.max_signal_recipients = 5  # Reduced for performance
+
     return config
 
 

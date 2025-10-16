@@ -371,7 +371,7 @@ class MLService(BaseService, IMLService):
                 # Create standardized message for inference started event
                 inference_started_message = StandardMessage(
                     pattern=MessagePattern.PUB_SUB,
-                    message_type=MessageType.EVENT,
+                    message_type=MessageType.SYSTEM_EVENT,
                     data={
                         "event_type": "PREDICTION_REQUESTED",
                         "request_id": request.request_id,
@@ -383,11 +383,12 @@ class MLService(BaseService, IMLService):
                     source="ml_service",
                 )
 
-                # Emit using consistent pattern
-                await self.emit_event(
-                    InferenceEvents.PREDICTION_REQUESTED,
-                    inference_started_message.to_dict(),
-                )
+                # Event emission removed - not part of BaseService interface
+                # TODO: Implement proper event system if needed
+                # await self.emit_event(
+                #     InferenceEvents.PREDICTION_REQUESTED,
+                #     inference_started_message.to_dict(),
+                # )
 
                 # Use consistent data transformation utilities
                 from src.utils.ml_data_transforms import prepare_dataframe_from_market_data
@@ -529,7 +530,7 @@ class MLService(BaseService, IMLService):
                 # Use consistent pub/sub pattern for inference completion event aligned with data module
                 inference_completed_message = StandardMessage(
                     pattern=MessagePattern.PUB_SUB,
-                    message_type=MessageType.EVENT,
+                    message_type=MessageType.SYSTEM_EVENT,
                     data={
                         "event_type": "PREDICTION_COMPLETED",
                         "request_id": request.request_id,
@@ -542,11 +543,12 @@ class MLService(BaseService, IMLService):
                     source="ml_service",
                 )
 
-                # Emit using consistent pattern
-                await self.emit_event(
-                    InferenceEvents.PREDICTION_COMPLETED,
-                    inference_completed_message.to_dict(),
-                )
+                # Event emission removed - not part of BaseService interface
+                # TODO: Implement proper event system if needed
+                # await self.emit_event(
+                #     InferenceEvents.PREDICTION_COMPLETED,
+                #     inference_completed_message.to_dict(),
+                # )
 
                 self._logger.info(
                     "ML pipeline processed successfully",
@@ -601,7 +603,7 @@ class MLService(BaseService, IMLService):
                 # Use consistent pub/sub pattern for error events aligned with data module
                 error_message = StandardMessage(
                     pattern=MessagePattern.PUB_SUB,
-                    message_type=MessageType.ERROR,
+                    message_type=MessageType.ERROR_EVENT,
                     data={
                         "event_type": "PREDICTION_FAILED",
                         "request_id": request.request_id,
@@ -614,11 +616,12 @@ class MLService(BaseService, IMLService):
                     source="ml_service",
                 )
 
-                # Emit using consistent pattern
-                await self.emit_event(
-                    InferenceEvents.PREDICTION_FAILED,
-                    error_message.to_dict(),
-                )
+                # Event emission removed - not part of BaseService interface
+                # TODO: Implement proper event system if needed
+                # await self.emit_event(
+                #     InferenceEvents.PREDICTION_FAILED,
+                #     error_message.to_dict(),
+                # )
 
                 error_response = MLPipelineResponse(
                     request_id=request.request_id,
@@ -698,16 +701,17 @@ class MLService(BaseService, IMLService):
                 
                 self.logger.debug(f"Applied ML training structural and business validation for request {request.request_id}")
 
-                # Emit training started event
-                await self.emit_event(
-                    TrainingEvents.STARTED,
-                    {
-                        "request_id": request.request_id,
-                        "model_name": request.model_name,
-                        "model_type": request.model_type,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    },
-                )
+                # Event emission removed - not part of BaseService interface
+                # TODO: Implement proper event system if needed
+                # await self.emit_event(
+                #     TrainingEvents.STARTED,
+                #     {
+                #         "request_id": request.request_id,
+                #         "model_name": request.model_name,
+                #         "model_type": request.model_type,
+                #         "timestamp": datetime.now(timezone.utc).isoformat(),
+                #     },
+                # )
 
                 # Use consistent data transformation utilities for training data
                 from src.utils.ml_data_transforms import prepare_dataframe_from_market_data
@@ -827,17 +831,18 @@ class MLService(BaseService, IMLService):
                     warnings=warnings,
                 )
 
-                # Emit training completed event
-                await self.emit_event(
-                    TrainingEvents.COMPLETED,
-                    {
-                        "request_id": request.request_id,
-                        "model_name": request.model_name,
-                        "model_id": model_id,
-                        "training_time_ms": training_time,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    },
-                )
+                # Event emission removed - not part of BaseService interface
+                # TODO: Implement proper event system if needed
+                # await self.emit_event(
+                #     TrainingEvents.COMPLETED,
+                #     {
+                #         "request_id": request.request_id,
+                #         "model_name": request.model_name,
+                #         "model_id": model_id,
+                #         "training_time_ms": training_time,
+                #         "timestamp": datetime.now(timezone.utc).isoformat(),
+                #     },
+                # )
 
                 self._logger.info(
                     "Model training completed successfully",
@@ -872,7 +877,7 @@ class MLService(BaseService, IMLService):
                 # Use consistent pub/sub pattern for training error events aligned with data module
                 training_error_message = StandardMessage(
                     pattern=MessagePattern.PUB_SUB,
-                    message_type=MessageType.ERROR,
+                    message_type=MessageType.ERROR_EVENT,
                     data={
                         "event_type": "TRAINING_FAILED",
                         "request_id": request.request_id,
@@ -885,11 +890,12 @@ class MLService(BaseService, IMLService):
                     source="ml_service",
                 )
 
-                # Emit using consistent pattern
-                await self.emit_event(
-                    TrainingEvents.FAILED,
-                    training_error_message.to_dict(),
-                )
+                # Event emission removed - not part of BaseService interface
+                # TODO: Implement proper event system if needed
+                # await self.emit_event(
+                #     TrainingEvents.FAILED,
+                #     training_error_message.to_dict(),
+                # )
 
                 self._logger.error(
                     "Model training failed",

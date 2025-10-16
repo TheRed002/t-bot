@@ -129,9 +129,7 @@ class TestRealRiskManagementValidation:
         )
 
         # WHEN: Validate order against real portfolio state
-        is_valid = await real_risk_service.validate_order(
-            order=sample_order_request, available_capital=portfolio_value
-        )
+        is_valid = await real_risk_service.validate_order(order=sample_order_request)
 
         # THEN: Validation should use real portfolio limits
         assert isinstance(is_valid, bool)
@@ -310,7 +308,7 @@ class TestRealRiskManagementValidation:
     ):
         """Test emergency controls with real validation."""
         # GIVEN: Emergency stop activated
-        await real_risk_service.activate_emergency_stop(reason="Test emergency validation")
+        await real_risk_service.trigger_emergency_stop(reason="Test emergency validation")
 
         # WHEN: Validate signal during emergency
         is_valid = await real_risk_service.validate_signal(sample_signal)
@@ -319,7 +317,7 @@ class TestRealRiskManagementValidation:
         assert is_valid is False, "Should reject during emergency stop"
 
         # Cleanup
-        await real_risk_service.deactivate_emergency_stop()
+        await real_risk_service.reset_emergency_stop(reason="Test cleanup")
 
     @pytest.mark.asyncio
     @pytest.mark.timeout(300)

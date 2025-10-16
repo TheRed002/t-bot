@@ -125,23 +125,23 @@ def register_analytics_services(injector: DependencyInjector) -> None:
             else None
         )
 
-        # Safely resolve services
+        # Safely resolve services (use Analytics-prefixed names)
         portfolio_service = None
         risk_service = None
         operational_service = None
 
         try:
-            portfolio_service = injector.resolve("PortfolioService")
+            portfolio_service = injector.resolve("AnalyticsPortfolioService")
         except Exception:
             pass
 
         try:
-            risk_service = injector.resolve("RiskService")
+            risk_service = injector.resolve("AnalyticsRiskService")
         except Exception:
             pass
 
         try:
-            operational_service = injector.resolve("OperationalService")
+            operational_service = injector.resolve("AnalyticsOperationalService")
         except Exception:
             pass
 
@@ -153,35 +153,36 @@ def register_analytics_services(injector: DependencyInjector) -> None:
         )
 
     # Register service factories
-    injector.register_factory("PortfolioService", portfolio_service_factory, singleton=True)
-    injector.register_factory("RiskService", risk_service_factory, singleton=True)
-    injector.register_factory("ReportingService", reporting_service_factory, singleton=True)
-    injector.register_factory("OperationalService", operational_service_factory, singleton=True)
-    injector.register_factory("AlertService", alert_service_factory, singleton=True)
-    injector.register_factory("ExportService", export_service_factory, singleton=True)
+    # NOTE: Analytics module services use "Analytics" prefix to avoid conflicts with other modules
+    injector.register_factory("AnalyticsPortfolioService", portfolio_service_factory, singleton=True)
+    injector.register_factory("AnalyticsRiskService", risk_service_factory, singleton=True)
+    injector.register_factory("AnalyticsReportingService", reporting_service_factory, singleton=True)
+    injector.register_factory("AnalyticsOperationalService", operational_service_factory, singleton=True)
+    injector.register_factory("AnalyticsAlertService", alert_service_factory, singleton=True)
+    injector.register_factory("AnalyticsExportService", export_service_factory, singleton=True)
     injector.register_factory(
         "RealtimeAnalyticsService", realtime_analytics_service_factory, singleton=True
     )
-    injector.register_factory("DashboardService", dashboard_service_factory, singleton=True)
+    injector.register_factory("AnalyticsDashboardService", dashboard_service_factory, singleton=True)
 
     # Register interface implementations
     injector.register_service(
-        "PortfolioServiceProtocol", lambda: injector.resolve("PortfolioService"), singleton=True
+        "PortfolioServiceProtocol", lambda: injector.resolve("AnalyticsPortfolioService"), singleton=True
     )
     injector.register_service(
-        "RiskServiceProtocol", lambda: injector.resolve("RiskService"), singleton=True
+        "RiskServiceProtocol", lambda: injector.resolve("AnalyticsRiskService"), singleton=True
     )
     injector.register_service(
-        "ReportingServiceProtocol", lambda: injector.resolve("ReportingService"), singleton=True
+        "ReportingServiceProtocol", lambda: injector.resolve("AnalyticsReportingService"), singleton=True
     )
     injector.register_service(
-        "OperationalServiceProtocol", lambda: injector.resolve("OperationalService"), singleton=True
+        "OperationalServiceProtocol", lambda: injector.resolve("AnalyticsOperationalService"), singleton=True
     )
     injector.register_service(
-        "AlertServiceProtocol", lambda: injector.resolve("AlertService"), singleton=True
+        "AlertServiceProtocol", lambda: injector.resolve("AnalyticsAlertService"), singleton=True
     )
     injector.register_service(
-        "ExportServiceProtocol", lambda: injector.resolve("ExportService"), singleton=True
+        "ExportServiceProtocol", lambda: injector.resolve("AnalyticsExportService"), singleton=True
     )
     injector.register_service(
         "RealtimeAnalyticsServiceProtocol",
@@ -239,17 +240,17 @@ def register_analytics_services(injector: DependencyInjector) -> None:
             else None
         )
 
-        # Resolve service dependencies safely
+        # Resolve service dependencies safely (use Analytics-prefixed names)
         dependencies = {}
         service_mappings = {
             "realtime_analytics": "RealtimeAnalyticsService",
-            "portfolio_service": "PortfolioService",
-            "reporting_service": "ReportingService",
-            "risk_service": "RiskService",
-            "operational_service": "OperationalService",
-            "alert_service": "AlertService",
-            "export_service": "ExportService",
-            "dashboard_service": "DashboardService",
+            "portfolio_service": "AnalyticsPortfolioService",
+            "reporting_service": "AnalyticsReportingService",
+            "risk_service": "AnalyticsRiskService",
+            "operational_service": "AnalyticsOperationalService",
+            "alert_service": "AnalyticsAlertService",
+            "export_service": "AnalyticsExportService",
+            "dashboard_service": "AnalyticsDashboardService",
             "metrics_collector": "MetricsCollector",
         }
 

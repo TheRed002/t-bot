@@ -685,17 +685,17 @@
 
 **Implemented Methods:**
 - `configure_dependencies(self, injector)` - Line 42
-- `async authenticate(self, credentials: dict[str, Any], provider_type: str | None = None) -> tuple[User, AuthToken] | None` - Line 130
-- `async validate_token(self, token_value: str, provider_type: str | None = None) -> User | None` - Line 180
-- `async revoke_token(self, token_value: str, provider_type: str | None = None) -> bool` - Line 211
-- `async refresh_token(self, refresh_token_value: str) -> AuthToken | None` - Line 235
-- `async create_api_key(self, user: User) -> AuthToken | None` - Line 255
-- `get_user(self, user_id: str) -> User | None` - Line 275
-- `get_user_by_username(self, username: str) -> User | None` - Line 279
-- `async create_user(self, user_data: dict[str, Any]) -> User | None` - Line 286
-- `async update_user(self, user_id: str, updates: dict[str, Any]) -> bool` - Line 329
-- `async change_password(self, user_id: str, old_password: str, new_password: str) -> bool` - Line 365
-- `get_user_stats(self) -> dict[str, Any]` - Line 392
+- `async authenticate(self, credentials: dict[str, Any], provider_type: str | None = None) -> tuple[User, AuthToken] | None` - Line 137
+- `async validate_token(self, token_value: str, provider_type: str | None = None) -> User | None` - Line 187
+- `async revoke_token(self, token_value: str, provider_type: str | None = None) -> bool` - Line 218
+- `async refresh_token(self, refresh_token_value: str) -> AuthToken | None` - Line 242
+- `async create_api_key(self, user: User) -> AuthToken | None` - Line 262
+- `get_user(self, user_id: str) -> User | None` - Line 282
+- `get_user_by_username(self, username: str) -> User | None` - Line 286
+- `async create_user(self, user_data: dict[str, Any]) -> User | None` - Line 293
+- `async update_user(self, user_id: str, updates: dict[str, Any]) -> bool` - Line 336
+- `async change_password(self, user_id: str, old_password: str, new_password: str) -> bool` - Line 372
+- `get_user_stats(self) -> dict[str, Any]` - Line 399
 
 ### Implementation: `AuthMiddleware` ✅
 
@@ -918,9 +918,9 @@
 - `create_risk_service(self) -> WebRiskServiceInterface` - Line 181
 - `create_strategy_service(self) -> WebStrategyServiceInterface` - Line 200
 - `create_market_data_service(self)` - Line 220
-- `create_api_facade(self) -> APIFacade` - Line 264
-- `create_websocket_manager(self) -> UnifiedWebSocketManager` - Line 331
-- `create_complete_web_stack(self, config: dict[str, Any] | None = None) -> dict[str, Any]` - Line 360
+- `create_api_facade(self) -> APIFacade` - Line 294
+- `create_websocket_manager(self) -> UnifiedWebSocketManager` - Line 361
+- `create_complete_web_stack(self, config: dict[str, Any] | None = None) -> dict[str, Any]` - Line 390
 
 ### Implementation: `WebPortfolioServiceInterface` ✅
 
@@ -1183,8 +1183,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async dispatch(self, request: Request, call_next: Callable) -> Response` - Line 136
-- `get_error_stats(self) -> dict` - Line 583
+- `async dispatch(self, request: Request, call_next: Callable) -> Response` - Line 138
+- `get_error_stats(self) -> dict` - Line 585
 
 ### Implementation: `FinancialValidationMiddleware` ✅
 
@@ -1356,28 +1356,28 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async initialize(self) -> None` - Line 28
-- `async cleanup(self) -> None` - Line 32
-- `async validate_bot_configuration(self, config_data: dict[str, Any]) -> dict[str, Any]` - Line 36
-- `async format_bot_response(self, bot_data: dict[str, Any]) -> dict[str, Any]` - Line 95
-- `async get_formatted_bot_list(self, filters: dict[str, Any] = None) -> list[dict[str, Any]]` - Line 121
-- `async calculate_bot_metrics(self, bot_id: str) -> dict[str, Any]` - Line 200
-- `async validate_bot_operation(self, bot_id: str, operation: str) -> dict[str, Any]` - Line 279
-- `async create_bot_configuration(self, request_data: dict[str, Any], user_id: str) -> BotConfiguration` - Line 320
-- `async update_bot_configuration(self, bot_id: str, update_data: dict[str, Any], user_id: str) -> dict[str, Any]` - Line 357
-- `health_check(self) -> dict[str, Any]` - Line 469
-- `get_service_info(self) -> dict[str, Any]` - Line 478
-- `async create_bot_through_service(self, bot_config) -> str` - Line 493
-- `async get_bot_status_through_service(self, bot_id: str) -> dict[str, Any]` - Line 523
-- `async start_bot_through_service(self, bot_id: str) -> bool` - Line 544
-- `async stop_bot_through_service(self, bot_id: str) -> bool` - Line 558
-- `async delete_bot_through_service(self, bot_id: str, force: bool = False) -> bool` - Line 572
-- `async list_bots_through_service(self) -> list[dict[str, Any]]` - Line 593
-- `get_controller_health_check(self) -> dict[str, Any]` - Line 619
-- `async start_bot_with_execution_integration(self, bot_id: str) -> bool` - Line 651
-- `async stop_bot_with_execution_integration(self, bot_id: str) -> bool` - Line 679
-- `async pause_bot_through_service(self, bot_id: str) -> bool` - Line 699
-- `async resume_bot_through_service(self, bot_id: str) -> bool` - Line 713
+- `async initialize(self) -> None` - Line 27
+- `async cleanup(self) -> None` - Line 31
+- `async validate_bot_configuration(self, config_data: dict[str, Any]) -> dict[str, Any]` - Line 35
+- `async format_bot_response(self, bot_data: dict[str, Any]) -> dict[str, Any]` - Line 94
+- `async get_formatted_bot_list(self, filters: dict[str, Any] = None) -> list[dict[str, Any]]` - Line 120
+- `async calculate_bot_metrics(self, bot_id: str) -> dict[str, Any]` - Line 199
+- `async validate_bot_operation(self, bot_id: str, operation: str) -> dict[str, Any]` - Line 278
+- `async create_bot_configuration(self, request_data: dict[str, Any], user_id: str) -> BotConfiguration` - Line 319
+- `async update_bot_configuration(self, bot_id: str, update_data: dict[str, Any], user_id: str) -> dict[str, Any]` - Line 356
+- `health_check(self) -> dict[str, Any]` - Line 475
+- `get_service_info(self) -> dict[str, Any]` - Line 484
+- `async create_bot_through_service(self, bot_config) -> str` - Line 499
+- `async get_bot_status_through_service(self, bot_id: str) -> dict[str, Any]` - Line 529
+- `async start_bot_through_service(self, bot_id: str) -> bool` - Line 550
+- `async stop_bot_through_service(self, bot_id: str) -> bool` - Line 564
+- `async delete_bot_through_service(self, bot_id: str, force: bool = False) -> bool` - Line 578
+- `async list_bots_through_service(self) -> list[dict[str, Any]]` - Line 599
+- `get_controller_health_check(self) -> dict[str, Any]` - Line 625
+- `async start_bot_with_execution_integration(self, bot_id: str) -> bool` - Line 657
+- `async stop_bot_with_execution_integration(self, bot_id: str) -> bool` - Line 685
+- `async pause_bot_through_service(self, bot_id: str) -> bool` - Line 705
+- `async resume_bot_through_service(self, bot_id: str) -> bool` - Line 719
 
 ### Implementation: `WebCapitalService` ✅
 
@@ -1860,7 +1860,7 @@
 - `from src.core.exceptions import ValidationError`
 - `from src.core.logging import get_logger`
 - `from src.utils.decorators import monitored`
-- `from src.web_interface.auth.middleware import get_current_user`
+- `from src.web_interface.security.auth import get_current_user`
 
 #### Class: `PortfolioMetricsResponse`
 
@@ -2210,7 +2210,7 @@ async def get_reserved_capital(current_user: dict = Any, web_capital_service = A
 - `from src.core.exceptions import ValidationError`
 - `from src.core.logging import get_logger`
 - `from src.utils.decorators import monitored`
-- `from src.web_interface.auth.middleware import get_current_user`
+- `from src.web_interface.security.auth import get_current_user`
 
 #### Class: `PipelineControlRequest`
 
@@ -2298,7 +2298,7 @@ async def get_cache_statistics(current_user: dict = Any, web_data_service = Any)
 - `from src.core.exceptions import ValidationError`
 - `from src.core.logging import get_logger`
 - `from src.utils.decorators import monitored`
-- `from src.web_interface.auth.middleware import get_current_user`
+- `from src.web_interface.security.auth import get_current_user`
 
 #### Class: `ExchangeConnectionRequest`
 
@@ -3305,22 +3305,22 @@ async def get_trading_balance(current_user: User = Any)  # Line 775
 
 ```python
 class LazyApp:
-    def __getattr__(self, name)  # Line 773
-    def __call__(self, *args, **kwargs)  # Line 777
+    def __getattr__(self, name)  # Line 802
+    def __call__(self, *args, **kwargs)  # Line 806
 ```
 
 #### Functions:
 
 ```python
 async def _initialize_services()  # Line 71
-async def _connect_api_endpoints_to_services(registry)  # Line 152
-async def lifespan(app: FastAPI)  # Line 172
-def create_app(...) -> Any  # Line 297
-def _register_routes(app: FastAPI) -> None  # Line 460
-def _setup_monitoring(fastapi_app: FastAPI, config: Config) -> None  # Line 626
-def get_app()  # Line 717
-def _get_app_lazy()  # Line 751
-def get_asgi_app()  # Line 760
+async def _connect_api_endpoints_to_services(registry)  # Line 178
+async def lifespan(app: FastAPI)  # Line 195
+def create_app(...) -> Any  # Line 320
+def _register_routes(app: FastAPI) -> None  # Line 483
+def _setup_monitoring(fastapi_app: FastAPI, config: Config) -> None  # Line 649
+def get_app()  # Line 746
+def _get_app_lazy()  # Line 780
+def get_asgi_app()  # Line 789
 ```
 
 ### File: auth_manager.py
@@ -3341,25 +3341,25 @@ class AuthManager(BaseComponent):
     def _initialize_providers(self) -> None  # Line 51
     def _create_default_users(self) -> None  # Line 83
     def _start_cleanup_tasks(self) -> None  # Line 125
-    async def authenticate(self, credentials: dict[str, Any], provider_type: str | None = None) -> tuple[User, AuthToken] | None  # Line 130
-    async def validate_token(self, token_value: str, provider_type: str | None = None) -> User | None  # Line 180
-    async def revoke_token(self, token_value: str, provider_type: str | None = None) -> bool  # Line 211
-    async def refresh_token(self, refresh_token_value: str) -> AuthToken | None  # Line 235
-    async def create_api_key(self, user: User) -> AuthToken | None  # Line 255
-    def get_user(self, user_id: str) -> User | None  # Line 275
-    def get_user_by_username(self, username: str) -> User | None  # Line 279
-    async def create_user(self, user_data: dict[str, Any]) -> User | None  # Line 286
-    async def update_user(self, user_id: str, updates: dict[str, Any]) -> bool  # Line 329
-    async def change_password(self, user_id: str, old_password: str, new_password: str) -> bool  # Line 365
-    def get_user_stats(self) -> dict[str, Any]  # Line 392
-    async def _cleanup_expired_sessions(self) -> None  # Line 405
+    async def authenticate(self, credentials: dict[str, Any], provider_type: str | None = None) -> tuple[User, AuthToken] | None  # Line 137
+    async def validate_token(self, token_value: str, provider_type: str | None = None) -> User | None  # Line 187
+    async def revoke_token(self, token_value: str, provider_type: str | None = None) -> bool  # Line 218
+    async def refresh_token(self, refresh_token_value: str) -> AuthToken | None  # Line 242
+    async def create_api_key(self, user: User) -> AuthToken | None  # Line 262
+    def get_user(self, user_id: str) -> User | None  # Line 282
+    def get_user_by_username(self, username: str) -> User | None  # Line 286
+    async def create_user(self, user_data: dict[str, Any]) -> User | None  # Line 293
+    async def update_user(self, user_id: str, updates: dict[str, Any]) -> bool  # Line 336
+    async def change_password(self, user_id: str, old_password: str, new_password: str) -> bool  # Line 372
+    def get_user_stats(self) -> dict[str, Any]  # Line 399
+    async def _cleanup_expired_sessions(self) -> None  # Line 412
 ```
 
 #### Functions:
 
 ```python
-def get_auth_manager(injector = None, config: dict[str, Any] | None = None) -> AuthManager  # Line 430
-def initialize_auth_manager(config: dict[str, Any]) -> AuthManager  # Line 469
+def get_auth_manager(injector = None, config: dict[str, Any] | None = None) -> AuthManager  # Line 437
+def initialize_auth_manager(config: dict[str, Any]) -> AuthManager  # Line 476
 ```
 
 ### File: decorators.py
@@ -3653,19 +3653,19 @@ def get_all_web_services(injector: DependencyInjector = None) -> dict[str, Any] 
 
 ```python
 def _register_core_services(injector: DependencyInjector, factory: 'WebInterfaceFactory') -> None  # Line 19
-def _register_web_business_services(injector: DependencyInjector, factory: 'WebInterfaceFactory') -> None  # Line 63
-def register_web_interface_services(injector: DependencyInjector) -> None  # Line 142
-def _create_mock_analytics_service()  # Line 184
-def _resolve_analytics_dependencies(injector: DependencyInjector) -> dict  # Line 238
-def _register_analytics_services(injector: DependencyInjector) -> None  # Line 274
-def _register_utility_services(injector: DependencyInjector, factory: 'WebInterfaceFactory') -> None  # Line 363
-def get_web_portfolio_service(injector: DependencyInjector = None) -> 'WebPortfolioService'  # Line 401
-def get_web_trading_service(injector: DependencyInjector = None) -> 'WebTradingService'  # Line 415
-def get_web_bot_service(injector: DependencyInjector = None) -> 'WebBotService'  # Line 428
-def get_web_monitoring_service(injector: DependencyInjector = None) -> 'WebMonitoringService'  # Line 441
-def get_web_risk_service(injector: DependencyInjector = None) -> 'WebRiskService'  # Line 454
-def get_api_facade_service(injector: DependencyInjector = None)  # Line 467
-def get_web_interface_factory(injector: DependencyInjector = None) -> 'WebInterfaceFactory'  # Line 480
+def _register_web_business_services(injector: DependencyInjector, factory: 'WebInterfaceFactory') -> None  # Line 61
+def register_web_interface_services(injector: DependencyInjector) -> None  # Line 140
+def _create_mock_analytics_service()  # Line 182
+def _resolve_analytics_dependencies(injector: DependencyInjector) -> dict  # Line 236
+def _register_analytics_services(injector: DependencyInjector) -> None  # Line 272
+def _register_utility_services(injector: DependencyInjector, factory: 'WebInterfaceFactory') -> None  # Line 361
+def get_web_portfolio_service(injector: DependencyInjector = None) -> 'WebPortfolioService'  # Line 399
+def get_web_trading_service(injector: DependencyInjector = None) -> 'WebTradingService'  # Line 413
+def get_web_bot_service(injector: DependencyInjector = None) -> 'WebBotService'  # Line 426
+def get_web_monitoring_service(injector: DependencyInjector = None) -> 'WebMonitoringService'  # Line 439
+def get_web_risk_service(injector: DependencyInjector = None) -> 'WebRiskService'  # Line 452
+def get_api_facade_service(injector: DependencyInjector = None)  # Line 465
+def get_web_interface_factory(injector: DependencyInjector = None) -> 'WebInterfaceFactory'  # Line 478
 ```
 
 ### File: api_facade.py
@@ -3786,16 +3786,16 @@ class WebInterfaceFactory(BaseComponent):
     def create_risk_service(self) -> WebRiskServiceInterface  # Line 181
     def create_strategy_service(self) -> WebStrategyServiceInterface  # Line 200
     def create_market_data_service(self)  # Line 220
-    def create_api_facade(self) -> APIFacade  # Line 264
-    def create_websocket_manager(self) -> UnifiedWebSocketManager  # Line 331
-    def create_complete_web_stack(self, config: dict[str, Any] | None = None) -> dict[str, Any]  # Line 360
+    def create_api_facade(self) -> APIFacade  # Line 294
+    def create_websocket_manager(self) -> UnifiedWebSocketManager  # Line 361
+    def create_complete_web_stack(self, config: dict[str, Any] | None = None) -> dict[str, Any]  # Line 390
 ```
 
 #### Functions:
 
 ```python
-def create_web_interface_service(...) -> WebServiceInterface | Any  # Line 393
-def create_web_interface_stack(injector: DependencyInjector | None = None, config: dict[str, Any] | None = None) -> dict[str, Any]  # Line 466
+def create_web_interface_service(...) -> WebServiceInterface | Any  # Line 423
+def create_web_interface_stack(injector: DependencyInjector | None = None, config: dict[str, Any] | None = None) -> dict[str, Any]  # Line 496
 ```
 
 ### File: interfaces.py
@@ -4171,18 +4171,18 @@ class DecimalValidationMiddleware(BaseHTTPMiddleware):
 ```python
 class ErrorHandlerMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, debug: bool = False)  # Line 46
-    def _validate_request_boundary(self, request: Request) -> None  # Line 85
-    def _validate_response_boundary(self, request: Request, response: Response) -> None  # Line 110
-    async def dispatch(self, request: Request, call_next: Callable) -> Response  # Line 136
-    async def _handle_tbot_exception(self, request: Request, exception: TradingBotError) -> JSONResponse  # Line 218
-    async def _handle_unexpected_exception(self, request: Request, exception: Exception) -> JSONResponse  # Line 293
-    def _log_http_exception(self, request: Request, exception: HTTPException) -> None  # Line 367
-    def _log_tbot_exception(self, request: Request, exception: TradingBotError, status_code: int) -> None  # Line 394
-    def _log_unexpected_exception(self, request: Request, exception: Exception) -> None  # Line 430
-    async def _handle_recovered_error(self, request: Request, exception: Exception, error_context: ErrorContext) -> JSONResponse  # Line 465
-    def _get_request_id(self, request: Request) -> str  # Line 550
-    def _get_current_timestamp(self) -> str  # Line 572
-    def get_error_stats(self) -> dict  # Line 583
+    def _validate_request_boundary(self, request: Request) -> None  # Line 87
+    def _validate_response_boundary(self, request: Request, response: Response) -> None  # Line 112
+    async def dispatch(self, request: Request, call_next: Callable) -> Response  # Line 138
+    async def _handle_tbot_exception(self, request: Request, exception: TradingBotError) -> JSONResponse  # Line 220
+    async def _handle_unexpected_exception(self, request: Request, exception: Exception) -> JSONResponse  # Line 295
+    def _log_http_exception(self, request: Request, exception: HTTPException) -> None  # Line 369
+    def _log_tbot_exception(self, request: Request, exception: TradingBotError, status_code: int) -> None  # Line 396
+    def _log_unexpected_exception(self, request: Request, exception: Exception) -> None  # Line 432
+    async def _handle_recovered_error(self, request: Request, exception: Exception, error_context: ErrorContext) -> JSONResponse  # Line 467
+    def _get_request_id(self, request: Request) -> str  # Line 552
+    def _get_current_timestamp(self) -> str  # Line 574
+    def get_error_stats(self) -> dict  # Line 585
 ```
 
 ### File: financial_validation.py
@@ -4505,31 +4505,31 @@ class WebAuthService(BaseService):
 
 ```python
 class WebBotService(BaseComponent):
-    def __init__(self, bot_facade = None)  # Line 24
-    async def initialize(self) -> None  # Line 28
-    async def cleanup(self) -> None  # Line 32
-    async def validate_bot_configuration(self, config_data: dict[str, Any]) -> dict[str, Any]  # Line 36
-    async def format_bot_response(self, bot_data: dict[str, Any]) -> dict[str, Any]  # Line 95
-    async def get_formatted_bot_list(self, filters: dict[str, Any] = None) -> list[dict[str, Any]]  # Line 121
-    async def calculate_bot_metrics(self, bot_id: str) -> dict[str, Any]  # Line 200
-    async def validate_bot_operation(self, bot_id: str, operation: str) -> dict[str, Any]  # Line 279
-    async def create_bot_configuration(self, request_data: dict[str, Any], user_id: str) -> BotConfiguration  # Line 320
-    async def update_bot_configuration(self, bot_id: str, update_data: dict[str, Any], user_id: str) -> dict[str, Any]  # Line 357
-    def _calculate_health_score(self, metrics: dict[str, Any]) -> float  # Line 442
-    def health_check(self) -> dict[str, Any]  # Line 469
-    def get_service_info(self) -> dict[str, Any]  # Line 478
-    async def create_bot_through_service(self, bot_config) -> str  # Line 493
-    async def get_bot_status_through_service(self, bot_id: str) -> dict[str, Any]  # Line 523
-    async def start_bot_through_service(self, bot_id: str) -> bool  # Line 544
-    async def stop_bot_through_service(self, bot_id: str) -> bool  # Line 558
-    async def delete_bot_through_service(self, bot_id: str, force: bool = False) -> bool  # Line 572
-    async def list_bots_through_service(self) -> list[dict[str, Any]]  # Line 593
-    def get_controller_health_check(self) -> dict[str, Any]  # Line 619
-    def _get_execution_service(self)  # Line 639
-    async def start_bot_with_execution_integration(self, bot_id: str) -> bool  # Line 651
-    async def stop_bot_with_execution_integration(self, bot_id: str) -> bool  # Line 679
-    async def pause_bot_through_service(self, bot_id: str) -> bool  # Line 699
-    async def resume_bot_through_service(self, bot_id: str) -> bool  # Line 713
+    def __init__(self, bot_facade = None)  # Line 23
+    async def initialize(self) -> None  # Line 27
+    async def cleanup(self) -> None  # Line 31
+    async def validate_bot_configuration(self, config_data: dict[str, Any]) -> dict[str, Any]  # Line 35
+    async def format_bot_response(self, bot_data: dict[str, Any]) -> dict[str, Any]  # Line 94
+    async def get_formatted_bot_list(self, filters: dict[str, Any] = None) -> list[dict[str, Any]]  # Line 120
+    async def calculate_bot_metrics(self, bot_id: str) -> dict[str, Any]  # Line 199
+    async def validate_bot_operation(self, bot_id: str, operation: str) -> dict[str, Any]  # Line 278
+    async def create_bot_configuration(self, request_data: dict[str, Any], user_id: str) -> BotConfiguration  # Line 319
+    async def update_bot_configuration(self, bot_id: str, update_data: dict[str, Any], user_id: str) -> dict[str, Any]  # Line 356
+    def _calculate_health_score(self, metrics: dict[str, Any]) -> float  # Line 448
+    def health_check(self) -> dict[str, Any]  # Line 475
+    def get_service_info(self) -> dict[str, Any]  # Line 484
+    async def create_bot_through_service(self, bot_config) -> str  # Line 499
+    async def get_bot_status_through_service(self, bot_id: str) -> dict[str, Any]  # Line 529
+    async def start_bot_through_service(self, bot_id: str) -> bool  # Line 550
+    async def stop_bot_through_service(self, bot_id: str) -> bool  # Line 564
+    async def delete_bot_through_service(self, bot_id: str, force: bool = False) -> bool  # Line 578
+    async def list_bots_through_service(self) -> list[dict[str, Any]]  # Line 599
+    def get_controller_health_check(self) -> dict[str, Any]  # Line 625
+    def _get_execution_service(self)  # Line 645
+    async def start_bot_with_execution_integration(self, bot_id: str) -> bool  # Line 657
+    async def stop_bot_with_execution_integration(self, bot_id: str) -> bool  # Line 685
+    async def pause_bot_through_service(self, bot_id: str) -> bool  # Line 705
+    async def resume_bot_through_service(self, bot_id: str) -> bool  # Line 719
 ```
 
 ### File: capital_service.py

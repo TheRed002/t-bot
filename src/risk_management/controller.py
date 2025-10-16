@@ -108,22 +108,28 @@ class RiskManagementController(BaseComponent, ErrorPropagationMixin):
                 method=method,
             )
 
-            # Delegate to position sizing service
-            position_size = await self._position_sizing_service.calculate_size(
+            # Delegate to position sizing service (returns USD value)
+            position_size_usd = await self._position_sizing_service.calculate_size(
                 signal=signal,
                 available_capital=available_capital,
                 current_price=current_price,
                 method=method,
             )
 
+            # Convert USD value to coin quantity
+            from src.utils.decimal_utils import safe_divide, ZERO
+            position_size_coins = safe_divide(position_size_usd, current_price, ZERO)
+
             self.logger.info(
                 "Position size calculated",
                 symbol=signal.symbol,
-                size=str(position_size),
+                size_usd=str(position_size_usd),
+                size_coins=str(position_size_coins),
+                price=str(current_price),
                 method=method,
             )
 
-            return position_size
+            return position_size_coins
 
         except Exception as e:
             self.propagate_service_error(e, "calculate_position_size")

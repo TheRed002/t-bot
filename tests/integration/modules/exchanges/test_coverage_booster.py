@@ -237,7 +237,7 @@ class TestValidationAndErrorHandling:
 
         # Test price validation edge cases
         valid_prices = [
-            Decimal("0.000000000000000001"),  # Minimum precision
+            Decimal("0.00000001"),  # Minimum precision (1E-8 for crypto)
             Decimal("1.0"),
             Decimal("50000.12345678"),
             Decimal("999999.99999999"),
@@ -257,7 +257,7 @@ class TestValidationAndErrorHandling:
                 exchange._validate_price(price)
 
         # Test quantity validation edge cases
-        valid_quantities = [Decimal("0.000000000000000001"), Decimal("1.5"), Decimal("1000.0")]
+        valid_quantities = [Decimal("0.00000001"), Decimal("1.5"), Decimal("1000.0")]  # Min 1E-8 for crypto
         for qty in valid_quantities:
             exchange._validate_quantity(qty)  # Should not raise
 

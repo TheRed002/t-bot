@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from src.core.exceptions import ServiceError, ValidationError
 from src.core.logging import get_logger
 from src.utils.decorators import monitored
-from src.web_interface.auth.middleware import get_current_user
+from src.web_interface.security.auth import get_current_user
 from src.web_interface.dependencies import get_web_exchange_service, get_web_auth_service
 
 logger = get_logger(__name__)
@@ -39,7 +39,7 @@ class ExchangeConfigRequest(BaseModel):
     """Request model for exchange configuration."""
 
     config: dict[str, Any]
-    validate: bool = True
+    should_validate: bool = True
 
 
 class RateLimitConfigRequest(BaseModel):
@@ -248,7 +248,7 @@ async def update_exchange_config(
         web_auth_service.require_admin_or_developer_permission(current_user)
 
         # Validate configuration if requested
-        if request.validate:
+        if request.should_validate:
             validation_result = await web_exchange_service.validate_exchange_config(
                 exchange, request.config
             )

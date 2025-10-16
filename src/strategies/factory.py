@@ -23,7 +23,7 @@ from src.error_handling import (
 )
 
 # Enhanced imports for comprehensive integration
-from src.core.logging import PerformanceMonitor
+from src.core.performance.performance_monitor import PerformanceMonitor
 from src.monitoring import AlertManager, MetricsCollector
 from src.strategies.dependencies import StrategyServiceContainer, create_strategy_service_container
 from src.strategies.interfaces import BaseStrategyInterface, StrategyFactoryInterface
@@ -665,13 +665,14 @@ class StrategyFactory(StrategyFactoryInterface):
         ):
             return False
 
-        # Validate momentum threshold
+        # Validate momentum threshold - MUST accept Decimal for financial precision
         threshold = params.get("momentum_threshold", 0)
-        if (
-            not isinstance(threshold, (int, float))
-            or threshold < MIN_MOMENTUM_THRESHOLD
-            or threshold > MAX_MOMENTUM_THRESHOLD
-        ):
+        # Convert to Decimal for comparison if not already
+        if isinstance(threshold, (int, float)):
+            threshold = Decimal(str(threshold))
+        if not isinstance(threshold, Decimal):
+            return False
+        if threshold < Decimal(str(MIN_MOMENTUM_THRESHOLD)) or threshold > Decimal(str(MAX_MOMENTUM_THRESHOLD)):
             return False
 
         return True
@@ -689,13 +690,14 @@ class StrategyFactory(StrategyFactoryInterface):
         ):
             return False
 
-        # Validate deviation threshold
+        # Validate deviation threshold - MUST accept Decimal for financial precision
         deviation = params.get("deviation_threshold", 0)
-        if (
-            not isinstance(deviation, (int, float))
-            or deviation < MIN_DEVIATION_THRESHOLD
-            or deviation > MAX_DEVIATION_THRESHOLD
-        ):
+        # Convert to Decimal for comparison if not already
+        if isinstance(deviation, (int, float)):
+            deviation = Decimal(str(deviation))
+        if not isinstance(deviation, Decimal):
+            return False
+        if deviation < Decimal(str(MIN_DEVIATION_THRESHOLD)) or deviation > Decimal(str(MAX_DEVIATION_THRESHOLD)):
             return False
 
         return True
@@ -709,9 +711,14 @@ class StrategyFactory(StrategyFactoryInterface):
         if not isinstance(exchanges, list) or len(exchanges) < MIN_EXCHANGES_REQUIRED:
             return False
 
-        # Validate profit threshold
+        # Validate profit threshold - MUST accept Decimal for financial precision
         profit_threshold = params.get("min_profit_threshold", 0)
-        if not isinstance(profit_threshold, (int, float)) or profit_threshold <= 0:
+        # Convert to Decimal for comparison if not already
+        if isinstance(profit_threshold, (int, float)):
+            profit_threshold = Decimal(str(profit_threshold))
+        if not isinstance(profit_threshold, Decimal):
+            return False
+        if profit_threshold <= Decimal("0"):
             return False
 
         return True
@@ -729,12 +736,14 @@ class StrategyFactory(StrategyFactoryInterface):
         ):
             return False
 
-        # Validate breakout threshold
+        # Validate breakout threshold - MUST accept Decimal for financial precision
         breakout_threshold = params.get("breakout_threshold", 0)
-        if (
-            not isinstance(breakout_threshold, (int, float))
-            or breakout_threshold < MIN_BREAKOUT_THRESHOLD
-        ):
+        # Convert to Decimal for comparison if not already
+        if isinstance(breakout_threshold, (int, float)):
+            breakout_threshold = Decimal(str(breakout_threshold))
+        if not isinstance(breakout_threshold, Decimal):
+            return False
+        if breakout_threshold < Decimal(str(MIN_BREAKOUT_THRESHOLD)):
             return False
 
         return True

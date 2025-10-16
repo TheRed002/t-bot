@@ -268,16 +268,14 @@ class BotInstance:
         self.websocket_last_pong: dict[str, datetime] = {}
 
         # Load websocket configuration from config with safe access
-        websocket_config = {}
         if self.config and hasattr(self.config, "bot_management"):
-            websocket_config = self.config.bot_management.get("websocket", {})
-
-        self.websocket_connection_timeout = websocket_config.get(
-            "connection_timeout", DEFAULT_WEBSOCKET_TIMEOUT
-        )
-        self.websocket_heartbeat_interval = websocket_config.get(
-            "heartbeat_interval", DEFAULT_HEARTBEAT_INTERVAL
-        )
+            self.websocket_connection_timeout = self.config.bot_management.websocket_connection_timeout
+            self.websocket_heartbeat_interval = self.config.bot_management.websocket_heartbeat_interval
+            websocket_config = getattr(self.config.bot_management, "websocket", {})
+        else:
+            self.websocket_connection_timeout = DEFAULT_WEBSOCKET_TIMEOUT
+            self.websocket_heartbeat_interval = DEFAULT_HEARTBEAT_INTERVAL
+            websocket_config = {}
         self.websocket_reconnect_attempts: dict[str, int] = {}
         self.websocket_circuit_breaker: dict[str, bool] = {}
 

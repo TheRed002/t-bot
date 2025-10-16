@@ -412,23 +412,48 @@ class RealServiceFactory:
 
             # Shutdown StateManager first (highest level service)
             if self.state_manager and hasattr(self.state_manager, "shutdown"):
-                await self.state_manager.shutdown()
-                logger.debug("State manager shutdown")
+                try:
+                    await self.state_manager.shutdown()
+                    logger.debug("State manager shutdown")
+                except Exception as e:
+                    logger.warning(f"Error shutting down state manager: {e}")
 
             # Shutdown DatabaseService (use correct method name)
             if self.database_service and hasattr(self.database_service, "stop"):
-                await self.database_service.stop()
-                logger.debug("Database service stopped")
+                try:
+                    await self.database_service.stop()
+                    logger.debug("Database service stopped")
+                except Exception as e:
+                    logger.warning(f"Error stopping database service: {e}")
 
-            # Shutdown CacheManager
-            if self.cache_manager and hasattr(self.cache_manager, "shutdown"):
-                await self.cache_manager.shutdown()
-                logger.debug("Cache manager shutdown")
+            # Shutdown CacheManager with explicit cleanup to prevent __del__ warnings
+            if self.cache_manager:
+                try:
+                    # First try cleanup() which is more graceful
+                    if hasattr(self.cache_manager, "cleanup"):
+                        await self.cache_manager.cleanup()
+                        logger.debug("Cache manager cleanup completed")
+
+                    # Then call shutdown() for full cleanup
+                    if hasattr(self.cache_manager, "shutdown"):
+                        await self.cache_manager.shutdown()
+                        logger.debug("Cache manager shutdown completed")
+
+                    # Set redis_client to None to prevent __del__ from complaining
+                    self.cache_manager.redis_client = None
+                except Exception as e:
+                    logger.warning(f"Error shutting down cache manager: {e}")
+                finally:
+                    # Nullify reference to prevent __del__ warnings
+                    self.cache_manager = None
 
             # Shutdown DatabaseConnectionManager (use correct method name)
             if self.connection_manager and hasattr(self.connection_manager, "close"):
-                await self.connection_manager.close()
-                logger.debug("Connection manager closed")
+                try:
+                    await self.connection_manager.close()
+                    logger.debug("Connection manager closed")
+                except Exception as e:
+                    logger.warning(f"Error closing connection manager: {e}")
 
         except Exception as e:
             logger.warning(f"Error during cleanup: {e}")

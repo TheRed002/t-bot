@@ -579,17 +579,19 @@ class TestMockExchangeEdgeCases:
     async def test_ticker_retrieval(self, mock_exchange):
         """Test ticker retrieval."""
         # Test the MockExchange ticker implementation
+        # Backend returns a Ticker object, not a dict
         ticker = await mock_exchange.get_ticker("BTCUSDT")
-        assert "symbol" in ticker
-        assert "price" in ticker
-        assert ticker["symbol"] == "BTCUSDT"
+        assert hasattr(ticker, "symbol")
+        assert hasattr(ticker, "last_price") or hasattr(ticker, "price")
+        assert ticker.symbol == "BTCUSDT"
 
     async def test_exchange_info_retrieval(self, mock_exchange):
         """Test exchange info retrieval."""
         # Test exchange info (MockExchange loads info on connect)
+        # Backend uses "mock_exchange" as exchange name (see logs: "component=mock_exchange_exchange")
         exchange_info = mock_exchange.get_exchange_info()
         assert exchange_info is not None
-        assert exchange_info.exchange == "mock"
+        assert exchange_info.exchange == "mock_exchange"
         assert exchange_info.symbol == "BTCUSDT"
 
     async def test_large_order_partial_fill_simulation(self, mock_exchange):

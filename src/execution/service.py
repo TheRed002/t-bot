@@ -937,7 +937,7 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
             "slippage_bps": 0.0,
             "market_impact_bps": 0.0,
             "total_cost_bps": 0.0,
-            "fill_rate": str(
+            "fill_rate": float(
                 execution_result.total_filled_quantity / execution_result.original_order.quantity
             ),
             "quality_score": 0.0,
@@ -1112,10 +1112,19 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
                 )
 
                 # Create Signal for validation
+                import uuid
+                signal_id = f"exec_svc_signal_{uuid.uuid4().hex[:12]}"
+                strategy_id_value = bot_id or "execution_service"
+                strategy_name_value = "ExecutionService"
+
                 trading_signal = Signal(
+                    signal_id=signal_id,
+                    strategy_id=strategy_id_value,
+                    strategy_name=strategy_name_value,
                     symbol=order.symbol,
                     direction=signal_direction,
                     strength=0.5,  # Default confidence
+                    confidence=Decimal("0.5"),
                     timestamp=datetime.now(timezone.utc),
                     source="ExecutionService",
                     metadata={
@@ -1469,31 +1478,27 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
                 "side": order.side.value,
                 "order_type": order.order_type.value,
                 "requested_quantity": decimal_to_float(
-                    self._convert_to_decimal_safe(order.quantity), "requested_quantity"
+                    self._convert_to_decimal_safe(order.quantity)
                 ),
                 "executed_quantity": decimal_to_float(
-                    self._convert_to_decimal_safe(execution_result.total_filled_quantity),
-                    "executed_quantity",
+                    self._convert_to_decimal_safe(execution_result.total_filled_quantity)
                 ),
                 "remaining_quantity": decimal_to_float(
-                    self._convert_to_decimal_safe(
-                        order.quantity - execution_result.total_filled_quantity
-                    ),
-                    "remaining_quantity",
+                    self._convert_to_decimal_safe(order.quantity) -
+                    self._convert_to_decimal_safe(execution_result.total_filled_quantity)
                 ),
                 "requested_price": decimal_to_float(
-                    self._convert_to_decimal_safe(order.price), "requested_price"
+                    self._convert_to_decimal_safe(order.price)
                 )
                 if order.price
                 else None,
                 "executed_price": decimal_to_float(
-                    self._convert_to_decimal_safe(execution_result.average_fill_price),
-                    "executed_price",
+                    self._convert_to_decimal_safe(execution_result.average_fill_price)
                 )
                 if execution_result.average_fill_price
                 else None,
                 "market_price_at_time": decimal_to_float(
-                    self._convert_to_decimal_safe(market_data.price), "market_price_at_time"
+                    self._convert_to_decimal_safe(market_data.price)
                 ),
                 "slippage_bps": (
                     execution_metrics.get("slippage_bps", 0) if execution_metrics else 0
@@ -1510,7 +1515,7 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
                 "success": success,
                 "error_message": error_message,
                 "total_fees": decimal_to_float(
-                    self._convert_to_decimal_safe(execution_result.total_fees), "total_fees"
+                    self._convert_to_decimal_safe(execution_result.total_fees)
                 ),
                 "market_conditions": {
                     "price": str(market_data.price),
@@ -1648,15 +1653,15 @@ class ExecutionService(TransactionalService, ExecutionServiceInterface, ErrorPro
             (current_avg_time * (total_executions - 1)) + execution_time_ms
         ) / total_executions
 
-        # Slippage
-        slippage_bps = execution_metrics.get("slippage_bps", 0)
+        # Slippage - ensure we're using floats for metrics tracking
+        slippage_bps = float(execution_metrics.get("slippage_bps", 0))
         current_avg_slippage = self._performance_metrics["average_slippage_bps"]
         self._performance_metrics["average_slippage_bps"] = (
             (current_avg_slippage * (total_executions - 1)) + slippage_bps
         ) / total_executions
 
-        # Execution quality
-        quality_score = execution_metrics.get("quality_score", 0)
+        # Execution quality - ensure we're using floats for metrics tracking
+        quality_score = float(execution_metrics.get("quality_score", 0))
         current_avg_quality = self._performance_metrics["execution_quality_score"]
         self._performance_metrics["execution_quality_score"] = (
             (current_avg_quality * (total_executions - 1)) + quality_score

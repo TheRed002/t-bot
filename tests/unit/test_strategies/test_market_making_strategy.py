@@ -258,6 +258,9 @@ class TestMarketMakingStrategy:
     async def test_validate_signal_valid(self, strategy):
         """Test signal validation with valid signal."""
         signal = Signal(
+            signal_id="test_signal_1",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.9"),
             timestamp=datetime.now(timezone.utc),
@@ -273,6 +276,9 @@ class TestMarketMakingStrategy:
     async def test_validate_signal_invalid_confidence(self, strategy):
         """Test signal validation with low confidence."""
         signal = Signal(
+            signal_id="test_signal_2",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.5"),  # Below threshold
             timestamp=datetime.now(timezone.utc),
@@ -288,6 +294,9 @@ class TestMarketMakingStrategy:
     async def test_validate_signal_missing_metadata(self, strategy):
         """Test signal validation with missing metadata."""
         signal = Signal(
+            signal_id="test_signal_3",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.9"),
             timestamp=datetime.now(timezone.utc),
@@ -305,6 +314,9 @@ class TestMarketMakingStrategy:
         strategy.daily_pnl = Decimal("-150")  # Exceeds limit
 
         signal = Signal(
+            signal_id="test_signal_4",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.9"),
             timestamp=datetime.now(timezone.utc),
@@ -325,6 +337,9 @@ class TestMarketMakingStrategy:
         strategy.set_risk_manager(mock_risk_manager)
 
         signal = Signal(
+            signal_id="test_signal_5",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.9"),
             timestamp=datetime.now(timezone.utc),
@@ -345,6 +360,9 @@ class TestMarketMakingStrategy:
         strategy.set_risk_manager(mock_risk_manager)
 
         signal = Signal(
+            signal_id="test_signal_6",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.9"),
             timestamp=datetime.now(timezone.utc),
@@ -360,6 +378,9 @@ class TestMarketMakingStrategy:
         """Test inventory limit checking."""
         # Test within limits
         signal = Signal(
+            signal_id="test_signal_7",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.9"),
             timestamp=datetime.now(timezone.utc),
@@ -379,6 +400,9 @@ class TestMarketMakingStrategy:
     def test_get_position_size(self, strategy):
         """Test position size calculation."""
         signal = Signal(
+            signal_id="test_signal_8",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.9"),
             timestamp=datetime.now(timezone.utc),
@@ -564,6 +588,9 @@ class TestMarketMakingStrategy:
         strategy.set_risk_manager(mock_risk_manager)
 
         signal = Signal(
+            signal_id="test_signal_9",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.9"),
             timestamp=datetime.now(timezone.utc),
@@ -579,6 +606,9 @@ class TestMarketMakingStrategy:
     def test_get_position_size_with_exception(self, strategy):
         """Test position size calculation with exception handling."""
         signal = Signal(
+            signal_id="test_signal_10",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.9"),
             timestamp=datetime.now(timezone.utc),

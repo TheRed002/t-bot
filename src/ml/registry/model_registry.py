@@ -122,7 +122,7 @@ class ModelRegistryService(BaseService):
         self.registry_config = ModelRegistryConfig(**registry_config_dict)
 
         # Service dependencies - resolved during startup
-        self.data_service: Any = None
+        self.ml_data_service: Any = None
 
         # Internal state
         self._model_cache: dict[str, tuple[ModelMetadata, Any, datetime]] = {}
@@ -423,9 +423,9 @@ class ModelRegistryService(BaseService):
 
             # Use MLDataService methods instead of raw SQL
             if filters.get("is_active"):
-                models_data = await self.ml_data_service.get_all_models(active_only=True)
+                models_data = await self.ml_data_service.get_all_models(include_archived=False)
             else:
-                models_data = await self.ml_data_service.get_all_models(active_only=False)
+                models_data = await self.ml_data_service.get_all_models(include_archived=True)
 
             # Convert to list of dictionaries
             models_list = []
@@ -732,8 +732,14 @@ class ModelRegistryService(BaseService):
     # Helper Methods
     async def _generate_model_id_and_version(self, name: str, model_type: str) -> tuple[str, str]:
         """Generate unique model ID and version."""
-        # Check existing models
-        existing_models = await self.ml_data_service.get_models_by_name_and_type(name, model_type)
+        # Check existing models (if ml_data_service is available)
+        existing_models = []
+        if self.ml_data_service is not None:
+            try:
+                existing_models = await self.ml_data_service.get_models_by_name_and_type(name, model_type)
+            except Exception as e:
+                self._logger.warning(f"Failed to get existing models: {e}")
+                existing_models = []
 
         if existing_models:
             # Get latest version and increment
@@ -824,13 +830,21 @@ class ModelRegistryService(BaseService):
 
     async def _store_model_metadata(self, metadata: ModelMetadata) -> None:
         """Store model metadata through data service."""
-        metadata_dict = metadata.dict()
-        await self.ml_data_service.store_model_metadata(metadata_dict)
+        if self.ml_data_service is not None:
+            metadata_dict = metadata.dict()
+            try:
+                await self.ml_data_service.store_model_metadata(metadata_dict)
+            except Exception as e:
+                self._logger.warning(f"Failed to store model metadata to data service: {e}")
 
     async def _update_model_metadata(self, metadata: ModelMetadata) -> None:
         """Update model metadata through data service."""
-        metadata_dict = metadata.dict()
-        await self.ml_data_service.update_model_metadata(metadata.model_id, metadata_dict)
+        if self.ml_data_service is not None:
+            metadata_dict = metadata.dict()
+            try:
+                await self.ml_data_service.update_model_metadata(metadata.model_id, metadata_dict)
+            except Exception as e:
+                self._logger.warning(f"Failed to update model metadata in data service: {e}")
 
     async def _save_model_to_file(self, model: Any, file_path: Path) -> None:
         """Save model to file."""
@@ -1025,7 +1039,7 @@ class ModelRegistryService(BaseService):
         """Clean up old model versions."""
         try:
             # Get all models grouped by name and type
-            all_models = await self.ml_data_service.get_all_models(active_only=True)
+            all_models = await self.ml_data_service.get_all_models(include_archived=False)
 
             # Group by name and type
             model_groups: dict[tuple[str | None, str | None], list[dict[str, Any]]] = {}

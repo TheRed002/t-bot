@@ -661,9 +661,7 @@ class BotService(BaseService):
                         f"High capital allocation detected for bot {bot_id}: "
                         f"{bot_config.allocated_capital}"
                     )
-                risk_threshold = Decimal(
-                    str(self.config.bot_management.get("risk_threshold", "0.05"))
-                )
+                risk_threshold = self.config.bot_management.risk_threshold
                 if bot_config.risk_percentage > risk_threshold:  # Configurable risk threshold
                     self._logger.warning(
                         f"High risk percentage for bot {bot_id}: {bot_config.risk_percentage}"
@@ -1348,9 +1346,7 @@ class BotService(BaseService):
                 elif hasattr(self._analytics_service, "calculate_bot_risk"):
                     # Alternative: Use analytics service for risk calculation
                     risk_metrics = await self._analytics_service.calculate_bot_risk(bot_id)
-                    risk_score_threshold = Decimal(
-                        str(self.config.bot_management.get("risk_score_threshold", "0.8"))
-                    )
+                    risk_score_threshold = self.config.bot_management.risk_score_threshold
                     if (
                         risk_metrics
                         and getattr(risk_metrics, "risk_score", 0) > risk_score_threshold
@@ -1818,9 +1814,7 @@ class BotService(BaseService):
                         )
                         rate_limit_per_minute = exchange_limits.get("requests_per_minute", 1000)
 
-                        rate_limit_threshold = Decimal(
-                            str(self.config.bot_management.get("rate_limit_threshold", "0.8"))
-                        )
+                        rate_limit_threshold = self.config.bot_management.rate_limit_threshold
                         if bot_rate_requirements > rate_limit_per_minute * rate_limit_threshold:
                             self._logger.warning(
                                 f"Bot may exceed 80% of rate limits on {exchange_name}",
@@ -2011,9 +2005,7 @@ class BotService(BaseService):
                     return HealthStatus.DEGRADED
 
             # Check active bot count
-            concurrent_bots_threshold = Decimal(
-                str(self.config.bot_management.get("concurrent_bots_threshold", "0.9"))
-            )
+            concurrent_bots_threshold = self.config.bot_management.concurrent_bots_threshold
             if len(self._active_bots) > self._max_concurrent_bots * concurrent_bots_threshold:
                 return HealthStatus.DEGRADED
 

@@ -28,8 +28,8 @@ class MockRepository:
         return self.data.get(entity_id)
 
 
-class TestCoreService(BaseService):
-    """Test service that inherits from BaseService."""
+class ConcreteTestService(BaseService):
+    """Concrete test service implementation that inherits from BaseService for testing."""
 
     def __init__(self, name="TestService", config=None):
         super().__init__(name, config)
@@ -76,7 +76,7 @@ class TestCoreModuleIntegration:
     @pytest.fixture
     def test_service(self):
         """Create test service instance."""
-        return TestCoreService()
+        return ConcreteTestService()
 
     @pytest.mark.asyncio
     @pytest.mark.timeout(300)

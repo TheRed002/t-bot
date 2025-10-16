@@ -279,7 +279,7 @@ async def real_mean_reversion_strategy(real_mean_reversion_config, strategy_fact
         strategy_type=StrategyType.MEAN_REVERSION, config=real_mean_reversion_config
     )
     yield strategy
-    strategy.cleanup()
+    await strategy.cleanup()
 
 
 @pytest_asyncio.fixture
@@ -289,7 +289,7 @@ async def real_trend_following_strategy(real_trend_following_config, strategy_fa
         strategy_type=StrategyType.TREND_FOLLOWING, config=real_trend_following_config
     )
     yield strategy
-    strategy.cleanup()
+    await strategy.cleanup()
 
 
 @pytest_asyncio.fixture
@@ -299,7 +299,7 @@ async def real_breakout_strategy(real_breakout_config, strategy_factory):
         strategy_type=StrategyType.BREAKOUT, config=real_breakout_config
     )
     yield strategy
-    strategy.cleanup()
+    await strategy.cleanup()
 
 
 @pytest_asyncio.fixture

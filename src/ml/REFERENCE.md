@@ -2,7 +2,7 @@
 
 ## INTEGRATION
 **Dependencies**: base, core, data, utils
-**Used By**: strategies
+**Used By**: None
 **Provides**: BatchPredictionService, BatchPredictorService, CrossValidationService, DriftDetectionService, FeatureEngineeringService, FeatureStoreService, HyperparameterOptimizationService, IBatchPredictionService, IDriftDetectionService, IFeatureEngineeringService, IInferenceService, IMLService, IModelManagerService, IModelRegistryService, IModelValidationService, ITrainingService, InferenceService, MLIntegrationService, MLService, MLValidationService, ModelCacheService, ModelManagerService, ModelRegistryService, ModelStorageManager, ModelTrainingService, ModelValidationService, TrainingService
 **Patterns**: Async Operations, Component Architecture, Service Layer
 
@@ -97,10 +97,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async compute_features(self, request: FeatureRequest) -> FeatureResponse` - Line 208
-- `async select_features(self, ...) -> tuple[pd.DataFrame, list[str], dict[str, float]]` - Line 892
-- `async get_feature_engineering_metrics(self) -> dict[str, Any]` - Line 1106
-- `async clear_cache(self) -> dict[str, int]` - Line 1119
+- `async compute_features(self, request: FeatureRequest) -> FeatureResponse` - Line 212
+- `async select_features(self, ...) -> tuple[pd.DataFrame, list[str], dict[str, float]]` - Line 926
+- `async get_feature_engineering_metrics(self) -> dict[str, Any]` - Line 1140
+- `async clear_cache(self) -> dict[str, int]` - Line 1153
 
 ### Implementation: `BatchPredictorConfig` ✅
 
@@ -529,8 +529,8 @@
 - `async deactivate_model(self, model_id: str, reason: str = '') -> bool` - Line 530
 - `async delete_model(self, model_id: str, remove_files: bool = True) -> bool` - Line 597
 - `async get_model_metrics(self, model_id: str) -> dict[str, Any]` - Line 675
-- `get_model_registry_metrics(self) -> dict[str, Any]` - Line 1083
-- `async clear_cache(self) -> dict[str, int]` - Line 1094
+- `get_model_registry_metrics(self) -> dict[str, Any]` - Line 1097
+- `async clear_cache(self) -> dict[str, int]` - Line 1108
 
 ### Implementation: `IMLRepository` 🔧
 
@@ -611,15 +611,15 @@
 
 **Implemented Methods:**
 - `async process_pipeline(self, request: MLPipelineRequest) -> MLPipelineResponse` - Line 281
-- `async train_model(self, request: MLTrainingRequest) -> MLTrainingResponse` - Line 649
-- `async process_batch_pipeline(self, requests: list[MLPipelineRequest]) -> list[MLPipelineResponse]` - Line 1007
-- `async clear_ml_cache(self) -> dict[str, int]` - Line 1139
-- `async list_available_models(self, model_type: str | None = None, stage: str | None = None) -> list[dict[str, Any]]` - Line 1149
-- `async promote_model(self, model_id: str, stage: str, description: str = '') -> bool` - Line 1160
-- `async get_model_info(self, model_id: str) -> dict[str, Any]` - Line 1167
-- `get_ml_service_metrics(self) -> dict[str, Any]` - Line 1257
-- `async clear_cache(self) -> dict[str, int]` - Line 1276
-- `async enhance_strategy_signals(self, ...) -> list` - Line 1282
+- `async train_model(self, request: MLTrainingRequest) -> MLTrainingResponse` - Line 652
+- `async process_batch_pipeline(self, requests: list[MLPipelineRequest]) -> list[MLPipelineResponse]` - Line 1013
+- `async clear_ml_cache(self) -> dict[str, int]` - Line 1145
+- `async list_available_models(self, model_type: str | None = None, stage: str | None = None) -> list[dict[str, Any]]` - Line 1155
+- `async promote_model(self, model_id: str, stage: str, description: str = '') -> bool` - Line 1166
+- `async get_model_info(self, model_id: str) -> dict[str, Any]` - Line 1173
+- `get_ml_service_metrics(self) -> dict[str, Any]` - Line 1263
+- `async clear_cache(self) -> dict[str, int]` - Line 1282
+- `async enhance_strategy_signals(self, ...) -> list` - Line 1288
 
 ### Implementation: `ModelValidationService` ✅
 
@@ -897,7 +897,7 @@ class MLErrorPropagationMixin:
 
 ```python
 def register_ml_services(container: 'DependencyContainer', config: ConfigDict) -> None  # Line 34
-def get_ml_service_dependencies() -> dict[str, list[str]]  # Line 116
+def get_ml_service_dependencies() -> dict[str, list[str]]  # Line 149
 ```
 
 ### File: factory.py
@@ -975,30 +975,30 @@ class FeatureResponse(BaseModel):
 class FeatureEngineeringService(BaseService):
     def __init__(self, config: ConfigDict | None = None, correlation_id: str | None = None) -> None  # Line 122
     async def _do_start(self) -> None  # Line 164
-    async def _do_stop(self) -> None  # Line 199
-    async def compute_features(self, request: FeatureRequest) -> FeatureResponse  # Line 208
-    async def _compute_features_impl(self, request: FeatureRequest) -> FeatureResponse  # Line 227
-    async def _compute_all_feature_types(self, market_data: pd.DataFrame, symbol: str, feature_types: list[str]) -> pd.DataFrame  # Line 471
-    async def _compute_price_features_async(self, market_data: pd.DataFrame) -> pd.DataFrame  # Line 528
-    def _compute_price_features(self, data: pd.DataFrame) -> pd.DataFrame  # Line 533
-    async def _compute_technical_features_async(self, market_data: pd.DataFrame, symbol: str) -> pd.DataFrame  # Line 593
-    async def _compute_statistical_features_async(self, market_data: pd.DataFrame) -> pd.DataFrame  # Line 638
-    async def _compute_volume_features_async(self, market_data: pd.DataFrame) -> pd.DataFrame  # Line 686
-    def _compute_volume_features(self, data: pd.DataFrame) -> pd.DataFrame  # Line 693
-    async def _compute_volatility_features_async(self, market_data: pd.DataFrame) -> pd.DataFrame  # Line 731
-    def _compute_volatility_features(self, data: pd.DataFrame) -> pd.DataFrame  # Line 738
-    async def _compute_momentum_features_async(self, market_data: pd.DataFrame) -> pd.DataFrame  # Line 766
-    def _compute_momentum_features(self, data: pd.DataFrame) -> pd.DataFrame  # Line 773
-    async def _compute_trend_features_async(self, market_data: pd.DataFrame) -> pd.DataFrame  # Line 821
-    def _compute_trend_features(self, data: pd.DataFrame) -> pd.DataFrame  # Line 826
-    async def select_features(self, ...) -> tuple[pd.DataFrame, list[str], dict[str, float]]  # Line 892
-    async def _select_features_impl(self, ...) -> tuple[pd.DataFrame, list[str], dict[str, float]]  # Line 923
-    async def _preprocess_features(self, features_df: pd.DataFrame, scaling_method: str = 'standard') -> tuple[pd.DataFrame, dict[str, Any]]  # Line 1005
-    def _handle_missing_values(self, features: pd.DataFrame) -> pd.DataFrame  # Line 1066
-    async def _service_health_check(self) -> 'HealthStatus'  # Line 1085
-    async def get_feature_engineering_metrics(self) -> dict[str, Any]  # Line 1106
-    async def clear_cache(self) -> dict[str, int]  # Line 1119
-    def _validate_service_config(self, config: ConfigDict) -> bool  # Line 1145
+    async def _do_stop(self) -> None  # Line 203
+    async def compute_features(self, request: FeatureRequest) -> FeatureResponse  # Line 212
+    async def _compute_features_impl(self, request: FeatureRequest) -> FeatureResponse  # Line 231
+    async def _compute_all_feature_types(self, market_data: pd.DataFrame, symbol: str, feature_types: list[str]) -> pd.DataFrame  # Line 475
+    async def _compute_price_features_async(self, market_data: pd.DataFrame) -> pd.DataFrame  # Line 532
+    def _compute_price_features(self, data: pd.DataFrame) -> pd.DataFrame  # Line 537
+    async def _compute_technical_features_async(self, market_data: pd.DataFrame, symbol: str) -> pd.DataFrame  # Line 597
+    async def _compute_statistical_features_async(self, market_data: pd.DataFrame) -> pd.DataFrame  # Line 649
+    async def _compute_volume_features_async(self, market_data: pd.DataFrame) -> pd.DataFrame  # Line 703
+    def _compute_volume_features(self, data: pd.DataFrame) -> pd.DataFrame  # Line 710
+    async def _compute_volatility_features_async(self, market_data: pd.DataFrame) -> pd.DataFrame  # Line 752
+    def _compute_volatility_features(self, data: pd.DataFrame) -> pd.DataFrame  # Line 759
+    async def _compute_momentum_features_async(self, market_data: pd.DataFrame) -> pd.DataFrame  # Line 792
+    def _compute_momentum_features(self, data: pd.DataFrame) -> pd.DataFrame  # Line 799
+    async def _compute_trend_features_async(self, market_data: pd.DataFrame) -> pd.DataFrame  # Line 852
+    def _compute_trend_features(self, data: pd.DataFrame) -> pd.DataFrame  # Line 857
+    async def select_features(self, ...) -> tuple[pd.DataFrame, list[str], dict[str, float]]  # Line 926
+    async def _select_features_impl(self, ...) -> tuple[pd.DataFrame, list[str], dict[str, float]]  # Line 957
+    async def _preprocess_features(self, features_df: pd.DataFrame, scaling_method: str = 'standard') -> tuple[pd.DataFrame, dict[str, Any]]  # Line 1039
+    def _handle_missing_values(self, features: pd.DataFrame) -> pd.DataFrame  # Line 1100
+    async def _service_health_check(self) -> 'HealthStatus'  # Line 1119
+    async def get_feature_engineering_metrics(self) -> dict[str, Any]  # Line 1140
+    async def clear_cache(self) -> dict[str, int]  # Line 1153
+    def _validate_service_config(self, config: ConfigDict) -> bool  # Line 1179
 ```
 
 ### File: batch_predictor.py
@@ -1745,28 +1745,28 @@ class ModelRegistryService(BaseService):
     async def get_model_metrics(self, model_id: str) -> dict[str, Any]  # Line 675
     async def _get_model_metrics_impl(self, model_id: str) -> dict[str, Any]  # Line 691
     async def _generate_model_id_and_version(self, name: str, model_type: str) -> tuple[str, str]  # Line 733
-    async def _find_model_metadata(self, ...) -> ModelMetadata | None  # Line 754
-    async def _get_model_metadata(self, model_id: str) -> ModelMetadata | None  # Line 802
-    async def _store_model_metadata(self, metadata: ModelMetadata) -> None  # Line 825
-    async def _update_model_metadata(self, metadata: ModelMetadata) -> None  # Line 830
-    async def _save_model_to_file(self, model: Any, file_path: Path) -> None  # Line 835
-    def _save_pickle_file(self, obj: Any, file_path: Path) -> None  # Line 846
-    async def _load_model_from_file(self, file_path: Path) -> Any  # Line 853
-    def _load_pickle_file(self, file_path: Path) -> Any  # Line 863
-    def _load_json_file(self, file_path: Path) -> dict[str, Any]  # Line 870
-    async def _save_registry_entry(self, metadata: ModelMetadata) -> None  # Line 875
-    def _save_json_file(self, data: dict[str, Any], file_path: Path) -> None  # Line 896
-    async def _load_existing_metadata(self) -> None  # Line 901
-    async def _cache_model(self, model_id: str, metadata: ModelMetadata, model: Any) -> None  # Line 931
-    async def _get_cached_model(self, model_id: str) -> Any | None  # Line 936
-    async def _log_audit_event(self, event_type: str, model_id: str, details: dict[str, Any]) -> None  # Line 950
-    async def _background_cleanup(self) -> None  # Line 977
-    async def _clean_expired_cache(self) -> None  # Line 995
-    async def _cleanup_old_versions(self) -> None  # Line 1024
-    async def _service_health_check(self) -> Any  # Line 1059
-    def get_model_registry_metrics(self) -> dict[str, Any]  # Line 1083
-    async def clear_cache(self) -> dict[str, int]  # Line 1094
-    def _validate_service_config(self, config: ConfigDict) -> bool  # Line 1114
+    async def _find_model_metadata(self, ...) -> ModelMetadata | None  # Line 760
+    async def _get_model_metadata(self, model_id: str) -> ModelMetadata | None  # Line 808
+    async def _store_model_metadata(self, metadata: ModelMetadata) -> None  # Line 831
+    async def _update_model_metadata(self, metadata: ModelMetadata) -> None  # Line 840
+    async def _save_model_to_file(self, model: Any, file_path: Path) -> None  # Line 849
+    def _save_pickle_file(self, obj: Any, file_path: Path) -> None  # Line 860
+    async def _load_model_from_file(self, file_path: Path) -> Any  # Line 867
+    def _load_pickle_file(self, file_path: Path) -> Any  # Line 877
+    def _load_json_file(self, file_path: Path) -> dict[str, Any]  # Line 884
+    async def _save_registry_entry(self, metadata: ModelMetadata) -> None  # Line 889
+    def _save_json_file(self, data: dict[str, Any], file_path: Path) -> None  # Line 910
+    async def _load_existing_metadata(self) -> None  # Line 915
+    async def _cache_model(self, model_id: str, metadata: ModelMetadata, model: Any) -> None  # Line 945
+    async def _get_cached_model(self, model_id: str) -> Any | None  # Line 950
+    async def _log_audit_event(self, event_type: str, model_id: str, details: dict[str, Any]) -> None  # Line 964
+    async def _background_cleanup(self) -> None  # Line 991
+    async def _clean_expired_cache(self) -> None  # Line 1009
+    async def _cleanup_old_versions(self) -> None  # Line 1038
+    async def _service_health_check(self) -> Any  # Line 1073
+    def get_model_registry_metrics(self) -> dict[str, Any]  # Line 1097
+    async def clear_cache(self) -> dict[str, int]  # Line 1108
+    def _validate_service_config(self, config: ConfigDict) -> bool  # Line 1128
 ```
 
 ### File: repository.py
@@ -1896,23 +1896,23 @@ class MLService(BaseService, IMLService):
     async def _do_stop(self) -> None  # Line 260
     async def process_pipeline(self, request: MLPipelineRequest) -> MLPipelineResponse  # Line 281
     async def _process_pipeline_impl(self, request: MLPipelineRequest) -> MLPipelineResponse  # Line 300
-    async def train_model(self, request: MLTrainingRequest) -> MLTrainingResponse  # Line 649
-    async def _train_model_impl(self, request: MLTrainingRequest) -> MLTrainingResponse  # Line 668
-    async def _train_model_async(self, ...) -> tuple[Any, dict[str, Any], dict[str, Any]]  # Line 914
-    def _train_model_sync(self, ...) -> tuple[Any, dict[str, Any], dict[str, Any]]  # Line 923
-    def _calculate_metrics(self, y_true: Any, y_pred: Any, is_classification: bool) -> dict[str, Any]  # Line 977
-    async def process_batch_pipeline(self, requests: list[MLPipelineRequest]) -> list[MLPipelineResponse]  # Line 1007
-    async def _process_batch_pipeline_impl(self, requests: list[MLPipelineRequest]) -> list[MLPipelineResponse]  # Line 1025
-    async def clear_ml_cache(self) -> dict[str, int]  # Line 1139
-    async def list_available_models(self, model_type: str | None = None, stage: str | None = None) -> list[dict[str, Any]]  # Line 1149
-    async def promote_model(self, model_id: str, stage: str, description: str = '') -> bool  # Line 1160
-    async def get_model_info(self, model_id: str) -> dict[str, Any]  # Line 1167
-    async def _service_health_check(self) -> HealthCheckResult  # Line 1175
-    def get_ml_service_metrics(self) -> dict[str, Any]  # Line 1257
-    async def clear_cache(self) -> dict[str, int]  # Line 1276
-    async def enhance_strategy_signals(self, ...) -> list  # Line 1282
-    async def _enhance_strategy_signals_impl(self, ...) -> list  # Line 1310
-    def _validate_service_config(self, config: ConfigDict) -> bool  # Line 1425
+    async def train_model(self, request: MLTrainingRequest) -> MLTrainingResponse  # Line 652
+    async def _train_model_impl(self, request: MLTrainingRequest) -> MLTrainingResponse  # Line 671
+    async def _train_model_async(self, ...) -> tuple[Any, dict[str, Any], dict[str, Any]]  # Line 920
+    def _train_model_sync(self, ...) -> tuple[Any, dict[str, Any], dict[str, Any]]  # Line 929
+    def _calculate_metrics(self, y_true: Any, y_pred: Any, is_classification: bool) -> dict[str, Any]  # Line 983
+    async def process_batch_pipeline(self, requests: list[MLPipelineRequest]) -> list[MLPipelineResponse]  # Line 1013
+    async def _process_batch_pipeline_impl(self, requests: list[MLPipelineRequest]) -> list[MLPipelineResponse]  # Line 1031
+    async def clear_ml_cache(self) -> dict[str, int]  # Line 1145
+    async def list_available_models(self, model_type: str | None = None, stage: str | None = None) -> list[dict[str, Any]]  # Line 1155
+    async def promote_model(self, model_id: str, stage: str, description: str = '') -> bool  # Line 1166
+    async def get_model_info(self, model_id: str) -> dict[str, Any]  # Line 1173
+    async def _service_health_check(self) -> HealthCheckResult  # Line 1181
+    def get_ml_service_metrics(self) -> dict[str, Any]  # Line 1263
+    async def clear_cache(self) -> dict[str, int]  # Line 1282
+    async def enhance_strategy_signals(self, ...) -> list  # Line 1288
+    async def _enhance_strategy_signals_impl(self, ...) -> list  # Line 1316
+    def _validate_service_config(self, config: ConfigDict) -> bool  # Line 1431
 ```
 
 ### File: services.py

@@ -16,29 +16,45 @@ from typing import Any
 
 # Coinbase Advanced Trade API imports
 try:
-    from coinbase.advanced_trading.client import AdvancedTradingClient, AuthenticationException
-    from coinbase.advanced_trading.exceptions import CoinbaseAdvancedTradingAPIError
-    from coinbase.advanced_trading.models.account import Account
-    from coinbase.advanced_trading.models.order import Order
-except ImportError:
-    # Fallback imports if the library is not available
-    try:
-        from coinbase.pro.client import AuthenticatedClient, PublicClient
-        from coinbase.pro.exceptions import CoinbaseProAPIError as CoinbaseAdvancedTradingAPIError
+    # Try new coinbase-advanced-py SDK (v1.8+)
+    from coinbase.rest import RESTClient
 
-        AdvancedTradingClient = None
-        Order = None
-        Account = None
-        AuthenticationException = Exception
+    AdvancedTradingClient = RESTClient
+    CoinbaseAdvancedTradingAPIError = Exception
+    AuthenticationException = Exception
+    Account = None
+    Order = None
+    COINBASE_AVAILABLE = True
+except ImportError:
+    try:
+        # Try legacy advanced_trading imports
+        from coinbase.advanced_trading.client import AdvancedTradingClient, AuthenticationException
+        from coinbase.advanced_trading.exceptions import CoinbaseAdvancedTradingAPIError
+        from coinbase.advanced_trading.models.account import Account
+        from coinbase.advanced_trading.models.order import Order
+
+        COINBASE_AVAILABLE = True
     except ImportError:
-        # Final fallback
-        AdvancedTradingClient = None
-        CoinbaseAdvancedTradingAPIError = Exception
-        Order = None
-        Account = None
-        AuthenticationException = Exception
-        PublicClient = None
-        AuthenticatedClient = None
+        # Try legacy Pro API imports
+        try:
+            from coinbase.pro.client import AuthenticatedClient, PublicClient
+            from coinbase.pro.exceptions import CoinbaseProAPIError as CoinbaseAdvancedTradingAPIError
+
+            AdvancedTradingClient = None
+            Order = None
+            Account = None
+            AuthenticationException = Exception
+            COINBASE_AVAILABLE = True  # Pro API available
+        except ImportError:
+            # Final fallback - no SDK available
+            AdvancedTradingClient = None
+            CoinbaseAdvancedTradingAPIError = Exception
+            Order = None
+            Account = None
+            AuthenticationException = Exception
+            PublicClient = None
+            AuthenticatedClient = None
+            COINBASE_AVAILABLE = False
 
 # MANDATORY: Core imports as per CLAUDE.md
 from src.core.exceptions import (
@@ -121,8 +137,11 @@ class CoinbaseExchange(BaseExchange):
 
             # Initialize Coinbase Advanced Trading client
             if AdvancedTradingClient:
+                # Use base_url for sandbox configuration (SDK doesn't accept sandbox parameter)
                 self.coinbase_client = AdvancedTradingClient(
-                    api_key=self.api_key, api_secret=self.api_secret, sandbox=self.sandbox
+                    api_key=self.api_key,
+                    api_secret=self.api_secret,
+                    base_url=self.base_url if self.sandbox else None
                 )
             elif PublicClient and AuthenticatedClient:
                 # Fallback to Coinbase Pro API
@@ -131,10 +150,10 @@ class CoinbaseExchange(BaseExchange):
                         key=self.api_key,
                         secret=self.api_secret,
                         passphrase=self.passphrase,
-                        sandbox=self.sandbox,
+                        api_url=self.base_url  # Use api_url for sandbox in Pro API
                     )
                 else:
-                    self.pro_client = PublicClient(sandbox=self.sandbox)
+                    self.pro_client = PublicClient(api_url=self.base_url)
             else:
                 raise ExchangeConnectionError("No Coinbase API client available")
 

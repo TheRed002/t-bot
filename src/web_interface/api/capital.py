@@ -18,7 +18,7 @@ from src.core.logging import get_logger
 from src.utils.decorators import monitored
 from src.utils.pydantic_validators import validate_amount, validate_utilized_amount
 from src.utils.web_interface_utils import async_api_error_handler
-from src.web_interface.auth.middleware import get_current_user
+from src.web_interface.security.auth import get_current_user
 from src.web_interface.dependencies import get_web_capital_service, get_web_auth_service
 
 logger = get_logger(__name__)

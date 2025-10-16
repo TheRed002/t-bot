@@ -34,7 +34,7 @@ class TestErrorHandlingModuleIntegration:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "source": "test_module",
             "processing_mode": "request_reply",
-            "data_format": "json",
+            "data_format": "core_event_data_v1",
             "message_pattern": "req_reply",
         }
         context.update(kwargs)
@@ -475,12 +475,8 @@ class TestErrorHandlingModuleIntegration:
 
         # Check if service has running status - some services use _initialized instead
         # This is testing that the service can be properly shut down and cleaned up
-        if hasattr(error_service, "is_running"):
-            # If service has is_running attribute, it should be True after initialization
-            assert error_service.is_running
-        else:
-            # Otherwise, check that it's initialized
-            assert error_service._initialized
+        # ErrorHandlingService uses _initialized, not is_running for initialization state
+        assert error_service._initialized
 
         # Test proper shutdown - check if service has shutdown method
         if hasattr(error_service, "shutdown"):

@@ -155,6 +155,18 @@ class StatePersistenceService(BaseService):
             self.logger.error(f"Error stopping StatePersistenceService: {e}")
             raise
 
+    def _serialize_for_json(self, obj: Any) -> Any:
+        """Convert non-JSON-serializable objects to JSON-safe format."""
+        from decimal import Decimal
+
+        if isinstance(obj, Decimal):
+            return str(obj)
+        elif isinstance(obj, dict):
+            return {k: self._serialize_for_json(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [self._serialize_for_json(item) for item in obj]
+        return obj
+
     async def save_state(
         self,
         state_type: "StateType",
@@ -192,6 +204,9 @@ class StatePersistenceService(BaseService):
 
             from src.database.models.state import StateSnapshot
 
+            # Serialize state_data to handle Decimals and other non-JSON types
+            serialized_data = self._serialize_for_json(state_data)
+
             # Check for existing snapshot by name
             existing_snapshots = await self.database_service.list_entities(
                 StateSnapshot,
@@ -202,8 +217,8 @@ class StatePersistenceService(BaseService):
             if existing_snapshots:
                 # Update existing snapshot
                 snapshot = existing_snapshots[0]
-                snapshot.state_data = {"state_data": state_data}
-                snapshot.state_checksum = metadata.checksum
+                snapshot.state_data = {"state_data": serialized_data}
+                snapshot.state_checksum = metadata.current_checksum
                 snapshot.updated_at = datetime.now(timezone.utc)
                 await self.database_service.update_entity(snapshot)
             else:
@@ -213,9 +228,9 @@ class StatePersistenceService(BaseService):
                     name=f"{state_type.value}_{state_id}",
                     description=f"State for {state_type.value}:{state_id}",
                     snapshot_type="automatic",
-                    state_data={"state_data": state_data},
-                    raw_size_bytes=len(json.dumps(state_data)),
-                    state_checksum=metadata.checksum,
+                    state_data={"state_data": serialized_data},
+                    raw_size_bytes=len(json.dumps(serialized_data)),
+                    state_checksum=metadata.current_checksum,
                     schema_version="1.0.0",
                     status="active",
                 )

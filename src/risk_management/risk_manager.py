@@ -111,8 +111,9 @@ class RiskManager(BaseRiskManager):
         elif database_service and state_service:
             # Create RiskService for enhanced features
             try:
+                # RiskService uses repositories, not database_service directly
                 self.risk_service = RiskService(
-                    database_service=database_service, state_service=state_service, config=config
+                    state_service=state_service, config=config
                 )
                 logger.info("RiskManager initialized with RiskService integration")
             except Exception as e:

@@ -464,27 +464,20 @@ def create_performance_profiler() -> PerformanceProfiler:
     from src.monitoring.metrics import MetricsCollector
     from src.monitoring.performance import PerformanceProfiler
 
-    container = get_monitoring_container()
+    # Create dependencies directly to avoid recursion
     try:
-        return container.resolve(PerformanceProfiler)
-    except (ServiceError, MonitoringError, KeyError, ValueError) as e:
-        logger.warning(f"Failed to resolve PerformanceProfiler from DI container: {e}")
-        # Create dependencies through DI container
-        try:
-            metrics_collector = container.resolve(MetricsCollector)
-            alert_manager = container.resolve(AlertManager)
-            return PerformanceProfiler(
-                metrics_collector=metrics_collector, alert_manager=alert_manager
-            )
-        except Exception:
-            # Final fallback with required dependencies
-            from src.monitoring.metrics import MetricsCollector
-            from src.monitoring.performance import PerformanceProfiler
-
-            return PerformanceProfiler(
-                metrics_collector=MetricsCollector(),
-                alert_manager=AlertManager(NotificationConfig()),
-            )
+        metrics_collector = create_metrics_collector()
+        alert_manager = create_alert_manager()
+        return PerformanceProfiler(
+            metrics_collector=metrics_collector, alert_manager=alert_manager
+        )
+    except Exception as e:
+        logger.warning(f"Failed to create PerformanceProfiler with DI: {e}")
+        # Final fallback with required dependencies
+        return PerformanceProfiler(
+            metrics_collector=MetricsCollector(),
+            alert_manager=AlertManager(NotificationConfig()),
+        )
 
 
 def create_monitoring_service():
@@ -559,6 +552,7 @@ def create_performance_service():
     container = get_monitoring_container()
 
     # Create performance profiler dependency
+    from src.monitoring.performance import PerformanceProfiler
     from src.monitoring.services import DefaultPerformanceService
 
     try:

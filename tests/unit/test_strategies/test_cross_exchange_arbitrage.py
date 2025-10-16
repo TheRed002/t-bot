@@ -255,6 +255,9 @@ class TestCrossExchangeArbitrageStrategy:
     async def test_validate_signal_valid(self, strategy):
         """Test signal validation with valid signal."""
         signal = Signal(
+            signal_id="test_signal_1",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
@@ -278,6 +281,9 @@ class TestCrossExchangeArbitrageStrategy:
     async def test_validate_signal_invalid(self, strategy):
         """Test signal validation with invalid signal."""
         signal = Signal(
+            signal_id="test_signal_2",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             strength=Decimal("0.3"),  # Below minimum confidence
@@ -296,6 +302,9 @@ class TestCrossExchangeArbitrageStrategy:
     def test_get_position_size(self, strategy):
         """Test position size calculation."""
         signal = Signal(
+            signal_id="test_signal_3",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),

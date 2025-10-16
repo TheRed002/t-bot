@@ -574,6 +574,9 @@ class TestTrendFollowingStrategy:
     async def test_validate_signal_success(self, strategy):
         """Test successful signal validation."""
         signal = Signal(
+            signal_id="test_signal_1",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME,
@@ -595,6 +598,9 @@ class TestTrendFollowingStrategy:
     async def test_validate_signal_low_confidence(self, strategy):
         """Test signal validation with low confidence."""
         signal = Signal(
+            signal_id="test_signal_2",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.3"),  # Below threshold
             timestamp=FIXED_TIME,
@@ -616,6 +622,9 @@ class TestTrendFollowingStrategy:
     async def test_validate_signal_old_signal(self, strategy):
         """Test signal validation with old signal."""
         signal = Signal(
+            signal_id="test_signal_3",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME - timedelta(minutes=15),
@@ -637,6 +646,9 @@ class TestTrendFollowingStrategy:
     async def test_validate_signal_missing_metadata(self, strategy):
         """Test signal validation with missing metadata."""
         signal = Signal(
+            signal_id="test_signal_4",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME,
@@ -652,6 +664,9 @@ class TestTrendFollowingStrategy:
     async def test_validate_signal_invalid_rsi(self, strategy):
         """Test signal validation with invalid RSI."""
         signal = Signal(
+            signal_id="test_signal_5",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME,
@@ -673,6 +688,9 @@ class TestTrendFollowingStrategy:
     async def test_validate_signal_exception_handling(self, strategy):
         """Test signal validation exception handling."""
         signal = Signal(
+            signal_id="test_signal_6",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME,
@@ -696,6 +714,9 @@ class TestTrendFollowingStrategy:
     def test_get_position_size_success(self, strategy):
         """Test successful position size calculation."""
         signal = Signal(
+            signal_id="test_signal_7",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME,
@@ -711,6 +732,9 @@ class TestTrendFollowingStrategy:
     def test_get_position_size_with_pyramid_level(self, strategy):
         """Test position size calculation with pyramid level adjustment."""
         signal = Signal(
+            signal_id="test_signal_8",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME,
@@ -730,6 +754,9 @@ class TestTrendFollowingStrategy:
     def test_get_position_size_with_max_limit(self, strategy):
         """Test position size calculation with maximum limit."""
         signal = Signal(
+            signal_id="test_signal_9",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("1.0"),
             timestamp=FIXED_TIME,
@@ -749,6 +776,9 @@ class TestTrendFollowingStrategy:
     def test_get_position_size_exception_handling(self, strategy):
         """Test position size calculation exception handling."""
         signal = Signal(
+            signal_id="test_signal_10",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME,
@@ -763,7 +793,7 @@ class TestTrendFollowingStrategy:
 
         position_size = strategy.get_position_size(signal)
         # Should return minimum position size on error
-        expected_min = Decimal(str(strategy.config.position_size_pct * 0.5))
+        expected_min = strategy.config.position_size_pct * Decimal("0.5")
         assert position_size == expected_min
 
     def test_should_exit_by_time(self, strategy, mock_position):
@@ -1077,6 +1107,9 @@ class TestTrendFollowingStrategy:
     def test_validate_signal_invalid_rsi_type(self, strategy):
         """Test signal validation with invalid RSI type in metadata."""
         signal = Signal(
+            signal_id="test_signal_11",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME,
@@ -1101,6 +1134,9 @@ class TestTrendFollowingStrategy:
     def test_validate_signal_invalid_ma_type(self, strategy):
         """Test signal validation with invalid MA type in metadata."""
         signal = Signal(
+            signal_id="test_signal_12",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME,
@@ -1124,6 +1160,9 @@ class TestTrendFollowingStrategy:
     def test_validate_signal_entry_below_threshold_edge_case(self, strategy):
         """Test signal validation with entry signal exactly at threshold."""
         signal = Signal(
+            signal_id="test_signal_13",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME,
@@ -1151,6 +1190,9 @@ class TestTrendFollowingStrategy:
         strategy.position_levels["BTC/USD"] = strategy.max_pyramid_levels
 
         signal = Signal(
+            signal_id="test_signal_14",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME,

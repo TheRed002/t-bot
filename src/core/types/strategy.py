@@ -86,28 +86,28 @@ class StrategyConfig(BaseModel):
 
     # Common strategy parameters
     lookback_period: int | None = None
-    entry_threshold: float | None = None
-    exit_threshold: float | None = None
-    stop_loss_pct: float | None = None
-    take_profit_pct: float | None = None
+    entry_threshold: Decimal | None = None
+    exit_threshold: Decimal | None = None
+    stop_loss_pct: Decimal | None = None
+    take_profit_pct: Decimal | None = None
     max_position_size: Decimal | None = None
-    min_confidence: float | None = None
+    min_confidence: Decimal | None = None
     max_positions: int | None = None
-    position_size_pct: float | None = None
+    position_size_pct: Decimal | None = None
     exchange_type: str | None = None
     requires_risk_manager: bool = False
     requires_exchange: bool = False
 
     # Mean reversion specific
     window_size: int | None = None
-    num_std: float | None = None
+    num_std: Decimal | None = None
 
     # Momentum specific
-    momentum_threshold: float | None = None
-    acceleration_factor: float | None = None
+    momentum_threshold: Decimal | None = None
+    acceleration_factor: Decimal | None = None
 
     # Market making specific
-    spread_pct: float | None = None
+    spread_pct: Decimal | None = None
     inventory_target: Decimal | None = None
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

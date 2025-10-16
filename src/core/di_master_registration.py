@@ -166,7 +166,7 @@ def _register_all_modules(registrar: DependencyRegistrar, config: Config) -> Non
         try:
             from src.risk_management.di_registration import register_risk_management_services
 
-            register_risk_management_services(injector.get_container())
+            register_risk_management_services(injector)
             logger.debug("Risk management services registered successfully")
         except Exception as e:
             logger.warning(f"Risk management registration failed: {e}")
@@ -192,7 +192,7 @@ def _register_all_modules(registrar: DependencyRegistrar, config: Config) -> Non
         try:
             from src.ml.di_registration import register_ml_services
 
-            register_ml_services(injector)
+            register_ml_services(injector.get_container(), config)
             logger.debug("ML services registered successfully")
         except Exception as e:
             logger.warning(f"ML registration failed: {e}")

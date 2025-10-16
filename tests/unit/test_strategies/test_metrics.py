@@ -118,6 +118,9 @@ class TestMetricsCalculator:
         """Create sample signal data - cached for class scope with fixed times."""
         return [
             Signal(
+                signal_id="test_signal_1",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="BTC/USD",
                 direction=SignalDirection.BUY,
                 strength=Decimal("0.8"),
@@ -125,6 +128,9 @@ class TestMetricsCalculator:
                 source="test_strategy",
             ),
             Signal(
+                signal_id="test_signal_2",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="BTC/USD",
                 direction=SignalDirection.SELL,
                 strength=Decimal("0.6"),
@@ -132,6 +138,9 @@ class TestMetricsCalculator:
                 source="test_strategy",
             ),
             Signal(
+                signal_id="test_signal_3",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="BTC/USD",
                 direction=SignalDirection.BUY,
                 strength=Decimal("0.3"),  # Below typical threshold
@@ -331,6 +340,9 @@ class TestRealTimeMetricsTracker:
     def sample_signal(self):
         """Create a sample signal - cached for class scope."""
         return Signal(
+            signal_id="test_signal_4",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
@@ -414,6 +426,9 @@ class TestRealTimeMetricsTracker:
         # Add more signals than the limit
         for i in range(15):  # Reduced for performance  # More than max_signal_history (50)
             signal = Signal(
+                signal_id="test_signal_5",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="BTC/USD",
                 direction=SignalDirection.BUY,
                 strength=Decimal("0.8"),
@@ -697,6 +712,9 @@ class TestMetricsEdgeCases:
         # Create signals with edge case strengths
         edge_signals = [
             Signal(
+                signal_id="test_signal_6",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="BTC/USD",
                 direction=SignalDirection.BUY,
                 strength=Decimal("0"),  # Zero strength
@@ -704,6 +722,9 @@ class TestMetricsEdgeCases:
                 source="test",
             ),
             Signal(
+                signal_id="test_signal_7",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="BTC/USD",
                 direction=SignalDirection.BUY,
                 strength=Decimal("1"),  # Maximum strength

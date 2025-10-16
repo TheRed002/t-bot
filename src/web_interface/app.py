@@ -96,6 +96,14 @@ async def _initialize_services():
         if model_manager:
             injector.register_service("ModelManager", model_manager, singleton=True)
 
+        # Register analytics services BEFORE web interface (web interface depends on analytics)
+        try:
+            from src.analytics.di_registration import register_analytics_services
+            register_analytics_services(injector)
+            logger.info("Analytics services registered successfully")
+        except Exception as e:
+            logger.warning(f"Failed to register analytics services: {e}")
+
         # Register web interface services using DI
         register_web_interface_services(injector)
 
@@ -125,19 +133,37 @@ async def _initialize_services():
         registry = injector.resolve("WebServiceRegistry")
 
         # Register services with registry using proper DI-created instances
+        # Note: Use Web-prefixed versions or fallback to optional resolution
         trading_service = injector.resolve("TradingService")
         bot_service = injector.resolve("BotManagementService")
         market_service = injector.resolve("MarketDataService")
-        portfolio_service = injector.resolve("PortfolioService")
-        risk_service = injector.resolve("RiskService")
-        strategy_service = injector.resolve("StrategyServiceImpl")
+
+        # Portfolio and Risk services may not be available in all configurations
+        portfolio_service = (
+            injector.resolve("WebPortfolioServiceImpl")
+            if injector.has_service("WebPortfolioServiceImpl")
+            else None
+        )
+        risk_service = (
+            injector.resolve("WebRiskServiceImpl")
+            if injector.has_service("WebRiskServiceImpl")
+            else None
+        )
+        strategy_service = (
+            injector.resolve("WebStrategyServiceImpl")
+            if injector.has_service("WebStrategyServiceImpl")
+            else None
+        )
 
         registry.register_service("trading", trading_service)
         registry.register_service("bot_management", bot_service)
         registry.register_service("market_data", market_service)
-        registry.register_service("portfolio", portfolio_service)
-        registry.register_service("risk_management", risk_service)
-        registry.register_service("strategies", strategy_service)
+        if portfolio_service:
+            registry.register_service("portfolio", portfolio_service)
+        if risk_service:
+            registry.register_service("risk_management", risk_service)
+        if strategy_service:
+            registry.register_service("strategies", strategy_service)
 
         # Initialize API facade
         facade = get_api_facade()
@@ -154,12 +180,9 @@ async def _connect_api_endpoints_to_services(registry):
     try:
         # Connect bot management API to the bot management service
         if registry.has_service("bot_management"):
-            bot_mgmt_service = registry.get_service("bot_management")
-            # Import here to avoid circular imports
-            from src.web_interface.api import bot_management
-
-            bot_management.set_bot_service(bot_mgmt_service)
-            logger.info("Connected bot management API to service")
+            # Bot management service is already registered in the service registry
+            # No need to call deprecated set_bot_service
+            logger.info("Bot management service connected via service registry")
 
         # Add other API connections here as needed
         # Example: trading API, portfolio API, etc.
@@ -662,25 +685,17 @@ def _setup_monitoring(fastapi_app: FastAPI, config: Config) -> None:
                 logger.warning(f"Failed to setup OpenTelemetry: {e}")
 
         # Setup metrics collection
+        metrics_collector = None
         try:
-            MetricsCollector()
+            metrics_collector = MetricsCollector()
             with correlation_context.correlation_context(monitoring_correlation_id):
                 logger.info("Prometheus metrics collector configured")
         except Exception as e:
             with correlation_context.correlation_context(monitoring_correlation_id):
                 logger.warning(f"Failed to setup metrics collector: {e}")
 
-        # Setup performance profiler
-        try:
-            profiler = PerformanceProfiler(enable_memory_tracking=True, enable_cpu_profiling=True)
-            set_global_profiler(profiler)
-            with correlation_context.correlation_context(monitoring_correlation_id):
-                logger.info("Performance profiler configured")
-        except Exception as e:
-            with correlation_context.correlation_context(monitoring_correlation_id):
-                logger.warning(f"Failed to setup performance profiler: {e}")
-
-        # Setup alert manager
+        # Setup alert manager (must be before profiler since profiler depends on it)
+        alert_manager = None
         try:
             notification_config = NotificationConfig(
                 email_from="tbot-alerts@example.com",
@@ -695,6 +710,20 @@ def _setup_monitoring(fastapi_app: FastAPI, config: Config) -> None:
         except Exception as e:
             with correlation_context.correlation_context(monitoring_correlation_id):
                 logger.warning(f"Failed to setup alert manager: {e}")
+
+        # Setup performance profiler (after metrics_collector and alert_manager)
+        try:
+            profiler = PerformanceProfiler(
+                metrics_collector=metrics_collector,
+                alert_manager=alert_manager,
+                anomaly_detection=True
+            )
+            set_global_profiler(profiler)
+            with correlation_context.correlation_context(monitoring_correlation_id):
+                logger.info("Performance profiler configured")
+        except Exception as e:
+            with correlation_context.correlation_context(monitoring_correlation_id):
+                logger.warning(f"Failed to setup performance profiler: {e}")
 
         with correlation_context.correlation_context(monitoring_correlation_id):
             logger.info("Monitoring infrastructure setup completed")

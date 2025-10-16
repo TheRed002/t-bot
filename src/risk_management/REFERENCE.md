@@ -2,7 +2,7 @@
 
 ## INTEGRATION
 **Dependencies**: core, database, error_handling, monitoring, state, utils
-**Used By**: strategies
+**Used By**: None
 **Provides**: AbstractRiskService, AdaptiveRiskManager, BaseRiskManager, CircuitBreakerManager, EnvironmentAwareRiskManager, PortfolioLimitsService, PositionSizingService, RiskManagementController, RiskManager, RiskMetricsService, RiskMonitoringService, RiskService, RiskValidationService
 **Patterns**: Async Operations, Circuit Breaker, Component Architecture, Dependency Injection, Service Layer
 
@@ -168,13 +168,13 @@
 
 **Implemented Methods:**
 - `async calculate_position_size(self, ...) -> Decimal` - Line 70
-- `async validate_signal(self, signal: Signal) -> bool` - Line 132
-- `async validate_order(self, order: OrderRequest) -> bool` - Line 165
-- `async calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics` - Line 198
-- `async validate_portfolio_limits(self, new_position: Position) -> bool` - Line 258
-- `async start_monitoring(self, interval: int = 60) -> None` - Line 289
-- `async stop_monitoring(self) -> None` - Line 308
-- `async get_risk_summary(self) -> dict[str, Any]` - Line 322
+- `async validate_signal(self, signal: Signal) -> bool` - Line 138
+- `async validate_order(self, order: OrderRequest) -> bool` - Line 171
+- `async calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics` - Line 204
+- `async validate_portfolio_limits(self, new_position: Position) -> bool` - Line 264
+- `async start_monitoring(self, interval: int = 60) -> None` - Line 295
+- `async stop_monitoring(self) -> None` - Line 314
+- `async get_risk_summary(self) -> dict[str, Any]` - Line 328
 
 ### Implementation: `RiskCalculator` ✅
 
@@ -383,11 +383,11 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async get(self, key: str) -> Any` - Line 26
-- `async set(self, key: str, value: Any, ttl: int | None = None) -> None` - Line 30
-- `async delete(self, key: str) -> None` - Line 34
-- `async clear(self) -> None` - Line 38
-- `async close(self) -> None` - Line 42
+- `async get(self, key: str) -> Any` - Line 27
+- `async set(self, key: str, value: Any, ttl: int | None = None) -> None` - Line 31
+- `async delete(self, key: str) -> None` - Line 35
+- `async clear(self) -> None` - Line 39
+- `async close(self) -> None` - Line 43
 
 ### Implementation: `ExchangeServiceInterface` ✅
 
@@ -396,9 +396,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async cancel_all_orders(self, symbol: str | None = None) -> int` - Line 50
-- `async close_all_positions(self) -> int` - Line 54
-- `async get_account_balance(self) -> Decimal` - Line 58
+- `async cancel_all_orders(self, symbol: str | None = None) -> int` - Line 52
+- `async close_all_positions(self) -> int` - Line 56
+- `async get_account_balance(self) -> Decimal` - Line 60
 
 ### Implementation: `RiskServiceInterface` ✅
 
@@ -407,17 +407,17 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async calculate_position_size(self, ...) -> Decimal` - Line 66
-- `async validate_signal(self, signal: Signal) -> bool` - Line 76
-- `async validate_order(self, order: OrderRequest) -> bool` - Line 80
-- `async calculate_risk_metrics(self, ...) -> RiskMetrics` - Line 84
-- `async should_exit_position(self, position: Position, market_data: MarketData) -> bool` - Line 90
-- `get_current_risk_level(self) -> RiskLevel` - Line 94
-- `is_emergency_stop_active(self) -> bool` - Line 98
-- `async get_risk_summary(self) -> dict[str, Any]` - Line 102
-- `async get_portfolio_metrics(self) -> Any` - Line 106
-- `async validate_risk_parameters(self, parameters: dict[str, Any]) -> dict[str, Any]` - Line 110
-- `async get_current_risk_limits(self) -> dict[str, Any]` - Line 114
+- `async calculate_position_size(self, ...) -> Decimal` - Line 69
+- `async validate_signal(self, signal: Signal) -> bool` - Line 79
+- `async validate_order(self, order: OrderRequest) -> bool` - Line 83
+- `async calculate_risk_metrics(self, ...) -> RiskMetrics` - Line 87
+- `async should_exit_position(self, position: Position, market_data: MarketData) -> bool` - Line 93
+- `get_current_risk_level(self) -> RiskLevel` - Line 97
+- `is_emergency_stop_active(self) -> bool` - Line 101
+- `async get_risk_summary(self) -> dict[str, Any]` - Line 105
+- `async get_portfolio_metrics(self) -> Any` - Line 109
+- `async validate_risk_parameters(self, parameters: dict[str, Any]) -> dict[str, Any]` - Line 113
+- `async get_current_risk_limits(self) -> dict[str, Any]` - Line 117
 
 ### Implementation: `PositionSizingServiceInterface` ✅
 
@@ -426,8 +426,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async calculate_size(self, ...) -> Decimal` - Line 122
-- `async validate_size(self, position_size: Decimal, available_capital: Decimal) -> bool` - Line 132
+- `async calculate_size(self, ...) -> Decimal` - Line 126
+- `async validate_size(self, position_size: Decimal, available_capital: Decimal) -> bool` - Line 136
 
 ### Implementation: `RiskMetricsServiceInterface` ✅
 
@@ -436,8 +436,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async calculate_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics` - Line 140
-- `async get_portfolio_value(self, positions: list[Position], market_data: list[MarketData]) -> Decimal` - Line 146
+- `async calculate_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics` - Line 145
+- `async get_portfolio_value(self, positions: list[Position], market_data: list[MarketData]) -> Decimal` - Line 151
 
 ### Implementation: `RiskValidationServiceInterface` ✅
 
@@ -446,9 +446,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async validate_signal(self, signal: Signal) -> bool` - Line 156
-- `async validate_order(self, order: OrderRequest) -> bool` - Line 160
-- `async validate_portfolio_limits(self, new_position: Position) -> bool` - Line 164
+- `async validate_signal(self, signal: Signal) -> bool` - Line 162
+- `async validate_order(self, order: OrderRequest) -> bool` - Line 166
+- `async validate_portfolio_limits(self, new_position: Position) -> bool` - Line 170
 
 ### Implementation: `PortfolioLimitsServiceInterface` ✅
 
@@ -457,10 +457,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async check_portfolio_limits(self, new_position: Position) -> bool` - Line 172
-- `async update_portfolio_state(self, positions: list[Position], portfolio_value: Decimal) -> None` - Line 176
-- `async update_return_history(self, symbol: str, price: Decimal) -> None` - Line 182
-- `async get_portfolio_summary(self) -> dict[str, Any]` - Line 186
+- `async check_portfolio_limits(self, new_position: Position) -> bool` - Line 179
+- `async update_portfolio_state(self, positions: list[Position], portfolio_value: Decimal) -> None` - Line 183
+- `async update_return_history(self, symbol: str, price: Decimal) -> None` - Line 189
+- `async get_portfolio_summary(self) -> dict[str, Any]` - Line 193
 
 ### Implementation: `RiskMonitoringServiceInterface` ✅
 
@@ -469,10 +469,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async start_monitoring(self, interval: int = 60) -> None` - Line 194
-- `async stop_monitoring(self) -> None` - Line 198
-- `async check_emergency_conditions(self, metrics: RiskMetrics) -> bool` - Line 202
-- `async get_risk_summary(self) -> dict[str, Any]` - Line 206
+- `async start_monitoring(self, interval: int = 60) -> None` - Line 202
+- `async stop_monitoring(self) -> None` - Line 206
+- `async check_emergency_conditions(self, metrics: RiskMetrics) -> bool` - Line 210
+- `async get_risk_summary(self) -> dict[str, Any]` - Line 214
 
 ### Implementation: `AbstractRiskService` 🔧
 
@@ -481,11 +481,11 @@
 **Status**: Abstract Base Class
 
 **Implemented Methods:**
-- `async start(self) -> None` - Line 215
-- `async stop(self) -> None` - Line 220
-- `async calculate_position_size(self, ...) -> Decimal` - Line 225
-- `async validate_signal(self, signal: Signal) -> bool` - Line 236
-- `async calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics` - Line 241
+- `async start(self) -> None` - Line 223
+- `async stop(self) -> None` - Line 228
+- `async calculate_position_size(self, ...) -> Decimal` - Line 233
+- `async validate_signal(self, signal: Signal) -> bool` - Line 244
+- `async calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics` - Line 249
 
 ### Implementation: `RiskMetricsRepositoryInterface` ✅
 
@@ -494,11 +494,11 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async get_historical_returns(self, symbol: str, days: int) -> list[Decimal]` - Line 251
-- `async get_price_history(self, symbol: str, days: int) -> list[Decimal]` - Line 255
-- `async get_portfolio_positions(self) -> list[Position]` - Line 259
-- `async save_risk_metrics(self, metrics: RiskMetrics) -> None` - Line 263
-- `async get_correlation_data(self, symbols: list[str], days: int) -> dict[str, list[Decimal]]` - Line 267
+- `async get_historical_returns(self, symbol: str, days: int) -> list[Decimal]` - Line 260
+- `async get_price_history(self, symbol: str, days: int) -> list[Decimal]` - Line 264
+- `async get_portfolio_positions(self) -> list[Position]` - Line 268
+- `async save_risk_metrics(self, metrics: RiskMetrics) -> None` - Line 272
+- `async get_correlation_data(self, symbols: list[str], days: int) -> dict[str, list[Decimal]]` - Line 276
 
 ### Implementation: `PortfolioRepositoryInterface` ✅
 
@@ -507,10 +507,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async get_current_positions(self) -> list[Position]` - Line 275
-- `async get_portfolio_value(self) -> Decimal` - Line 279
-- `async get_position_history(self, symbol: str, days: int) -> list[Position]` - Line 283
-- `async update_portfolio_limits(self, limits: dict[str, Any]) -> None` - Line 287
+- `async get_current_positions(self) -> list[Position]` - Line 285
+- `async get_portfolio_value(self) -> Decimal` - Line 289
+- `async get_position_history(self, symbol: str, days: int) -> list[Position]` - Line 293
+- `async update_portfolio_limits(self, limits: dict[str, Any]) -> None` - Line 297
 
 ### Implementation: `RiskManagementFactoryInterface` 🔧
 
@@ -519,9 +519,9 @@
 **Status**: Abstract Base Class
 
 **Implemented Methods:**
-- `create_risk_service(self, correlation_id: str | None = None) -> 'RiskServiceInterface'` - Line 296
-- `create_risk_management_controller(self, correlation_id: str | None = None) -> Any` - Line 301
-- `validate_dependencies(self) -> dict[str, bool]` - Line 306
+- `create_risk_service(self, correlation_id: str | None = None) -> 'RiskServiceInterface'` - Line 306
+- `create_risk_management_controller(self, correlation_id: str | None = None) -> Any` - Line 311
+- `validate_dependencies(self) -> dict[str, bool]` - Line 316
 
 ### Implementation: `PortfolioLimits` ✅
 
@@ -570,18 +570,18 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async calculate_position_size(self, signal: Signal, available_capital: Decimal, current_price: Decimal) -> Decimal` - Line 149
-- `async validate_signal(self, signal: Signal) -> bool` - Line 225
-- `async validate_order(self, order: OrderRequest) -> bool` - Line 290
-- `async calculate_risk_metrics(self, ...) -> RiskMetrics` - Line 354
-- `update_positions(self, positions: list[Position]) -> None` - Line 404
-- `check_risk_limits(self) -> tuple[bool, str]` - Line 438
-- `get_position_limits(self) -> PositionLimits` - Line 482
-- `async emergency_stop(self, reason: str) -> None` - Line 491
-- `calculate_leverage(self) -> Decimal` - Line 548
-- `async check_portfolio_limits(self, new_position: Position) -> bool` - Line 601
-- `async should_exit_position(self, position: Position, market_data: MarketData) -> bool` - Line 671
-- `async get_comprehensive_risk_summary(self) -> dict[str, Any]` - Line 750
+- `async calculate_position_size(self, signal: Signal, available_capital: Decimal, current_price: Decimal) -> Decimal` - Line 150
+- `async validate_signal(self, signal: Signal) -> bool` - Line 226
+- `async validate_order(self, order: OrderRequest) -> bool` - Line 291
+- `async calculate_risk_metrics(self, ...) -> RiskMetrics` - Line 355
+- `update_positions(self, positions: list[Position]) -> None` - Line 405
+- `check_risk_limits(self) -> tuple[bool, str]` - Line 439
+- `get_position_limits(self) -> PositionLimits` - Line 483
+- `async emergency_stop(self, reason: str) -> None` - Line 492
+- `calculate_leverage(self) -> Decimal` - Line 549
+- `async check_portfolio_limits(self, new_position: Position) -> bool` - Line 602
+- `async should_exit_position(self, position: Position, market_data: MarketData) -> bool` - Line 672
+- `async get_comprehensive_risk_summary(self) -> dict[str, Any]` - Line 751
 
 ### Implementation: `RiskCalculator` ✅
 
@@ -613,22 +613,29 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async calculate_position_size(self, ...) -> Decimal` - Line 389
-- `async calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics` - Line 862
-- `async get_portfolio_metrics(self) -> PortfolioMetrics` - Line 1329
-- `async validate_signal(self, signal: Signal) -> bool` - Line 1349
-- `async validate_order(self, order: OrderRequest) -> bool` - Line 1430
-- `async trigger_emergency_stop(self, reason: str) -> None` - Line 1707
-- `async reset_emergency_stop(self, reason: str) -> None` - Line 1783
-- `async update_price_history(self, symbol: str, price: Decimal) -> None` - Line 1835
-- `async get_risk_alerts(self, limit: int | None = None) -> list[RiskAlert]` - Line 2268
-- `async acknowledge_risk_alert(self, alert_id: str) -> bool` - Line 2283
-- `get_current_risk_level(self) -> RiskLevel` - Line 2302
-- `is_emergency_stop_active(self) -> bool` - Line 2306
-- `async get_risk_summary(self) -> dict[str, Any]` - Line 2310
-- `reset_metrics(self) -> None` - Line 2436
-- `async should_exit_position(self, position: Position, market_data: MarketData) -> bool` - Line 2453
-- `async risk_monitoring_context(self, operation: str) -> Any` - Line 2581
+- `async calculate_position_size(self, ...) -> Decimal` - Line 390
+- `async calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics` - Line 893
+- `async get_portfolio_metrics(self) -> PortfolioMetrics` - Line 1452
+- `async validate_signal(self, signal: Signal) -> bool` - Line 1472
+- `async validate_order(self, order: OrderRequest) -> bool` - Line 1564
+- `async trigger_emergency_stop(self, reason: str) -> None` - Line 1841
+- `async reset_emergency_stop(self, reason: str) -> None` - Line 1918
+- `async update_price_history(self, symbol: str, price: Decimal) -> None` - Line 1971
+- `async get_risk_alerts(self, limit: int | None = None) -> list[RiskAlert]` - Line 2416
+- `async acknowledge_risk_alert(self, alert_id: str) -> bool` - Line 2431
+- `get_current_risk_level(self) -> RiskLevel` - Line 2450
+- `is_emergency_stop_active(self) -> bool` - Line 2454
+- `async save_risk_metrics(self, risk_metrics: RiskMetrics) -> None` - Line 2458
+- `is_healthy(self) -> bool` - Line 2467
+- `async get_risk_summary(self) -> dict[str, Any]` - Line 2497
+- `async validate_risk_parameters(self, parameters: dict[str, Any]) -> dict[str, Any]` - Line 2518
+- `async get_current_risk_limits(self) -> dict[str, Any]` - Line 2566
+- `reset_metrics(self) -> None` - Line 2692
+- `async should_exit_position(self, position: Position, market_data: MarketData) -> bool` - Line 2709
+- `async check_emergency_conditions(self, risk_metrics: RiskMetrics) -> bool` - Line 2838
+- `async check_portfolio_limits(self, new_position: Position) -> bool` - Line 2902
+- `async update_portfolio_state(self, positions: list[Position], available_capital: Decimal) -> None` - Line 2950
+- `async risk_monitoring_context(self, operation: str) -> Any` - Line 3006
 
 ### Implementation: `PortfolioLimitsService` ✅
 
@@ -653,7 +660,7 @@
 
 **Implemented Methods:**
 - `async calculate_size(self, ...) -> Decimal` - Line 62
-- `async validate_size(self, position_size: Decimal, available_capital: Decimal) -> bool` - Line 186
+- `async validate_size(self, position_size: Decimal, available_capital: Decimal) -> bool` - Line 174
 
 ### Implementation: `RiskMetricsService` ✅
 
@@ -909,13 +916,13 @@ class CircuitBreakerManager:
 class RiskManagementController(BaseComponent, ErrorPropagationMixin):
     def __init__(self, ...)  # Line 37
     async def calculate_position_size(self, ...) -> Decimal  # Line 70
-    async def validate_signal(self, signal: Signal) -> bool  # Line 132
-    async def validate_order(self, order: OrderRequest) -> bool  # Line 165
-    async def calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics  # Line 198
-    async def validate_portfolio_limits(self, new_position: Position) -> bool  # Line 258
-    async def start_monitoring(self, interval: int = 60) -> None  # Line 289
-    async def stop_monitoring(self) -> None  # Line 308
-    async def get_risk_summary(self) -> dict[str, Any]  # Line 322
+    async def validate_signal(self, signal: Signal) -> bool  # Line 138
+    async def validate_order(self, order: OrderRequest) -> bool  # Line 171
+    async def calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics  # Line 204
+    async def validate_portfolio_limits(self, new_position: Position) -> bool  # Line 264
+    async def start_monitoring(self, interval: int = 60) -> None  # Line 295
+    async def stop_monitoring(self) -> None  # Line 314
+    async def get_risk_summary(self) -> dict[str, Any]  # Line 328
 ```
 
 ### File: calculator.py
@@ -1140,13 +1147,13 @@ class RiskDataTransformer:
 
 ```python
 def register_risk_management_services(injector: DependencyInjector) -> None  # Line 41
-def configure_risk_management_dependencies(injector: DependencyInjector | None = None) -> DependencyInjector  # Line 263
-def get_risk_service(injector: DependencyInjector) -> 'RiskService'  # Line 286
-def get_position_sizing_service(injector: DependencyInjector) -> 'PositionSizingService'  # Line 291
-def get_risk_validation_service(injector: DependencyInjector) -> 'RiskValidationService'  # Line 296
-def get_risk_metrics_service(injector: DependencyInjector) -> 'RiskMetricsService'  # Line 301
-def get_risk_monitoring_service(injector: DependencyInjector) -> 'RiskMonitoringService'  # Line 306
-def get_risk_management_factory(injector: DependencyInjector) -> 'RiskManagementFactoryInterface'  # Line 311
+def configure_risk_management_dependencies(injector: DependencyInjector | None = None) -> DependencyInjector  # Line 273
+def get_risk_service(injector: DependencyInjector) -> 'RiskService'  # Line 296
+def get_position_sizing_service(injector: DependencyInjector) -> 'PositionSizingService'  # Line 301
+def get_risk_validation_service(injector: DependencyInjector) -> 'RiskValidationService'  # Line 306
+def get_risk_metrics_service(injector: DependencyInjector) -> 'RiskMetricsService'  # Line 311
+def get_risk_monitoring_service(injector: DependencyInjector) -> 'RiskMonitoringService'  # Line 316
+def get_risk_management_factory(injector: DependencyInjector) -> 'RiskManagementFactoryInterface'  # Line 321
 ```
 
 ### File: emergency_controls.py
@@ -1312,11 +1319,11 @@ def create_risk_management_controller(injector: DependencyInjector, correlation_
 
 ```python
 class CacheServiceInterface(Protocol):
-    async def get(self, key: str) -> Any  # Line 26
-    async def set(self, key: str, value: Any, ttl: int | None = None) -> None  # Line 30
-    async def delete(self, key: str) -> None  # Line 34
-    async def clear(self) -> None  # Line 38
-    async def close(self) -> None  # Line 42
+    async def get(self, key: str) -> Any  # Line 27
+    async def set(self, key: str, value: Any, ttl: int | None = None) -> None  # Line 31
+    async def delete(self, key: str) -> None  # Line 35
+    async def clear(self) -> None  # Line 39
+    async def close(self) -> None  # Line 43
 ```
 
 #### Class: `ExchangeServiceInterface`
@@ -1326,9 +1333,9 @@ class CacheServiceInterface(Protocol):
 
 ```python
 class ExchangeServiceInterface(Protocol):
-    async def cancel_all_orders(self, symbol: str | None = None) -> int  # Line 50
-    async def close_all_positions(self) -> int  # Line 54
-    async def get_account_balance(self) -> Decimal  # Line 58
+    async def cancel_all_orders(self, symbol: str | None = None) -> int  # Line 52
+    async def close_all_positions(self) -> int  # Line 56
+    async def get_account_balance(self) -> Decimal  # Line 60
 ```
 
 #### Class: `RiskServiceInterface`
@@ -1338,17 +1345,17 @@ class ExchangeServiceInterface(Protocol):
 
 ```python
 class RiskServiceInterface(Protocol):
-    async def calculate_position_size(self, ...) -> Decimal  # Line 66
-    async def validate_signal(self, signal: Signal) -> bool  # Line 76
-    async def validate_order(self, order: OrderRequest) -> bool  # Line 80
-    async def calculate_risk_metrics(self, ...) -> RiskMetrics  # Line 84
-    async def should_exit_position(self, position: Position, market_data: MarketData) -> bool  # Line 90
-    def get_current_risk_level(self) -> RiskLevel  # Line 94
-    def is_emergency_stop_active(self) -> bool  # Line 98
-    async def get_risk_summary(self) -> dict[str, Any]  # Line 102
-    async def get_portfolio_metrics(self) -> Any  # Line 106
-    async def validate_risk_parameters(self, parameters: dict[str, Any]) -> dict[str, Any]  # Line 110
-    async def get_current_risk_limits(self) -> dict[str, Any]  # Line 114
+    async def calculate_position_size(self, ...) -> Decimal  # Line 69
+    async def validate_signal(self, signal: Signal) -> bool  # Line 79
+    async def validate_order(self, order: OrderRequest) -> bool  # Line 83
+    async def calculate_risk_metrics(self, ...) -> RiskMetrics  # Line 87
+    async def should_exit_position(self, position: Position, market_data: MarketData) -> bool  # Line 93
+    def get_current_risk_level(self) -> RiskLevel  # Line 97
+    def is_emergency_stop_active(self) -> bool  # Line 101
+    async def get_risk_summary(self) -> dict[str, Any]  # Line 105
+    async def get_portfolio_metrics(self) -> Any  # Line 109
+    async def validate_risk_parameters(self, parameters: dict[str, Any]) -> dict[str, Any]  # Line 113
+    async def get_current_risk_limits(self) -> dict[str, Any]  # Line 117
 ```
 
 #### Class: `PositionSizingServiceInterface`
@@ -1358,8 +1365,8 @@ class RiskServiceInterface(Protocol):
 
 ```python
 class PositionSizingServiceInterface(Protocol):
-    async def calculate_size(self, ...) -> Decimal  # Line 122
-    async def validate_size(self, position_size: Decimal, available_capital: Decimal) -> bool  # Line 132
+    async def calculate_size(self, ...) -> Decimal  # Line 126
+    async def validate_size(self, position_size: Decimal, available_capital: Decimal) -> bool  # Line 136
 ```
 
 #### Class: `RiskMetricsServiceInterface`
@@ -1369,8 +1376,8 @@ class PositionSizingServiceInterface(Protocol):
 
 ```python
 class RiskMetricsServiceInterface(Protocol):
-    async def calculate_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics  # Line 140
-    async def get_portfolio_value(self, positions: list[Position], market_data: list[MarketData]) -> Decimal  # Line 146
+    async def calculate_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics  # Line 145
+    async def get_portfolio_value(self, positions: list[Position], market_data: list[MarketData]) -> Decimal  # Line 151
 ```
 
 #### Class: `RiskValidationServiceInterface`
@@ -1380,9 +1387,9 @@ class RiskMetricsServiceInterface(Protocol):
 
 ```python
 class RiskValidationServiceInterface(Protocol):
-    async def validate_signal(self, signal: Signal) -> bool  # Line 156
-    async def validate_order(self, order: OrderRequest) -> bool  # Line 160
-    async def validate_portfolio_limits(self, new_position: Position) -> bool  # Line 164
+    async def validate_signal(self, signal: Signal) -> bool  # Line 162
+    async def validate_order(self, order: OrderRequest) -> bool  # Line 166
+    async def validate_portfolio_limits(self, new_position: Position) -> bool  # Line 170
 ```
 
 #### Class: `PortfolioLimitsServiceInterface`
@@ -1392,10 +1399,10 @@ class RiskValidationServiceInterface(Protocol):
 
 ```python
 class PortfolioLimitsServiceInterface(Protocol):
-    async def check_portfolio_limits(self, new_position: Position) -> bool  # Line 172
-    async def update_portfolio_state(self, positions: list[Position], portfolio_value: Decimal) -> None  # Line 176
-    async def update_return_history(self, symbol: str, price: Decimal) -> None  # Line 182
-    async def get_portfolio_summary(self) -> dict[str, Any]  # Line 186
+    async def check_portfolio_limits(self, new_position: Position) -> bool  # Line 179
+    async def update_portfolio_state(self, positions: list[Position], portfolio_value: Decimal) -> None  # Line 183
+    async def update_return_history(self, symbol: str, price: Decimal) -> None  # Line 189
+    async def get_portfolio_summary(self) -> dict[str, Any]  # Line 193
 ```
 
 #### Class: `RiskMonitoringServiceInterface`
@@ -1405,10 +1412,10 @@ class PortfolioLimitsServiceInterface(Protocol):
 
 ```python
 class RiskMonitoringServiceInterface(Protocol):
-    async def start_monitoring(self, interval: int = 60) -> None  # Line 194
-    async def stop_monitoring(self) -> None  # Line 198
-    async def check_emergency_conditions(self, metrics: RiskMetrics) -> bool  # Line 202
-    async def get_risk_summary(self) -> dict[str, Any]  # Line 206
+    async def start_monitoring(self, interval: int = 60) -> None  # Line 202
+    async def stop_monitoring(self) -> None  # Line 206
+    async def check_emergency_conditions(self, metrics: RiskMetrics) -> bool  # Line 210
+    async def get_risk_summary(self) -> dict[str, Any]  # Line 214
 ```
 
 #### Class: `AbstractRiskService`
@@ -1418,11 +1425,11 @@ class RiskMonitoringServiceInterface(Protocol):
 
 ```python
 class AbstractRiskService(ABC):
-    async def start(self) -> None  # Line 215
-    async def stop(self) -> None  # Line 220
-    async def calculate_position_size(self, ...) -> Decimal  # Line 225
-    async def validate_signal(self, signal: Signal) -> bool  # Line 236
-    async def calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics  # Line 241
+    async def start(self) -> None  # Line 223
+    async def stop(self) -> None  # Line 228
+    async def calculate_position_size(self, ...) -> Decimal  # Line 233
+    async def validate_signal(self, signal: Signal) -> bool  # Line 244
+    async def calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics  # Line 249
 ```
 
 #### Class: `RiskMetricsRepositoryInterface`
@@ -1432,11 +1439,11 @@ class AbstractRiskService(ABC):
 
 ```python
 class RiskMetricsRepositoryInterface(Protocol):
-    async def get_historical_returns(self, symbol: str, days: int) -> list[Decimal]  # Line 251
-    async def get_price_history(self, symbol: str, days: int) -> list[Decimal]  # Line 255
-    async def get_portfolio_positions(self) -> list[Position]  # Line 259
-    async def save_risk_metrics(self, metrics: RiskMetrics) -> None  # Line 263
-    async def get_correlation_data(self, symbols: list[str], days: int) -> dict[str, list[Decimal]]  # Line 267
+    async def get_historical_returns(self, symbol: str, days: int) -> list[Decimal]  # Line 260
+    async def get_price_history(self, symbol: str, days: int) -> list[Decimal]  # Line 264
+    async def get_portfolio_positions(self) -> list[Position]  # Line 268
+    async def save_risk_metrics(self, metrics: RiskMetrics) -> None  # Line 272
+    async def get_correlation_data(self, symbols: list[str], days: int) -> dict[str, list[Decimal]]  # Line 276
 ```
 
 #### Class: `PortfolioRepositoryInterface`
@@ -1446,10 +1453,10 @@ class RiskMetricsRepositoryInterface(Protocol):
 
 ```python
 class PortfolioRepositoryInterface(Protocol):
-    async def get_current_positions(self) -> list[Position]  # Line 275
-    async def get_portfolio_value(self) -> Decimal  # Line 279
-    async def get_position_history(self, symbol: str, days: int) -> list[Position]  # Line 283
-    async def update_portfolio_limits(self, limits: dict[str, Any]) -> None  # Line 287
+    async def get_current_positions(self) -> list[Position]  # Line 285
+    async def get_portfolio_value(self) -> Decimal  # Line 289
+    async def get_position_history(self, symbol: str, days: int) -> list[Position]  # Line 293
+    async def update_portfolio_limits(self, limits: dict[str, Any]) -> None  # Line 297
 ```
 
 #### Class: `RiskManagementFactoryInterface`
@@ -1459,9 +1466,9 @@ class PortfolioRepositoryInterface(Protocol):
 
 ```python
 class RiskManagementFactoryInterface(ABC):
-    def create_risk_service(self, correlation_id: str | None = None) -> 'RiskServiceInterface'  # Line 296
-    def create_risk_management_controller(self, correlation_id: str | None = None) -> Any  # Line 301
-    def validate_dependencies(self) -> dict[str, bool]  # Line 306
+    def create_risk_service(self, correlation_id: str | None = None) -> 'RiskServiceInterface'  # Line 306
+    def create_risk_management_controller(self, correlation_id: str | None = None) -> Any  # Line 311
+    def validate_dependencies(self) -> dict[str, bool]  # Line 316
 ```
 
 ### File: portfolio_limits.py
@@ -1568,22 +1575,22 @@ class MarketRegimeDetector(BaseComponent):
 ```python
 class RiskManager(BaseRiskManager):
     def __init__(self, ...)  # Line 79
-    async def calculate_position_size(self, signal: Signal, available_capital: Decimal, current_price: Decimal) -> Decimal  # Line 149
-    async def validate_signal(self, signal: Signal) -> bool  # Line 225
-    async def validate_order(self, order: OrderRequest) -> bool  # Line 290
-    async def calculate_risk_metrics(self, ...) -> RiskMetrics  # Line 354
-    def update_positions(self, positions: list[Position]) -> None  # Line 404
-    def check_risk_limits(self) -> tuple[bool, str]  # Line 438
-    def get_position_limits(self) -> PositionLimits  # Line 482
-    async def emergency_stop(self, reason: str) -> None  # Line 491
-    def _update_risk_level(self, metrics: RiskMetrics) -> None  # Line 521
-    def calculate_leverage(self) -> Decimal  # Line 548
-    def _calculate_signal_score(self, signal: Signal) -> Decimal  # Line 580
-    def _apply_portfolio_constraints(self, size: Decimal, symbol: str) -> Decimal  # Line 588
-    def _check_capital_availability(self, required: Decimal, available: Decimal) -> bool  # Line 596
-    async def check_portfolio_limits(self, new_position: Position) -> bool  # Line 601
-    async def should_exit_position(self, position: Position, market_data: MarketData) -> bool  # Line 671
-    async def get_comprehensive_risk_summary(self) -> dict[str, Any]  # Line 750
+    async def calculate_position_size(self, signal: Signal, available_capital: Decimal, current_price: Decimal) -> Decimal  # Line 150
+    async def validate_signal(self, signal: Signal) -> bool  # Line 226
+    async def validate_order(self, order: OrderRequest) -> bool  # Line 291
+    async def calculate_risk_metrics(self, ...) -> RiskMetrics  # Line 355
+    def update_positions(self, positions: list[Position]) -> None  # Line 405
+    def check_risk_limits(self) -> tuple[bool, str]  # Line 439
+    def get_position_limits(self) -> PositionLimits  # Line 483
+    async def emergency_stop(self, reason: str) -> None  # Line 492
+    def _update_risk_level(self, metrics: RiskMetrics) -> None  # Line 522
+    def calculate_leverage(self) -> Decimal  # Line 549
+    def _calculate_signal_score(self, signal: Signal) -> Decimal  # Line 581
+    def _apply_portfolio_constraints(self, size: Decimal, symbol: str) -> Decimal  # Line 589
+    def _check_capital_availability(self, required: Decimal, available: Decimal) -> bool  # Line 597
+    async def check_portfolio_limits(self, new_position: Position) -> bool  # Line 602
+    async def should_exit_position(self, position: Position, market_data: MarketData) -> bool  # Line 672
+    async def get_comprehensive_risk_summary(self) -> dict[str, Any]  # Line 751
 ```
 
 ### File: risk_metrics.py
@@ -1644,68 +1651,77 @@ class RiskAlert(BaseModel):
 
 ```python
 class RiskService(BaseService):
-    def __init__(self, ...)  # Line 177
-    async def _do_start(self) -> None  # Line 307
-    async def _do_stop(self) -> None  # Line 326
-    async def calculate_position_size(self, ...) -> Decimal  # Line 389
-    async def _calculate_position_size_impl(self, ...) -> Decimal  # Line 421
-    async def _fixed_percentage_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal  # Line 477
-    def _validate_kelly_data(self, winning_returns: list, losing_returns: list, returns_decimal: list) -> bool  # Line 491
-    def _calculate_kelly_statistics(self, winning_returns: list, losing_returns: list, returns_decimal: list) -> tuple[Decimal, Decimal, Decimal]  # Line 517
-    async def _kelly_criterion_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal  # Line 549
-    async def _volatility_adjusted_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal  # Line 621
-    async def _strength_weighted_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal  # Line 687
-    def _validate_position_sizing_inputs(self, signal: Signal, available_capital: Decimal, current_price: Decimal) -> None  # Line 709
-    def _apply_position_size_limits(self, position_size: Decimal, available_capital: Decimal) -> Decimal  # Line 787
-    async def _apply_portfolio_constraints(self, position_size: Decimal, symbol: str, available_capital: Decimal) -> Decimal  # Line 818
-    async def calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics  # Line 862
-    async def _calculate_risk_metrics_impl(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics  # Line 882
-    def _create_empty_risk_metrics(self) -> RiskMetrics  # Line 1017
-    async def _calculate_portfolio_value(self, positions: list[Position], market_data: list[MarketData]) -> Decimal  # Line 1036
-    async def _update_portfolio_history(self, portfolio_value: Decimal) -> None  # Line 1058
-    async def _calculate_var(self, days: int, portfolio_value: Decimal) -> Decimal  # Line 1077
-    async def _calculate_expected_shortfall(self, portfolio_value: Decimal) -> Decimal  # Line 1158
-    async def _calculate_max_drawdown(self) -> Decimal  # Line 1193
-    async def _calculate_current_drawdown(self, portfolio_value: Decimal) -> Decimal  # Line 1222
-    async def _calculate_sharpe_ratio(self) -> Decimal | None  # Line 1237
-    async def _calculate_portfolio_beta(self, positions: list[Position]) -> Decimal | None  # Line 1265
-    async def _calculate_correlation_risk(self, positions: list[Position]) -> Decimal  # Line 1271
-    def _determine_risk_level(self, ...) -> RiskLevel  # Line 1284
-    async def get_portfolio_metrics(self) -> PortfolioMetrics  # Line 1329
-    async def validate_signal(self, signal: Signal) -> bool  # Line 1349
-    async def _validate_signal_impl(self, signal: Signal) -> bool  # Line 1363
-    async def validate_order(self, order: OrderRequest) -> bool  # Line 1430
-    async def _validate_order_impl(self, order: OrderRequest) -> bool  # Line 1444
-    async def _risk_monitoring_loop(self) -> None  # Line 1497
-    async def _perform_risk_check(self) -> None  # Line 1514
-    async def _check_risk_alerts(self, risk_metrics: RiskMetrics) -> None  # Line 1545
-    async def _check_emergency_stop_conditions(self, risk_metrics: RiskMetrics) -> None  # Line 1682
-    async def trigger_emergency_stop(self, reason: str) -> None  # Line 1707
-    async def reset_emergency_stop(self, reason: str) -> None  # Line 1783
-    async def update_price_history(self, symbol: str, price: Decimal) -> None  # Line 1835
-    async def _get_all_positions(self) -> list[Position]  # Line 1907
-    async def _get_positions_for_symbol(self, symbol: str) -> list[Position]  # Line 1933
-    async def _get_current_market_data(self) -> list[MarketData]  # Line 1952
-    async def _load_risk_state(self) -> None  # Line 1960
-    async def _save_risk_state(self) -> None  # Line 1999
-    async def _save_risk_metrics(self, risk_metrics: RiskMetrics) -> None  # Line 2070
-    async def _save_emergency_state(self, reason: str) -> None  # Line 2138
-    async def _verify_dependencies(self) -> bool  # Line 2169
-    async def _service_health_check(self) -> Any  # Line 2204
-    async def _emit_state_event(self, event_type: str, event_data: dict) -> None  # Line 2234
-    def _emit_validation_error(self, error: Exception, context: dict[str, Any]) -> None  # Line 2243
-    async def get_risk_alerts(self, limit: int | None = None) -> list[RiskAlert]  # Line 2268
-    async def acknowledge_risk_alert(self, alert_id: str) -> bool  # Line 2283
-    def get_current_risk_level(self) -> RiskLevel  # Line 2302
-    def is_emergency_stop_active(self) -> bool  # Line 2306
-    async def get_risk_summary(self) -> dict[str, Any]  # Line 2310
-    async def _cleanup_resources(self) -> None  # Line 2331
-    async def _cleanup_stale_symbols(self) -> None  # Line 2410
-    def reset_metrics(self) -> None  # Line 2436
-    async def should_exit_position(self, position: Position, market_data: MarketData) -> bool  # Line 2453
-    async def _should_exit_position_impl(self, position: Position, market_data: MarketData) -> bool  # Line 2468
-    async def risk_monitoring_context(self, operation: str) -> Any  # Line 2581
-    async def _cleanup_connection_resources(self) -> None  # Line 2673
+    def __init__(self, ...)  # Line 176
+    async def _do_start(self) -> None  # Line 308
+    async def _do_stop(self) -> None  # Line 327
+    async def calculate_position_size(self, ...) -> Decimal  # Line 390
+    async def _calculate_position_size_impl(self, ...) -> Decimal  # Line 422
+    async def _fixed_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal  # Line 485
+    async def _fixed_percentage_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal  # Line 502
+    def _validate_kelly_data(self, winning_returns: list, losing_returns: list, returns_decimal: list) -> bool  # Line 516
+    def _calculate_kelly_statistics(self, winning_returns: list, losing_returns: list, returns_decimal: list) -> tuple[Decimal, Decimal, Decimal]  # Line 542
+    async def _kelly_criterion_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal  # Line 574
+    async def _volatility_adjusted_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal  # Line 646
+    async def _strength_weighted_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal  # Line 712
+    def _validate_position_sizing_inputs(self, signal: Signal, available_capital: Decimal, current_price: Decimal) -> None  # Line 740
+    def _apply_position_size_limits(self, position_size: Decimal, available_capital: Decimal) -> Decimal  # Line 818
+    async def _apply_portfolio_constraints(self, position_size: Decimal, symbol: str, available_capital: Decimal) -> Decimal  # Line 849
+    async def calculate_risk_metrics(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics  # Line 893
+    async def _calculate_risk_metrics_impl(self, positions: list[Position], market_data: list[MarketData]) -> RiskMetrics  # Line 913
+    def _create_empty_risk_metrics(self) -> RiskMetrics  # Line 1066
+    async def _calculate_portfolio_value(self, positions: list[Position], market_data: list[MarketData]) -> Decimal  # Line 1087
+    async def _update_portfolio_history(self, portfolio_value: Decimal) -> None  # Line 1109
+    async def _calculate_var(self, days: int, portfolio_value: Decimal) -> Decimal  # Line 1128
+    async def _calculate_expected_shortfall(self, portfolio_value: Decimal, var: Decimal) -> Decimal  # Line 1210
+    async def _calculate_max_drawdown(self) -> Decimal  # Line 1270
+    async def _calculate_current_drawdown(self, portfolio_value: Decimal) -> Decimal  # Line 1297
+    async def _calculate_sharpe_ratio(self) -> Decimal  # Line 1312
+    async def _calculate_sortino_ratio(self) -> Decimal  # Line 1340
+    async def _calculate_portfolio_beta(self, positions: list[Position]) -> Decimal | None  # Line 1388
+    async def _calculate_correlation_risk(self, positions: list[Position]) -> Decimal  # Line 1394
+    def _determine_risk_level(self, ...) -> RiskLevel  # Line 1407
+    async def get_portfolio_metrics(self) -> PortfolioMetrics  # Line 1452
+    async def validate_signal(self, signal: Signal) -> bool  # Line 1472
+    async def _validate_signal_impl(self, signal: Signal) -> bool  # Line 1486
+    async def validate_order(self, order: OrderRequest) -> bool  # Line 1564
+    async def _validate_order_impl(self, order: OrderRequest) -> bool  # Line 1578
+    async def _risk_monitoring_loop(self) -> None  # Line 1631
+    async def _perform_risk_check(self) -> None  # Line 1648
+    async def _check_risk_alerts(self, risk_metrics: RiskMetrics) -> None  # Line 1679
+    async def _check_emergency_stop_conditions(self, risk_metrics: RiskMetrics) -> None  # Line 1816
+    async def trigger_emergency_stop(self, reason: str) -> None  # Line 1841
+    async def reset_emergency_stop(self, reason: str) -> None  # Line 1918
+    async def update_price_history(self, symbol: str, price: Decimal) -> None  # Line 1971
+    async def _get_all_positions(self) -> list[Position]  # Line 2041
+    async def _get_positions_for_symbol(self, symbol: str) -> list[Position]  # Line 2071
+    async def _get_current_market_data(self) -> list[MarketData]  # Line 2090
+    async def _load_risk_state(self) -> None  # Line 2098
+    async def _save_risk_state(self) -> None  # Line 2137
+    async def _save_risk_metrics(self, risk_metrics: RiskMetrics) -> None  # Line 2208
+    async def _save_emergency_state(self, reason: str) -> None  # Line 2281
+    async def _verify_dependencies(self) -> bool  # Line 2317
+    async def _service_health_check(self) -> Any  # Line 2352
+    async def _emit_state_event(self, event_type: str, event_data: dict) -> None  # Line 2382
+    def _emit_validation_error(self, error: Exception, context: dict[str, Any]) -> None  # Line 2391
+    async def get_risk_alerts(self, limit: int | None = None) -> list[RiskAlert]  # Line 2416
+    async def acknowledge_risk_alert(self, alert_id: str) -> bool  # Line 2431
+    def get_current_risk_level(self) -> RiskLevel  # Line 2450
+    def is_emergency_stop_active(self) -> bool  # Line 2454
+    async def save_risk_metrics(self, risk_metrics: RiskMetrics) -> None  # Line 2458
+    def is_healthy(self) -> bool  # Line 2467
+    async def get_risk_summary(self) -> dict[str, Any]  # Line 2497
+    async def validate_risk_parameters(self, parameters: dict[str, Any]) -> dict[str, Any]  # Line 2518
+    async def get_current_risk_limits(self) -> dict[str, Any]  # Line 2566
+    async def _cleanup_resources(self) -> None  # Line 2587
+    async def _cleanup_stale_symbols(self) -> None  # Line 2666
+    def reset_metrics(self) -> None  # Line 2692
+    async def should_exit_position(self, position: Position, market_data: MarketData) -> bool  # Line 2709
+    async def _should_exit_position_impl(self, position: Position, market_data: MarketData) -> bool  # Line 2724
+    async def check_emergency_conditions(self, risk_metrics: RiskMetrics) -> bool  # Line 2838
+    async def check_portfolio_limits(self, new_position: Position) -> bool  # Line 2902
+    async def update_portfolio_state(self, positions: list[Position], available_capital: Decimal) -> None  # Line 2950
+    async def risk_monitoring_context(self, operation: str) -> Any  # Line 3006
+    async def _cleanup_connection_resources(self) -> None  # Line 3098
 ```
 
 ### File: portfolio_limits_service.py
@@ -1752,17 +1768,17 @@ class PortfolioLimitsService(BaseService, PortfolioLimitsServiceInterface):
 class PositionSizingService(BaseService):
     def __init__(self, ...)  # Line 36
     async def calculate_size(self, ...) -> Decimal  # Line 62
-    async def validate_size(self, position_size: Decimal, available_capital: Decimal) -> bool  # Line 186
-    def _validate_inputs(self, signal: Signal, available_capital: Decimal, current_price: Decimal) -> None  # Line 234
-    async def _fixed_percentage_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal  # Line 250
-    async def _kelly_criterion_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal  # Line 260
-    async def _volatility_adjusted_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal  # Line 293
-    async def _confidence_weighted_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal  # Line 321
-    def _apply_limits(self, position_size: Decimal, available_capital: Decimal) -> Decimal  # Line 333
-    def _calculate_kelly_fraction(self, returns: list[Decimal]) -> Decimal  # Line 345
-    def _calculate_volatility(self, prices: list[Decimal]) -> Decimal  # Line 374
-    async def _get_historical_returns(self, symbol: str) -> list[Decimal]  # Line 383
-    async def _get_price_history(self, symbol: str) -> list[Decimal]  # Line 393
+    async def validate_size(self, position_size: Decimal, available_capital: Decimal) -> bool  # Line 174
+    def _validate_inputs(self, signal: Signal, available_capital: Decimal, current_price: Decimal) -> None  # Line 222
+    async def _fixed_percentage_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal  # Line 238
+    async def _kelly_criterion_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal  # Line 248
+    async def _volatility_adjusted_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal  # Line 281
+    async def _confidence_weighted_sizing(self, signal: Signal, available_capital: Decimal) -> Decimal  # Line 309
+    def _apply_limits(self, position_size: Decimal, available_capital: Decimal) -> Decimal  # Line 321
+    def _calculate_kelly_fraction(self, returns: list[Decimal]) -> Decimal  # Line 333
+    def _calculate_volatility(self, prices: list[Decimal]) -> Decimal  # Line 362
+    async def _get_historical_returns(self, symbol: str) -> list[Decimal]  # Line 371
+    async def _get_price_history(self, symbol: str) -> list[Decimal]  # Line 381
 ```
 
 ### File: risk_metrics_service.py

@@ -16,9 +16,11 @@ from typing import Any
 import pytest
 import pytest_asyncio
 
+from src.error_handling.decorators import shutdown_all_error_handlers
 from src.core.types import (
     MarketData,
     Order,
+    OrderRequest,
     OrderSide,
     OrderStatus,
     OrderType,
@@ -315,6 +317,19 @@ def sample_orders():
     ]
 
     return orders
+
+
+@pytest.fixture
+def sample_order_request():
+    """Generate a sample order request for testing."""
+    return OrderRequest(
+        symbol="BTC/USDT",
+        side=OrderSide.BUY,
+        order_type=OrderType.LIMIT,
+        quantity=Decimal("0.5"),
+        price=Decimal("50000.00"),
+        time_in_force="GTC",
+    )
 
 
 @pytest.fixture
@@ -629,11 +644,32 @@ async def cleanup_di_container(injector):
     if not injector:
         return
 
+    # Reset global error handler state (circuit breakers, error counts, etc.)
+    # This is CRITICAL to prevent circuit breaker state pollution across tests
+    try:
+        shutdown_all_error_handlers()
+        logger.debug("Reset global error handler state")
+    except Exception as e:
+        logger.warning(f"Failed to reset global error handler state: {e}")
+
     # Get all service names
     service_names = []
     if hasattr(injector, "_container"):
         container = injector._container
         service_names = list(container._services.keys())
+
+    # Reset ALL service-level circuit breakers before stopping services
+    for service_name in service_names:
+        try:
+            service = injector.resolve(service_name)
+            # Reset circuit breakers in ErrorHandler
+            if hasattr(service, "circuit_breakers") and isinstance(service.circuit_breakers, dict):
+                for cb_name, circuit_breaker in service.circuit_breakers.items():
+                    if hasattr(circuit_breaker, "reset") and callable(circuit_breaker.reset):
+                        circuit_breaker.reset()
+                        logger.debug(f"Reset circuit breaker: {cb_name} in {service_name}")
+        except Exception as e:
+            logger.debug(f"Could not reset circuit breakers in {service_name}: {e}")
 
     # Stop services that have a stop() method
     for service_name in service_names:
@@ -647,6 +683,21 @@ async def cleanup_di_container(injector):
                 logger.debug(f"Stopped service: {service_name}")
         except Exception as e:
             logger.warning(f"Failed to stop service {service_name}: {e}")
+
+    # Explicitly cleanup CacheManager to prevent resource leaks
+    for service_name in service_names:
+        try:
+            service = injector.resolve(service_name)
+            # Check if this is a CacheManager instance
+            if service.__class__.__name__ == "CacheManager":
+                if hasattr(service, "cleanup") and callable(service.cleanup):
+                    logger.debug(f"Cleaning up CacheManager: {service_name}")
+                    await service.cleanup()
+                elif hasattr(service, "shutdown") and callable(service.shutdown):
+                    logger.debug(f"Shutting down CacheManager: {service_name}")
+                    await service.shutdown()
+        except Exception as e:
+            logger.debug(f"Failed to cleanup CacheManager {service_name}: {e}")
 
     # Clear the container
     if hasattr(injector, "_container"):

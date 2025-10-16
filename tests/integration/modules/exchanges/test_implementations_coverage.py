@@ -718,7 +718,7 @@ class TestExchangeConfiguration:
         # Test conversion to Decimal
         min_amount = Decimal(exchange.config["min_trade_amount"])
         assert isinstance(min_amount, Decimal)
-        assert min_amount == Decimal("0.000000000000000001")
+        assert min_amount == Decimal("0.00000001")  # 1E-8 - standard crypto precision
 
 
 if __name__ == "__main__":

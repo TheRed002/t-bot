@@ -943,6 +943,119 @@ class MLConfig(BaseConfig):
         return v
 
 
+class BotManagementConfig(BaseConfig):
+    """Bot management configuration for bot lifecycle and coordination."""
+
+    # Coordination settings
+    max_symbol_exposure: Decimal = Field(
+        default=Decimal("100000"), description="Maximum symbol exposure across all bots"
+    )
+    coordination_interval: int = Field(
+        default=10, description="Coordination loop interval in seconds"
+    )
+    signal_retention_minutes: int = Field(
+        default=60, description="Signal retention time in minutes"
+    )
+    arbitrage_detection_enabled: bool = Field(
+        default=True, description="Enable arbitrage detection"
+    )
+
+    # Lifecycle settings
+    deployment_timeout_seconds: int = Field(
+        default=60, description="Deployment timeout in seconds"
+    )
+    termination_timeout_seconds: int = Field(
+        default=30, description="Termination timeout in seconds"
+    )
+    health_check_interval_seconds: int = Field(
+        default=30, description="Health check interval in seconds"
+    )
+
+    # Resource management
+    max_bots_per_instance: int = Field(
+        default=10, description="Maximum bots per instance"
+    )
+    default_bot_capital: Decimal = Field(
+        default=Decimal("10000"), description="Default capital allocation per bot"
+    )
+    resource_allocation_timeout_seconds: int = Field(
+        default=30, description="Resource allocation timeout in seconds"
+    )
+
+    # Lifecycle management
+    event_retention_hours: int = Field(
+        default=168, description="Event retention hours (default 7 days)"
+    )
+    graceful_shutdown_timeout: int = Field(
+        default=60, description="Graceful shutdown timeout in seconds"
+    )
+    restart_max_attempts: int = Field(
+        default=3, description="Maximum restart attempts"
+    )
+    restart_delay_seconds: int = Field(
+        default=60, description="Delay between restart attempts in seconds"
+    )
+
+    # Risk and monitoring thresholds
+    risk_threshold: Decimal = Field(
+        default=Decimal("0.05"), description="Risk threshold for alerts"
+    )
+    risk_score_threshold: Decimal = Field(
+        default=Decimal("0.8"), description="Risk score threshold for action"
+    )
+    rate_limit_threshold: Decimal = Field(
+        default=Decimal("0.8"), description="Rate limit threshold"
+    )
+    concurrent_bots_threshold: Decimal = Field(
+        default=Decimal("0.9"), description="Concurrent bots capacity threshold"
+    )
+
+    # WebSocket configuration
+    websocket_connection_timeout: int = Field(
+        default=30, description="WebSocket connection timeout in seconds"
+    )
+    websocket_heartbeat_interval: int = Field(
+        default=30, description="WebSocket heartbeat interval in seconds"
+    )
+
+    @field_validator(
+        "max_symbol_exposure",
+        "default_bot_capital",
+        "risk_threshold",
+        "risk_score_threshold",
+        "rate_limit_threshold",
+        "concurrent_bots_threshold",
+    )
+    @classmethod
+    def validate_decimal_positive(cls, v: Decimal) -> Decimal:
+        """Validate decimal fields are positive."""
+        if v <= 0:
+            raise ValueError(f"Value must be positive, got {v}")
+        return v
+
+    @field_validator(
+        "coordination_interval",
+        "signal_retention_minutes",
+        "deployment_timeout_seconds",
+        "termination_timeout_seconds",
+        "health_check_interval_seconds",
+        "max_bots_per_instance",
+        "resource_allocation_timeout_seconds",
+        "event_retention_hours",
+        "graceful_shutdown_timeout",
+        "restart_max_attempts",
+        "restart_delay_seconds",
+        "websocket_connection_timeout",
+        "websocket_heartbeat_interval",
+    )
+    @classmethod
+    def validate_positive_integers(cls, v: int) -> int:
+        """Validate integer fields are positive."""
+        if v <= 0:
+            raise ValueError(f"Value must be positive, got {v}")
+        return v
+
+
 class ExecutionConfig(BaseConfig):
     """Execution engine configuration for order processing and algorithms."""
 
@@ -1022,6 +1135,7 @@ class Config(BaseConfig):
     strategies: StrategyManagementConfig = StrategyManagementConfig()
     execution: ExecutionConfig = ExecutionConfig()
     ml: MLConfig = MLConfig()
+    bot_management: BotManagementConfig = BotManagementConfig()
 
     @field_validator("environment")
     @classmethod

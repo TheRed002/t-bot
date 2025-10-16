@@ -93,6 +93,9 @@ class TestSignal:
     def test_signal_creation(self):
         """Test Signal model creation and validation."""
         signal = Signal(
+            signal_id="test_signal_1",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=datetime.now(timezone.utc),
@@ -101,6 +104,9 @@ class TestSignal:
             metadata={"test": "data"},
         )
 
+        assert signal.signal_id == "test_signal_1"
+        assert signal.strategy_id == "test_strategy_1"
+        assert signal.strategy_name == "test_strategy"
         assert signal.direction == SignalDirection.BUY
         assert signal.strength == Decimal("0.8")
         assert signal.symbol == "BTC/USDT"
@@ -111,6 +117,9 @@ class TestSignal:
         """Test Signal strength validation."""
         # Valid strength
         signal = Signal(
+            signal_id="test_signal_2",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.5"),
             timestamp=datetime.now(timezone.utc),
@@ -124,6 +133,9 @@ class TestSignal:
         # Invalid strength should raise validation error
         with pytest.raises(ValueError):
             Signal(
+                signal_id="test_signal_invalid_1",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 direction=SignalDirection.BUY,
                 strength=Decimal("1.5"),  # Invalid: > 1.0
                 timestamp=datetime.now(timezone.utc),
@@ -134,6 +146,9 @@ class TestSignal:
         # Test negative strength
         with pytest.raises(ValueError):
             Signal(
+                signal_id="test_signal_invalid_2",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 direction=SignalDirection.BUY,
                 strength=-0.1,  # Invalid: < 0.0
                 timestamp=datetime.now(timezone.utc),
@@ -145,6 +160,9 @@ class TestSignal:
         """Test Signal strength boundary values."""
         # Test minimum strength
         signal_min = Signal(
+            signal_id="test_signal_min",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.0"),
             timestamp=datetime.now(timezone.utc),
@@ -155,6 +173,9 @@ class TestSignal:
 
         # Test maximum strength
         signal_max = Signal(
+            signal_id="test_signal_max",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("1.0"),
             timestamp=datetime.now(timezone.utc),
@@ -489,6 +510,9 @@ class TestFinancialCalculationAccuracy:
         """Test signal strength precision and validation."""
         # Test precise strength values
         signal = Signal(
+            signal_id="test_signal_1",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.87654321"),  # High precision as Decimal
             timestamp=datetime.now(timezone.utc),
@@ -613,6 +637,9 @@ class TestTypeValidationEdgeCases:
         for symbol in valid_symbols:
             # Should not raise for valid symbols
             signal = Signal(
+                signal_id="test_signal_2",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 direction=SignalDirection.BUY,
                 strength=Decimal("0.8"),
                 timestamp=datetime.now(timezone.utc),
@@ -625,6 +652,9 @@ class TestTypeValidationEdgeCases:
             # Should raise for invalid symbols (ValidationError or PydanticValidationError)
             with pytest.raises((ValueError, ValidationError, PydanticValidationError)):
                 Signal(
+                    signal_id="test_signal_3",
+                    strategy_id="test_strategy_1",
+                    strategy_name="test_strategy",
                     direction=SignalDirection.BUY,
                     strength=Decimal("0.8"),
                     timestamp=datetime.now(timezone.utc),
@@ -637,6 +667,9 @@ class TestTypeValidationEdgeCases:
         # Test with UTC timezone
         utc_time = datetime.now(timezone.utc)
         signal_utc = Signal(
+            signal_id="test_signal_4",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=utc_time,
@@ -648,6 +681,9 @@ class TestTypeValidationEdgeCases:
         # Test with naive datetime (should be rejected)
         with pytest.raises(ValidationError):
             Signal(
+                signal_id="test_signal_5",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 direction=SignalDirection.BUY,
                 strength=Decimal("0.8"),
                 timestamp=datetime.now(),  # Naive datetime
@@ -658,6 +694,9 @@ class TestTypeValidationEdgeCases:
         # Test future timestamp (might be invalid for some use cases)
         future_time = datetime.now(timezone.utc) + timedelta(days=1)
         signal_future = Signal(
+            signal_id="test_signal_6",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=future_time,
@@ -702,6 +741,9 @@ class TestCrossTypeConsistency:
     def test_signal_to_order_consistency(self):
         """Test consistency between signal and generated order."""
         signal = Signal(
+            signal_id="test_signal_7",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=datetime.now(timezone.utc),
@@ -747,6 +789,9 @@ class TestCrossTypeConsistency:
         signal_strength = min(float(price_change_pct) * 10, 1.0)  # Scale and cap at 1.0
 
         signal = Signal(
+            signal_id="test_signal_8",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=signal_direction,
             strength=signal_strength,
             timestamp=market_data.timestamp,

@@ -62,9 +62,11 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             self.logger.warning(f"Global error handler not available: {e}")
             self.global_error_handler = None
 
-        # Initialize pattern analytics
+        # Initialize pattern analytics with Config
         try:
-            self.pattern_analytics = ErrorPatternAnalytics()
+            from src.core.config import Config
+            config = Config()
+            self.pattern_analytics = ErrorPatternAnalytics(config=config)
         except Exception as e:
             self.logger.warning(f"Error pattern analytics not available: {e}")
             self.pattern_analytics = None

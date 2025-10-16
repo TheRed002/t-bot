@@ -126,6 +126,7 @@ class GlobalErrorHandler(BaseService):
     def register_database_handler(self):
         """Register database error handler separately to avoid circular dependencies."""
         try:
+            from src.error_handling.factory import ErrorHandlerFactory
             from src.error_handling.handlers.database import DatabaseErrorHandler
 
             ErrorHandlerFactory.register("database", DatabaseErrorHandler)

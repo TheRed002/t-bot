@@ -176,6 +176,101 @@ class DependencyContainer:
         """Check if service is registered."""
         return name in self._services or name in self._factories
 
+    def resolve(self, name: str) -> Any:
+        """
+        Resolve a dependency by name (alias for get()).
+
+        Args:
+            name: Service name
+
+        Returns:
+            Service instance
+
+        Raises:
+            DependencyError: If service not found
+        """
+        return self.get(name)
+
+    def get_optional(self, name: str) -> Any | None:
+        """
+        Get a service by name, returning None if not found.
+
+        Args:
+            name: Service name
+
+        Returns:
+            Service instance or None if not found
+        """
+        try:
+            return self.get(name)
+        except DependencyError:
+            return None
+
+    def register_factory(self, name: str, factory: Callable, singleton: bool = False) -> None:
+        """
+        Register a factory function (alias for register with callable).
+
+        Args:
+            name: Service name
+            factory: Factory function
+            singleton: Whether to treat as singleton
+        """
+        self.register(name, factory, singleton=singleton)
+
+    def register_singleton(self, name: str, service: Any) -> None:
+        """
+        Register a singleton service.
+
+        Args:
+            name: Service name
+            service: Service instance or factory
+        """
+        self.register(name, service, singleton=True)
+
+    def register_service(self, name: str, service: Any, singleton: bool = False) -> None:
+        """
+        Register a service (alias for register).
+
+        Args:
+            name: Service name
+            service: Service instance or factory
+            singleton: Whether to treat as singleton
+        """
+        self.register(name, service, singleton=singleton)
+
+    def has_service(self, name: str) -> bool:
+        """
+        Check if service is registered (alias for has()).
+
+        Args:
+            name: Service name
+
+        Returns:
+            True if service is registered
+        """
+        return self.has(name)
+
+    def is_registered(self, name: str) -> bool:
+        """
+        Check if service is registered (alias for has()).
+
+        Args:
+            name: Service name
+
+        Returns:
+            True if service is registered
+        """
+        return self.has(name)
+
+    def get_container(self) -> "DependencyContainer":
+        """
+        Get self (for compatibility with DependencyInjector API).
+
+        Returns:
+            Self reference
+        """
+        return self
+
     def __contains__(self, name: str) -> bool:
         """Support 'in' operator for checking if service is registered."""
         return self.has(name)
@@ -323,6 +418,21 @@ class DependencyInjector:
                 suggested_action="Check service registration and container state",
                 context={"resolution_error": str(e)},
             ) from e
+
+    def get_optional(self, name: str) -> Any | None:
+        """
+        Get a service by name, returning None if not found.
+
+        Args:
+            name: Service name
+
+        Returns:
+            Service instance or None if not found
+        """
+        try:
+            return self._container.get(name)
+        except DependencyError:
+            return None
 
     def register_service(self, name: str, service: Any, singleton: bool = False) -> None:
         """

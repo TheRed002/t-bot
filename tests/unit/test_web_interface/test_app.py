@@ -145,15 +145,22 @@ class TestConnectApiEndpointsToServices:
     """Tests for _connect_api_endpoints_to_services function."""
 
     async def test_connect_api_endpoints_success(self):
-        """Test successful API endpoint connection."""
+        """Test successful API endpoint connection.
+
+        Backend no longer calls set_bot_service (deprecated).
+        It only logs that the service is connected via registry.
+        """
         mock_registry = Mock()
         mock_registry.has_service.return_value = True
         mock_service = Mock()
         mock_registry.get_service.return_value = mock_service
 
-        with patch("src.web_interface.api.bot_management") as mock_bot_mgmt:
-            await _connect_api_endpoints_to_services(mock_registry)
-            mock_bot_mgmt.set_bot_service.assert_called_once_with(mock_service)
+        # Should complete without error
+        # Backend no longer calls deprecated set_bot_service
+        await _connect_api_endpoints_to_services(mock_registry)
+
+        # Verify has_service was checked
+        mock_registry.has_service.assert_called_with("bot_management")
 
     async def test_connect_api_endpoints_no_service(self):
         """Test API endpoint connection when service is not available."""

@@ -54,6 +54,9 @@ class TestKellyCriterionPrecision:
     def sample_signal(self):
         """Create a sample trading signal."""
         return Signal(
+            signal_id="test_signal_1",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             strength=0.8,
@@ -143,7 +146,12 @@ class TestKellyCriterionPrecision:
 
     @pytest.mark.asyncio
     async def test_kelly_edge_case_all_negative_returns(self, position_sizer, sample_signal):
-        """Test Kelly with all negative returns (extreme pessimism)."""
+        """Test Kelly with all negative returns (extreme pessimism).
+
+        IMPORTANT: Kelly fallback uses FixedPercentageAlgorithm which does NOT apply signal strength.
+        See src/utils/position_sizing.py lines 146-151 for fallback implementation.
+        See src/utils/position_sizing.py lines 84-86 for FIXED_PERCENTAGE behavior.
+        """
         portfolio_value = Decimal("10000")
 
         # All negative returns
@@ -153,17 +161,22 @@ class TestKellyCriterionPrecision:
         # Kelly with all negative returns should fallback to fixed percentage
         position_size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
 
-        # Should fallback to fixed percentage sizing (using default_position_size_pct from config)
+        # Should fallback to fixed percentage sizing WITHOUT signal strength multiplier
+        # Note: RiskService uses default_position_size_pct which may differ from Config's risk_per_trade
         expected_fallback = (
             portfolio_value
             * Decimal(str(position_sizer.risk_config.default_position_size_pct))
-            * Decimal(str(sample_signal.strength))
         )
         assert position_size == expected_fallback
 
     @pytest.mark.asyncio
     async def test_kelly_edge_case_zero_variance(self, position_sizer, sample_signal):
-        """Test Kelly with zero variance (all identical returns)."""
+        """Test Kelly with zero variance (all identical returns).
+
+        IMPORTANT: Kelly fallback uses FixedPercentageAlgorithm which does NOT apply signal strength.
+        See src/utils/position_sizing.py lines 146-151 for fallback implementation.
+        See src/utils/position_sizing.py lines 84-86 for FIXED_PERCENTAGE behavior.
+        """
         portfolio_value = Decimal("10000")
 
         # All identical returns (zero variance)
@@ -172,11 +185,10 @@ class TestKellyCriterionPrecision:
 
         position_size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
 
-        # Should fallback to fixed percentage sizing (using default_position_size_pct from config)
+        # Should fallback to fixed percentage sizing WITHOUT signal strength multiplier
         expected_fallback = (
             portfolio_value
             * Decimal(str(position_sizer.risk_config.default_position_size_pct))
-            * Decimal(str(sample_signal.strength))
         )
         assert position_size == expected_fallback
 
@@ -221,6 +233,9 @@ class TestKellyCriterionPrecision:
 
         for confidence in confidence_levels:
             signal = Signal(
+                signal_id="test_signal_2",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="BTC/USDT",
                 direction=SignalDirection.BUY,
                 strength=confidence,
@@ -365,22 +380,28 @@ class TestKellyCriterionPrecision:
         position_sizer._return_history["BTC/USDT"] = returns
 
         # Calculate using main method with current price and method
+        # IMPORTANT: calculate_position_size returns COINS, not USD
+        # See src/risk_management/service.py lines 469-483 for USD→coins conversion
         current_price = Decimal("50000")  # BTC price
-        size = await position_sizer.calculate_position_size(
+        size_coins = await position_sizer.calculate_position_size(
             sample_signal, portfolio_value, current_price, PositionSizeMethod.KELLY_CRITERION
         )
 
-        # Calculate using internal method
-        internal_size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
+        # Calculate using internal method - returns USD value
+        internal_size_usd = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
+
+        # Convert coins back to USD for comparison
+        size_usd = size_coins * current_price
 
         # Should apply additional limits in main method (using max_position_size_pct)
-        assert size <= portfolio_value * Decimal(str(position_sizer.risk_config.max_position_size_pct))
-        assert size >= Decimal("0")
+        max_allowed_usd = portfolio_value * Decimal(str(position_sizer.risk_config.max_position_size_pct))
+        assert size_usd <= max_allowed_usd
+        assert size_coins >= Decimal("0")
 
-        # If within limits, should match internal calculation  
-        max_allowed = portfolio_value * Decimal(str(position_sizer.risk_config.max_position_size_pct))
-        if internal_size <= max_allowed:
-            assert size == internal_size
+        # If within limits, USD values should match (accounting for rounding in conversion)
+        if internal_size_usd <= max_allowed_usd:
+            # Allow small rounding errors from USD→coins→USD conversion
+            assert abs(size_usd - internal_size_usd) < Decimal("0.01")
 
     @pytest.mark.asyncio
     async def test_kelly_statistical_properties(self, position_sizer, sample_signal):
@@ -425,7 +446,12 @@ class TestKellyCriterionPrecision:
 
     @pytest.mark.asyncio
     async def test_kelly_fallback_behavior(self, position_sizer, sample_signal):
-        """Test Kelly fallback to fixed percentage in various scenarios."""
+        """Test Kelly fallback to fixed percentage in various scenarios.
+
+        IMPORTANT: Kelly fallback uses FixedPercentageAlgorithm which does NOT apply signal strength.
+        See src/utils/position_sizing.py lines 146-151 for fallback implementation.
+        See src/utils/position_sizing.py lines 84-86 for FIXED_PERCENTAGE behavior.
+        """
         portfolio_value = Decimal("10000")
 
         fallback_scenarios = [
@@ -446,11 +472,10 @@ class TestKellyCriterionPrecision:
 
             size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
 
-            # Should fallback to fixed percentage (using risk_per_trade from config)
+            # Should fallback to fixed percentage WITHOUT signal strength multiplier
             expected_fallback = (
                 portfolio_value
                 * Decimal(str(position_sizer.risk_config.default_position_size_pct))
-                * Decimal(str(sample_signal.strength))
             )
             assert size == expected_fallback
 

@@ -736,6 +736,12 @@ class StateService(BaseService, ErrorPropagationMixin):
                     try:
                         start_time = datetime.now(timezone.utc)
 
+                        # Add audit timestamps if not present (required for validation)
+                        if "created_at" not in state_data:
+                            state_data["created_at"] = start_time.isoformat()
+                        if "updated_at" not in state_data:
+                            state_data["updated_at"] = start_time.isoformat()
+
                         # Delegate ALL validation to validation service
                         if validate and self._validation_service:
                             validation_result = await self._validation_service.validate_state_data(

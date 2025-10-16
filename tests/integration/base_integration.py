@@ -11,7 +11,6 @@ This module provides common infrastructure for integration tests including:
 import asyncio
 import logging
 import time
-from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -205,12 +204,17 @@ class MockStrategyFactory:
                 direction = SignalDirection.HOLD
 
             return Signal(
+                signal_id="test-signal-1",
+                strategy_id="momentum-strategy",
+                strategy_name="Momentum Strategy",
                 symbol=symbol,
                 direction=direction,
                 confidence=signal_confidence + (random.random() - 0.5) * 0.2,  # Add some noise
+                strength=signal_confidence,
                 price=Decimal("50000.0")
                 + Decimal(str((random.random() - 0.5) * 1000)),  # Price noise
                 timestamp=datetime.now(timezone.utc),
+                source="test",
                 metadata={"strategy": "momentum", "indicator_values": {"rsi": 65.5, "macd": 1.2}},
             )
 
@@ -351,19 +355,19 @@ def performance_test(max_duration: float = 60.0, max_memory_mb: float = 500.0):
     return decorator
 
 
-class BaseIntegrationTest(ABC):
+class BaseIntegrationTest:
     """Base class for integration tests with common setup/teardown."""
 
-    def __init__(self):
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_integration_test(self):
+        """Setup common test infrastructure."""
+        # Initialize instance variables
         self.config = None
         self.exchanges = {}
         self.strategies = {}
         self.bot_instance = None
         self.performance_monitor = PerformanceMonitor()
 
-    @pytest_asyncio.fixture(autouse=True)
-    async def setup_integration_test(self):
-        """Setup common test infrastructure."""
         # Load test configuration
         self.config = await self._create_test_config()
 
@@ -444,11 +448,6 @@ class BaseIntegrationTest(ABC):
                 await self.bot_instance.stop()
             except Exception as e:
                 logger.warning(f"Error stopping bot instance: {e}")
-
-    @abstractmethod
-    async def run_integration_test(self):
-        """Abstract method for running the actual integration test."""
-        pass
 
     async def create_mock_exchanges(self) -> dict[str, Mock]:
         """Create mock exchanges for testing."""

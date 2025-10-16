@@ -62,6 +62,9 @@ class TestDataCleaner:
         """Create valid signals for testing"""
         return [
             Signal(
+                signal_id="test_signal_1",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="BTC/USDT",
                 direction=SignalDirection.BUY,
                 strength=0.75,
@@ -69,6 +72,9 @@ class TestDataCleaner:
                 source="test_strategy",
             ),
             Signal(
+                signal_id="test_signal_2",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="ETH/USDT",
                 direction=SignalDirection.SELL,
                 strength=0.85,
@@ -286,6 +292,9 @@ class TestDataCleaner:
         # Since Pydantic prevents invalid data, test with edge cases
         edge_signals = [
             Signal(
+                signal_id="test_signal_3",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 direction=SignalDirection.BUY,
                 strength=0.0,  # Minimum confidence (edge case)
                 timestamp=datetime.now(timezone.utc),
@@ -293,6 +302,9 @@ class TestDataCleaner:
                 source="test_strategy",
             ),
             Signal(
+                signal_id="test_signal_4",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 direction=SignalDirection.SELL,
                 strength=1.0,  # Maximum confidence (edge case)
                 timestamp=datetime.now(timezone.utc),
@@ -313,6 +325,9 @@ class TestDataCleaner:
         """Test cleaning with duplicate signals"""
         duplicate_signals = [
             Signal(
+                signal_id="test_signal_5",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 direction=SignalDirection.BUY,
                 strength=0.75,
                 timestamp=datetime.now(timezone.utc),
@@ -320,6 +335,9 @@ class TestDataCleaner:
                 source="test_strategy",
             ),
             Signal(
+                signal_id="test_signal_6",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 direction=SignalDirection.BUY,
                 strength=0.75,
                 # Very close timestamp
@@ -341,6 +359,9 @@ class TestDataCleaner:
         # Test with valid signals that might need confidence adjustment
         signals_with_edge_confidence = [
             Signal(
+                signal_id="test_signal_7",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 direction=SignalDirection.BUY,
                 strength=0.999,  # Very high confidence
                 timestamp=datetime.now(timezone.utc),
@@ -348,6 +369,9 @@ class TestDataCleaner:
                 source="test_strategy",
             ),
             Signal(
+                signal_id="test_signal_8",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 direction=SignalDirection.SELL,
                 strength=0.001,  # Very low confidence
                 timestamp=datetime.now(timezone.utc),
@@ -513,6 +537,9 @@ class TestDataCleaner:
         """Test signal validation"""
         # Valid signal
         valid_signal = Signal(
+            signal_id="test_signal_9",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=0.75,
             timestamp=datetime.now(timezone.utc),
@@ -523,6 +550,9 @@ class TestDataCleaner:
 
         # Test with edge case signal
         edge_signal = Signal(
+            signal_id="test_signal_10",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.SELL,
             strength=0.0,  # Minimum confidence
             timestamp=datetime.now(timezone.utc),
@@ -546,6 +576,9 @@ class TestDataCleaner:
     async def test_is_duplicate_signal(self, cleaner: DataCleaner):
         """Test duplicate signal detection"""
         base_signal = Signal(
+            signal_id="test_signal_11",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=0.75,
             timestamp=datetime.now(timezone.utc),
@@ -557,6 +590,9 @@ class TestDataCleaner:
 
         # Same signal (duplicate)
         duplicate_signal = Signal(
+            signal_id="test_signal_12",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=0.75,
             timestamp=base_signal.timestamp + timedelta(seconds=0.5),
@@ -567,6 +603,9 @@ class TestDataCleaner:
 
         # Different signal (not duplicate)
         different_signal = Signal(
+            signal_id="test_signal_13",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.SELL,
             strength=0.75,
             timestamp=datetime.now(timezone.utc),

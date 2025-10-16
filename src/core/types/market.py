@@ -58,6 +58,11 @@ class MarketData(BaseModel):
         return self.open
 
     @property
+    def close_price(self) -> Decimal:
+        """Alias for close for backward compatibility."""
+        return self.close
+
+    @property
     def bid(self) -> Decimal | None:
         """Alias for bid_price for backward compatibility."""
         return self.bid_price

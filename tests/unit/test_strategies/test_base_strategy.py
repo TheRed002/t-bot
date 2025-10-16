@@ -34,6 +34,9 @@ from src.core.types import (
 
 # Pre-computed signal objects for performance
 VALID_SIGNAL = Signal(
+    signal_id="test_signal_valid",
+    strategy_id="test_strategy_1",
+    strategy_name="test_strategy",
     direction=SignalDirection.BUY,
     strength=Decimal("0.8"),
     timestamp=FIXED_TIME,
@@ -43,6 +46,9 @@ VALID_SIGNAL = Signal(
 )
 
 INVALID_SIGNAL = Signal(
+    signal_id="test_signal_invalid",
+    strategy_id="test_strategy_1",
+    strategy_name="test_strategy",
     direction=SignalDirection.BUY,
     strength=Decimal("0.5"),
     timestamp=FIXED_TIME,
@@ -107,6 +113,9 @@ class MockStrategy(BaseStrategy):
 
             # Create a mock signal
             signal = Signal(
+                signal_id="test_signal_1",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol=data.symbol,
                 direction=SignalDirection.BUY,
                 strength=Decimal("0.8"),
@@ -416,7 +425,7 @@ class TestBaseStrategy:
         fresh_strategy.update_config(new_config)
 
         assert fresh_strategy.config.name == "updated_strategy"
-        assert fresh_strategy.config.min_confidence == 0.7
+        assert fresh_strategy.config.min_confidence == Decimal("0.7")
         assert fresh_strategy.config.max_positions == 3
 
     def test_get_performance_summary(self, fresh_strategy):

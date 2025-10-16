@@ -129,20 +129,21 @@ class BotLifecycleService(BaseService, IBotLifecycleService):
             template = self._bot_templates[template_name]
 
             # Create bot configuration
+            from src.core.types import BotType
             bot_config = BotConfiguration(
-                id=f"bot_{bot_name}_{template_name}",
+                bot_id=f"bot_{bot_name}_{template_name}",
                 name=bot_name,
-                exchange=exchange,
-                strategy=strategy or template["default_strategy"],
-                priority=priority,
-                capital_amount=capital_amount,
-                config=self._merge_configs(template["default_config"], custom_config or {}),
-                enabled=True,
+                bot_type=BotType.TRADING,
+                version="1.0.0",
+                strategy_id=strategy or template["default_strategy"],
+                symbols=[],  # Will be configured later
+                exchanges=[exchange],
+                allocated_capital=capital_amount,
             )
 
             # Record lifecycle event
             await self._record_lifecycle_event(
-                bot_config.id,
+                bot_config.bot_id,
                 "created",
                 {
                     "template": template_name,
@@ -151,7 +152,7 @@ class BotLifecycleService(BaseService, IBotLifecycleService):
                 }
             )
 
-            self._logger.info(f"Created bot configuration from template {template_name}: {bot_config.id}")
+            self._logger.info(f"Created bot configuration from template {template_name}: {bot_config.bot_id}")
             return bot_config
 
         except Exception as e:
@@ -177,7 +178,7 @@ class BotLifecycleService(BaseService, IBotLifecycleService):
 
             # Record deployment start
             await self._record_lifecycle_event(
-                bot_config.id,
+                bot_config.bot_id,
                 "deployment_started",
                 {"strategy": strategy}
             )
@@ -188,22 +189,22 @@ class BotLifecycleService(BaseService, IBotLifecycleService):
 
             # Record deployment result
             await self._record_lifecycle_event(
-                bot_config.id,
+                bot_config.bot_id,
                 "deployment_completed" if success else "deployment_failed",
                 {"strategy": strategy, "success": success}
             )
 
             if success:
-                self._logger.info(f"Successfully deployed bot {bot_config.id} using {strategy} strategy")
+                self._logger.info(f"Successfully deployed bot {bot_config.bot_id} using {strategy} strategy")
             else:
-                self._logger.error(f"Failed to deploy bot {bot_config.id} using {strategy} strategy")
+                self._logger.error(f"Failed to deploy bot {bot_config.bot_id} using {strategy} strategy")
 
             return success
 
         except Exception as e:
-            self._logger.error(f"Failed to deploy bot {bot_config.id}: {e}")
+            self._logger.error(f"Failed to deploy bot {bot_config.bot_id}: {e}")
             await self._record_lifecycle_event(
-                bot_config.id,
+                bot_config.bot_id,
                 "deployment_error",
                 {"error": str(e)}
             )

@@ -81,12 +81,11 @@ def create_state_metadata(
         return StateMetadata(
             state_id=state_id,
             state_type=state_type,
-            version=version,
+            current_version=version,
             created_at=now,
             updated_at=now,
-            checksum=checksum,
-            size_bytes=size_bytes,
-            source_component=source_component,
+            current_checksum=checksum,
+            current_size_bytes=size_bytes,
             tags=tags
         )
 
@@ -459,15 +458,19 @@ async def validate_positive_values(data: dict[str, Any], positive_fields: list[s
     return errors
 
 
-async def create_state_metadata(
+async def create_state_metadata_dict(
     state_id: str,
     state_type: str,
     state_data: dict[str, Any],
     source_component: str = "",
     version: int = 1,
+    tags: list[str] | None = None,
 ) -> dict[str, Any]:
     """
-    Create standard metadata for state objects with consistent data transformation.
+    Create standard metadata dictionary for state objects with consistent data transformation.
+
+    Note: This is the async version that returns a dict.
+    For StateMetadata objects, use the synchronous create_state_metadata() function.
 
     Args:
         state_id: Unique state identifier
@@ -475,6 +478,7 @@ async def create_state_metadata(
         state_data: State data
         source_component: Component that created the state
         version: State version number
+        tags: Optional list of tags for categorization
 
     Returns:
         State metadata dictionary
@@ -498,7 +502,7 @@ async def create_state_metadata(
         "checksum": calculate_state_checksum(transformed_data),
         "size_bytes": len(serialized_data.encode()),
         "source_component": source_component,
-        "tags": {},
+        "tags": tags if tags is not None else [],
         # Add consistent processing metadata
         "processing_mode": "stream",
         "message_pattern": "pub_sub",

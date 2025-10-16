@@ -59,6 +59,9 @@ class TestAdaptiveRiskManager:
     def sample_signal(self):
         """Create a sample trading signal."""
         return Signal(
+            signal_id="test_signal_1",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             strength=0.8,
@@ -236,6 +239,9 @@ class TestAdaptiveRiskManager:
     async def test_calculate_adaptive_stop_loss_sell_signal(self, adaptive_risk_manager):
         """Test adaptive stop loss calculation for sell signal."""
         sell_signal = Signal(
+            signal_id="test_signal_2",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USDT",
             direction=SignalDirection.SELL,
             strength=0.8,
@@ -473,6 +479,9 @@ class TestAdaptiveRiskManager:
         # Test with invalid signal (empty symbol) - should fail at Signal construction
         with pytest.raises(ValidationError):
             invalid_signal = Signal(
+                signal_id="test_signal_3",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="",  # This will fail at Signal construction with ValidationError
                 direction=SignalDirection.BUY,
                 strength=0.8,
@@ -487,6 +496,9 @@ class TestAdaptiveRiskManager:
         # Test with invalid signal (empty symbol) - should fail at Signal construction
         with pytest.raises(ValidationError):
             invalid_signal = Signal(
+                signal_id="test_signal_4",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="",  # This will fail at Signal construction with ValidationError
                 direction=SignalDirection.BUY,
                 strength=0.8,
@@ -501,6 +513,9 @@ class TestAdaptiveRiskManager:
         # Test with invalid signal (empty symbol) - should fail at Signal construction
         with pytest.raises(ValidationError):
             invalid_signal = Signal(
+                signal_id="test_signal_5",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="",  # This will fail at Signal construction with ValidationError
                 direction=SignalDirection.BUY,
                 strength=0.8,

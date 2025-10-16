@@ -2,7 +2,7 @@
 
 ## INTEGRATION
 **Dependencies**: core, database, error_handling, monitoring, utils
-**Used By**: strategies
+**Used By**: None
 **Provides**: CheckpointManager, EnvironmentAwareStateManager, MockDatabaseService, QualityController, QualityService, StateBusinessService, StateController, StateManager, StateMonitoringService, StatePersistenceService, StateRecoveryManager, StateService, StateSyncManager, StateSynchronizationService, StateValidationService, TradeLifecycleManager, TradeLifecycleService
 **Patterns**: Async Operations, Circuit Breaker, Component Architecture, Service Layer
 
@@ -605,15 +605,15 @@
 - `database_service(self)` - Line 106
 - `async start(self) -> None` - Line 110
 - `async stop(self) -> None` - Line 125
-- `async save_state(self, ...) -> bool` - Line 158
-- `async load_state(self, state_type: 'StateType', state_id: str) -> dict[str, Any] | None` - Line 234
-- `async delete_state(self, state_type: 'StateType', state_id: str) -> bool` - Line 280
-- `async list_states(self, state_type: 'StateType', limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]` - Line 321
-- `async save_snapshot(self, snapshot: 'RuntimeStateSnapshot') -> bool` - Line 388
-- `async load_snapshot(self, snapshot_id: str) -> 'RuntimeStateSnapshot | None'` - Line 433
-- `async queue_save_operation(self, ...) -> None` - Line 470
-- `async queue_delete_operation(self, state_type: 'StateType', state_id: str) -> None` - Line 490
-- `is_available(self) -> bool` - Line 569
+- `async save_state(self, ...) -> bool` - Line 170
+- `async load_state(self, state_type: 'StateType', state_id: str) -> dict[str, Any] | None` - Line 249
+- `async delete_state(self, state_type: 'StateType', state_id: str) -> bool` - Line 295
+- `async list_states(self, state_type: 'StateType', limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]` - Line 336
+- `async save_snapshot(self, snapshot: 'RuntimeStateSnapshot') -> bool` - Line 403
+- `async load_snapshot(self, snapshot_id: str) -> 'RuntimeStateSnapshot | None'` - Line 448
+- `async queue_save_operation(self, ...) -> None` - Line 485
+- `async queue_delete_operation(self, state_type: 'StateType', state_id: str) -> None` - Line 505
+- `is_available(self) -> bool` - Line 584
 
 ### Implementation: `StateSynchronizationService` ✅
 
@@ -749,17 +749,17 @@ state handling with synchronizatio
 - `async cleanup(self) -> None` - Line 449
 - `async get_state(self, state_type: StateType, state_id: str, include_metadata: bool = False) -> dict[str, Any] | None` - Line 530
 - `async set_state(self, ...) -> bool` - Line 689
-- `async delete_state(self, ...) -> bool` - Line 813
-- `async get_states_by_type(self, ...) -> list[dict[str, Any]]` - Line 887
-- `async search_states(self, ...) -> list[dict[str, Any]]` - Line 931
-- `async create_snapshot(self, description: str = '', state_types: list[StateType] | None = None) -> str` - Line 969
-- `async restore_snapshot(self, snapshot_id: str) -> bool` - Line 1014
-- `subscribe(self, ...) -> None` - Line 1057
-- `unsubscribe(self, state_type: StateType, callback: Callable) -> None` - Line 1075
-- `get_metrics(self) -> dict[str, int | float | str]` - Line 1090
-- `async get_state_metrics(self) -> StateMetrics` - Line 1108
-- `async get_health_status(self) -> dict[str, Any]` - Line 1116
-- `error_handler(self) -> ErrorHandler` - Line 1686
+- `async delete_state(self, ...) -> bool` - Line 819
+- `async get_states_by_type(self, ...) -> list[dict[str, Any]]` - Line 893
+- `async search_states(self, ...) -> list[dict[str, Any]]` - Line 937
+- `async create_snapshot(self, description: str = '', state_types: list[StateType] | None = None) -> str` - Line 975
+- `async restore_snapshot(self, snapshot_id: str) -> bool` - Line 1020
+- `subscribe(self, ...) -> None` - Line 1063
+- `unsubscribe(self, state_type: StateType, callback: Callable) -> None` - Line 1081
+- `get_metrics(self) -> dict[str, int | float | str]` - Line 1096
+- `async get_state_metrics(self) -> StateMetrics` - Line 1114
+- `async get_health_status(self) -> dict[str, Any]` - Line 1122
+- `error_handler(self) -> ErrorHandler` - Line 1692
 
 ### Implementation: `SyncEventType` ✅
 
@@ -1147,7 +1147,7 @@ class StateDataTransformer:
 
 ```python
 def register_state_services(container: DependencyContainer) -> None  # Line 40
-async def create_state_service_with_dependencies(...) -> 'StateService'  # Line 202
+async def create_state_service_with_dependencies(...) -> 'StateService'  # Line 204
 ```
 
 ### File: environment_integration.py
@@ -1858,18 +1858,19 @@ class StatePersistenceService(BaseService):
     def database_service(self)  # Line 106
     async def start(self) -> None  # Line 110
     async def stop(self) -> None  # Line 125
-    async def save_state(self, ...) -> bool  # Line 158
-    async def load_state(self, state_type: 'StateType', state_id: str) -> dict[str, Any] | None  # Line 234
-    async def delete_state(self, state_type: 'StateType', state_id: str) -> bool  # Line 280
-    async def list_states(self, state_type: 'StateType', limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]  # Line 321
-    async def save_snapshot(self, snapshot: 'RuntimeStateSnapshot') -> bool  # Line 388
-    async def load_snapshot(self, snapshot_id: str) -> 'RuntimeStateSnapshot | None'  # Line 433
-    async def queue_save_operation(self, ...) -> None  # Line 470
-    async def queue_delete_operation(self, state_type: 'StateType', state_id: str) -> None  # Line 490
-    async def _process_operations(self) -> None  # Line 504
-    async def _handle_persistence_event(self, event_data: dict[str, Any]) -> None  # Line 528
-    async def _flush_events(self) -> None  # Line 555
-    def is_available(self) -> bool  # Line 569
+    def _serialize_for_json(self, obj: Any) -> Any  # Line 158
+    async def save_state(self, ...) -> bool  # Line 170
+    async def load_state(self, state_type: 'StateType', state_id: str) -> dict[str, Any] | None  # Line 249
+    async def delete_state(self, state_type: 'StateType', state_id: str) -> bool  # Line 295
+    async def list_states(self, state_type: 'StateType', limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]  # Line 336
+    async def save_snapshot(self, snapshot: 'RuntimeStateSnapshot') -> bool  # Line 403
+    async def load_snapshot(self, snapshot_id: str) -> 'RuntimeStateSnapshot | None'  # Line 448
+    async def queue_save_operation(self, ...) -> None  # Line 485
+    async def queue_delete_operation(self, state_type: 'StateType', state_id: str) -> None  # Line 505
+    async def _process_operations(self) -> None  # Line 519
+    async def _handle_persistence_event(self, event_data: dict[str, Any]) -> None  # Line 543
+    async def _flush_events(self) -> None  # Line 570
+    def is_available(self) -> bool  # Line 584
 ```
 
 ### File: state_synchronization_service.py
@@ -2127,43 +2128,43 @@ class StateService(BaseService, ErrorPropagationMixin):
     async def cleanup(self) -> None  # Line 449
     async def get_state(self, state_type: StateType, state_id: str, include_metadata: bool = False) -> dict[str, Any] | None  # Line 530
     async def set_state(self, ...) -> bool  # Line 689
-    async def delete_state(self, ...) -> bool  # Line 813
-    async def get_states_by_type(self, ...) -> list[dict[str, Any]]  # Line 887
-    async def search_states(self, ...) -> list[dict[str, Any]]  # Line 931
-    async def create_snapshot(self, description: str = '', state_types: list[StateType] | None = None) -> str  # Line 969
-    async def restore_snapshot(self, snapshot_id: str) -> bool  # Line 1014
-    def subscribe(self, ...) -> None  # Line 1057
-    def unsubscribe(self, state_type: StateType, callback: Callable) -> None  # Line 1075
-    def get_metrics(self) -> dict[str, int | float | str]  # Line 1090
-    async def get_state_metrics(self) -> StateMetrics  # Line 1108
-    async def get_health_status(self) -> dict[str, Any]  # Line 1116
-    async def _check_rate_limit(self, cache_key: str) -> bool  # Line 1171
-    def _get_state_lock(self, state_key: str) -> asyncio.Lock  # Line 1199
-    def _detect_changed_fields(self, old_state: dict[str, Any] | None, new_state: dict[str, Any]) -> set[str]  # Line 1222
-    def _get_next_version(self, cache_key: str) -> int  # Line 1243
-    def _update_hit_rate(self, hit: bool) -> float  # Line 1248
-    def _update_operation_metrics(self, operation_time_ms: float, success: bool) -> None  # Line 1260
-    def _calculate_memory_usage(self) -> float  # Line 1282
-    def _matches_criteria(self, state: dict[str, Any], criteria: dict[str, Any]) -> bool  # Line 1305
-    async def _load_metadata_through_service(self, cache_key: str, state_type: StateType, state_id: str) -> StateMetadata | None  # Line 1322
-    async def _load_existing_states(self) -> None  # Line 1347
-    async def _broadcast_state_change(self, ...) -> None  # Line 1357
-    async def _notify_legacy_subscribers(self, ...) -> None  # Line 1468
-    async def _synchronization_loop(self) -> None  # Line 1490
-    async def _cleanup_loop(self) -> None  # Line 1503
-    async def _metrics_loop(self) -> None  # Line 1524
-    async def _backup_loop(self) -> None  # Line 1548
-    async def _initialize_service_components(self) -> None  # Line 1578
-    async def _initialize_state_components(self) -> None  # Line 1642
-    def error_handler(self) -> ErrorHandler  # Line 1686
-    async def _store_state_through_services(self, ...) -> None  # Line 1702
-    async def _coordinate_post_storage_activities(self, ...) -> None  # Line 1731
-    def _resolve_service_dependency(self, service_name: str, fallback_factory)  # Line 1769
-    def _create_business_service_fallback(self)  # Line 1779
-    def _create_persistence_service_fallback(self)  # Line 1783
-    def _create_validation_service_fallback(self)  # Line 1787
-    def _create_synchronization_service_fallback(self)  # Line 1791
-    def _extract_config_dict(self, config: Config) -> dict[str, Any]  # Line 1797
+    async def delete_state(self, ...) -> bool  # Line 819
+    async def get_states_by_type(self, ...) -> list[dict[str, Any]]  # Line 893
+    async def search_states(self, ...) -> list[dict[str, Any]]  # Line 937
+    async def create_snapshot(self, description: str = '', state_types: list[StateType] | None = None) -> str  # Line 975
+    async def restore_snapshot(self, snapshot_id: str) -> bool  # Line 1020
+    def subscribe(self, ...) -> None  # Line 1063
+    def unsubscribe(self, state_type: StateType, callback: Callable) -> None  # Line 1081
+    def get_metrics(self) -> dict[str, int | float | str]  # Line 1096
+    async def get_state_metrics(self) -> StateMetrics  # Line 1114
+    async def get_health_status(self) -> dict[str, Any]  # Line 1122
+    async def _check_rate_limit(self, cache_key: str) -> bool  # Line 1177
+    def _get_state_lock(self, state_key: str) -> asyncio.Lock  # Line 1205
+    def _detect_changed_fields(self, old_state: dict[str, Any] | None, new_state: dict[str, Any]) -> set[str]  # Line 1228
+    def _get_next_version(self, cache_key: str) -> int  # Line 1249
+    def _update_hit_rate(self, hit: bool) -> float  # Line 1254
+    def _update_operation_metrics(self, operation_time_ms: float, success: bool) -> None  # Line 1266
+    def _calculate_memory_usage(self) -> float  # Line 1288
+    def _matches_criteria(self, state: dict[str, Any], criteria: dict[str, Any]) -> bool  # Line 1311
+    async def _load_metadata_through_service(self, cache_key: str, state_type: StateType, state_id: str) -> StateMetadata | None  # Line 1328
+    async def _load_existing_states(self) -> None  # Line 1353
+    async def _broadcast_state_change(self, ...) -> None  # Line 1363
+    async def _notify_legacy_subscribers(self, ...) -> None  # Line 1474
+    async def _synchronization_loop(self) -> None  # Line 1496
+    async def _cleanup_loop(self) -> None  # Line 1509
+    async def _metrics_loop(self) -> None  # Line 1530
+    async def _backup_loop(self) -> None  # Line 1554
+    async def _initialize_service_components(self) -> None  # Line 1584
+    async def _initialize_state_components(self) -> None  # Line 1648
+    def error_handler(self) -> ErrorHandler  # Line 1692
+    async def _store_state_through_services(self, ...) -> None  # Line 1708
+    async def _coordinate_post_storage_activities(self, ...) -> None  # Line 1737
+    def _resolve_service_dependency(self, service_name: str, fallback_factory)  # Line 1775
+    def _create_business_service_fallback(self)  # Line 1785
+    def _create_persistence_service_fallback(self)  # Line 1789
+    def _create_validation_service_fallback(self)  # Line 1793
+    def _create_synchronization_service_fallback(self)  # Line 1797
+    def _extract_config_dict(self, config: Config) -> dict[str, Any]  # Line 1803
 ```
 
 ### File: state_sync_manager.py

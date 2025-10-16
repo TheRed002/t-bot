@@ -66,6 +66,9 @@ class TestAdaptiveStopLossValidation:
     def buy_signal(self):
         """Create a buy signal for testing."""
         return Signal(
+            signal_id="test_signal_1",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             strength=0.8,
@@ -78,6 +81,9 @@ class TestAdaptiveStopLossValidation:
     def sell_signal(self):
         """Create a sell signal for testing."""
         return Signal(
+            signal_id="test_signal_2",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USDT",
             direction=SignalDirection.SELL,
             strength=0.8,
@@ -391,6 +397,9 @@ class TestAdaptiveStopLossValidation:
         # Test empty symbol - should fail at Signal construction
         with pytest.raises(ValidationError):
             Signal(
+                signal_id="test_signal_3",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="",
                 direction=SignalDirection.BUY,
                 strength=0.8,
@@ -402,6 +411,9 @@ class TestAdaptiveStopLossValidation:
         # Test whitespace symbol - should also fail at Signal construction
         with pytest.raises(ValidationError):
             Signal(
+                signal_id="test_signal_4",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="   ",
                 direction=SignalDirection.BUY,
                 strength=0.8,
@@ -558,6 +570,9 @@ class TestAdaptiveStopLossValidation:
                 # Test calculation with modified config
                 entry_price = Decimal("50000")
                 buy_signal = Signal(
+                    signal_id="test_signal_5",
+                    strategy_id="test_strategy_1",
+                    strategy_name="test_strategy",
                     symbol="BTC/USDT",
                     direction=SignalDirection.BUY,
                     strength=0.8,

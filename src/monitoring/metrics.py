@@ -406,7 +406,7 @@ class MetricsCollector(BaseComponent):
                 full_name = f"{definition.namespace}_{definition.name}"
 
                 if full_name in self._metrics:
-                    self.logger.warning(f"Metric {full_name} already registered")
+                    self.logger.debug(f"Metric {full_name} already registered, reusing existing metric")
                     return self._metrics[full_name]
 
                 # Normalize metric type (handle both string and enum values)

@@ -2,7 +2,7 @@
 
 ## INTEGRATION
 **Dependencies**: core, error_handling, utils
-**Used By**: strategies
+**Used By**: None
 **Provides**: AlertManager, DefaultAlertService, DefaultDashboardService, DefaultMetricsService, DefaultPerformanceService, GrafanaDashboardManager, MonitoringService, WebSocketManager
 **Patterns**: Async Operations, Component Architecture, Service Layer
 
@@ -85,10 +85,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `is_active(self) -> bool` - Line 226
-- `to_db_model_dict(self) -> dict[str, Any]` - Line 230
-- `from_db_model(cls, db_alert: dict[str, Any]) -> 'Alert'` - Line 251
-- `duration(self) -> timedelta` - Line 278
+- `is_active(self) -> bool` - Line 227
+- `to_db_model_dict(self) -> dict[str, Any]` - Line 231
+- `from_db_model(cls, db_alert: dict[str, Any]) -> 'Alert'` - Line 252
+- `duration(self) -> timedelta` - Line 279
 
 ### Implementation: `NotificationConfig` ✅
 
@@ -107,19 +107,19 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `add_rule(self, rule: AlertRule) -> None` - Line 373
-- `remove_rule(self, rule_name: str) -> bool` - Line 383
-- `add_escalation_policy(self, policy: EscalationPolicy) -> None` - Line 399
-- `add_suppression_rule(self, rule: dict[str, Any]) -> None` - Line 409
-- `async fire_alert(self, alert: Alert) -> None` - Line 422
-- `async resolve_alert(self, fingerprint: str) -> None` - Line 485
-- `async acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool` - Line 553
-- `get_active_alerts(self, severity: AlertSeverity | None = None) -> list[Alert]` - Line 580
-- `get_alert_history(self, limit: int = 100) -> list[Alert]` - Line 595
-- `get_alert_stats(self) -> dict[str, Any]` - Line 609
-- `async start(self) -> None` - Line 633
-- `async stop(self) -> None` - Line 643
-- `async cleanup(self) -> None` - Line 667
+- `add_rule(self, rule: AlertRule) -> None` - Line 380
+- `remove_rule(self, rule_name: str) -> bool` - Line 390
+- `add_escalation_policy(self, policy: EscalationPolicy) -> None` - Line 406
+- `add_suppression_rule(self, rule: dict[str, Any]) -> None` - Line 416
+- `async fire_alert(self, alert: Alert) -> None` - Line 429
+- `async resolve_alert(self, fingerprint: str) -> None` - Line 493
+- `async acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool` - Line 562
+- `get_active_alerts(self, severity: AlertSeverity | None = None) -> list[Alert]` - Line 589
+- `get_alert_history(self, limit: int = 100) -> list[Alert]` - Line 604
+- `get_alert_stats(self) -> dict[str, Any]` - Line 618
+- `async start(self) -> None` - Line 642
+- `async stop(self) -> None` - Line 653
+- `async cleanup(self) -> None` - Line 678
 
 ### Implementation: `ErrorContext` ✅
 
@@ -162,9 +162,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async deploy_all_dashboards(self) -> dict[str, bool]` - Line 732
-- `async deploy_dashboard(self, dashboard: Dashboard) -> bool` - Line 763
-- `export_dashboards_to_files(self, output_dir: str) -> None` - Line 844
+- `async deploy_all_dashboards(self) -> dict[str, bool]` - Line 738
+- `async deploy_dashboard(self, dashboard: Dashboard) -> bool` - Line 769
+- `export_dashboards_to_files(self, output_dir: str) -> None` - Line 850
 
 ### Implementation: `MonitoringDataTransformer` ✅
 
@@ -309,10 +309,10 @@
 - `async start_collection(self) -> None` - Line 765
 - `async stop_collection(self) -> None` - Line 775
 - `async cleanup(self) -> None` - Line 794
-- `async start(self) -> None` - Line 841
-- `async stop(self) -> None` - Line 845
-- `export_metrics(self) -> bytes` - Line 869
-- `get_metrics_content_type(self) -> str` - Line 878
+- `async start(self) -> None` - Line 853
+- `async stop(self) -> None` - Line 857
+- `export_metrics(self) -> bytes` - Line 881
+- `get_metrics_content_type(self) -> str` - Line 890
 
 ### Implementation: `TradingMetrics` ✅
 
@@ -321,13 +321,13 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `record_order(self, ...) -> None` - Line 1240
-- `record_trade(self, ...) -> None` - Line 1316
-- `update_portfolio_metrics(self, ...) -> None` - Line 1410
-- `record_strategy_signal(self, strategy: str, signal_type: str, symbol: str) -> None` - Line 1485
-- `record_pnl(self, ...) -> None` - Line 1497
-- `record_latency(self, operation: str, exchange: str, latency_ms: float, **kwargs) -> None` - Line 1524
-- `record_order_latency(self, exchange: str, latency: float, order_type: str | None = None) -> None` - Line 1539
+- `record_order(self, ...) -> None` - Line 1252
+- `record_trade(self, ...) -> None` - Line 1328
+- `update_portfolio_metrics(self, ...) -> None` - Line 1422
+- `record_strategy_signal(self, strategy: str, signal_type: str, symbol: str) -> None` - Line 1497
+- `record_pnl(self, ...) -> None` - Line 1509
+- `record_latency(self, operation: str, exchange: str, latency_ms: float, **kwargs) -> None` - Line 1536
+- `record_order_latency(self, exchange: str, latency: float, order_type: str | None = None) -> None` - Line 1551
 
 ### Implementation: `SystemMetrics` ✅
 
@@ -336,11 +336,11 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `record_cpu_usage(self, cpu_percent: float) -> None` - Line 1621
-- `record_memory_usage(self, used_mb: float, total_mb: float) -> None` - Line 1630
-- `record_network_io(self, bytes_sent: float, bytes_received: float) -> None` - Line 1646
-- `record_disk_usage(self, mount_point: str, usage_percent: float) -> None` - Line 1659
-- `async collect_and_record_system_metrics(self) -> None` - Line 1670
+- `record_cpu_usage(self, cpu_percent: float) -> None` - Line 1633
+- `record_memory_usage(self, used_mb: float, total_mb: float) -> None` - Line 1642
+- `record_network_io(self, bytes_sent: float, bytes_received: float) -> None` - Line 1658
+- `record_disk_usage(self, mount_point: str, usage_percent: float) -> None` - Line 1671
+- `async collect_and_record_system_metrics(self) -> None` - Line 1682
 
 ### Implementation: `ExchangeMetrics` ✅
 
@@ -349,18 +349,18 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `record_api_request(self, exchange: str, endpoint: str, status: str, response_time: float) -> None` - Line 1837
-- `update_rate_limits(self, exchange: str, limit_type: str, remaining: int) -> None` - Line 1857
-- `record_connection(self, success: bool, exchange: str | None = None) -> None` - Line 1869
-- `record_health_check(self, success: bool, duration: float | None = None, exchange: str | None = None) -> None` - Line 1885
-- `record_rate_limit_violation(self, endpoint: str, exchange: str | None = None) -> None` - Line 1909
-- `record_rate_limit_check(self, endpoint: str, weight: int = 1, exchange: str | None = None) -> None` - Line 1921
-- `record_order(self, order_type = None, side = None, success = None, **kwargs) -> None` - Line 1936
-- `record_order_latency(self, exchange: str, latency: float, order_type: str | None = None) -> None` - Line 1999
-- `async record_websocket_connection(self, exchange: str, connected: bool, error_type: str | None = None) -> None` - Line 2024
-- `async record_websocket_message(self, ...) -> None` - Line 2049
-- `async record_websocket_heartbeat(self, exchange: str, latency_seconds: float) -> None` - Line 2093
-- `async record_websocket_reconnection(self, exchange: str, reason: str) -> None` - Line 2124
+- `record_api_request(self, exchange: str, endpoint: str, status: str, response_time: float) -> None` - Line 1849
+- `update_rate_limits(self, exchange: str, limit_type: str, remaining: int) -> None` - Line 1869
+- `record_connection(self, success: bool, exchange: str | None = None) -> None` - Line 1881
+- `record_health_check(self, success: bool, duration: float | None = None, exchange: str | None = None) -> None` - Line 1897
+- `record_rate_limit_violation(self, endpoint: str, exchange: str | None = None) -> None` - Line 1921
+- `record_rate_limit_check(self, endpoint: str, weight: int = 1, exchange: str | None = None) -> None` - Line 1933
+- `record_order(self, order_type = None, side = None, success = None, **kwargs) -> None` - Line 1948
+- `record_order_latency(self, exchange: str, latency: float, order_type: str | None = None) -> None` - Line 2011
+- `async record_websocket_connection(self, exchange: str, connected: bool, error_type: str | None = None) -> None` - Line 2036
+- `async record_websocket_message(self, ...) -> None` - Line 2061
+- `async record_websocket_heartbeat(self, exchange: str, latency_seconds: float) -> None` - Line 2105
+- `async record_websocket_reconnection(self, exchange: str, reason: str) -> None` - Line 2136
 
 ### Implementation: `RiskMetrics` ✅
 
@@ -369,10 +369,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `record_var(self, confidence_level: float, timeframe: str, var_value: float) -> None` - Line 2162
-- `record_drawdown(self, timeframe: str, drawdown_pct: float) -> None` - Line 2198
-- `record_sharpe_ratio(self, timeframe: str, sharpe_ratio: float) -> None` - Line 2227
-- `record_position_size(self, exchange: str, symbol: str, size_usd: float) -> None` - Line 2253
+- `record_var(self, confidence_level: float, timeframe: str, var_value: float) -> None` - Line 2174
+- `record_drawdown(self, timeframe: str, drawdown_pct: float) -> None` - Line 2210
+- `record_sharpe_ratio(self, timeframe: str, sharpe_ratio: float) -> None` - Line 2239
+- `record_position_size(self, exchange: str, symbol: str, size_usd: float) -> None` - Line 2265
 
 ### Implementation: `PerformanceCategory` ✅
 
@@ -415,26 +415,26 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async start(self) -> None` - Line 477
-- `async start_async(self) -> None` - Line 486
-- `async stop_async(self) -> None` - Line 503
-- `async stop(self) -> None` - Line 571
-- `async cleanup(self) -> None` - Line 577
-- `profile_function(self, ...)` - Line 724
-- `async profile_async_function(self, ...)` - Line 768
-- `record_order_execution(self, ...) -> None` - Line 811
-- `record_market_data_processing(self, ...) -> None` - Line 932
-- `async record_websocket_latency(self, exchange: str, message_type: str, latency_ms: Decimal) -> None` - Line 976
-- `record_database_query(self, database: str, operation: str, table: str, query_time_ms: Decimal) -> None` - Line 1032
-- `record_strategy_performance(self, ...) -> None` - Line 1080
-- `get_latency_stats(self, metric_name: str) -> LatencyStats | None` - Line 1130
-- `get_throughput_stats(self, metric_name: str) -> ThroughputStats | None` - Line 1152
-- `get_system_resource_stats(self) -> SystemResourceStats | None` - Line 1192
-- `get_gc_stats(self) -> GCStats | None` - Line 1213
-- `get_performance_summary(self) -> dict[str, Any]` - Line 1232
-- `get_metrics(self) -> dict[str, Any]` - Line 1282
-- `reset_metrics(self) -> None` - Line 1286
-- `clear_metrics(self) -> None` - Line 1297
+- `async start(self) -> None` - Line 485
+- `async start_async(self) -> None` - Line 495
+- `async stop_async(self) -> None` - Line 513
+- `async stop(self) -> None` - Line 581
+- `async cleanup(self) -> None` - Line 588
+- `profile_function(self, ...)` - Line 748
+- `async profile_async_function(self, ...)` - Line 792
+- `record_order_execution(self, ...) -> None` - Line 835
+- `record_market_data_processing(self, ...) -> None` - Line 956
+- `async record_websocket_latency(self, exchange: str, message_type: str, latency_ms: Decimal) -> None` - Line 1000
+- `record_database_query(self, database: str, operation: str, table: str, query_time_ms: Decimal) -> None` - Line 1056
+- `record_strategy_performance(self, ...) -> None` - Line 1104
+- `get_latency_stats(self, metric_name: str) -> LatencyStats | None` - Line 1154
+- `get_throughput_stats(self, metric_name: str) -> ThroughputStats | None` - Line 1176
+- `get_system_resource_stats(self) -> SystemResourceStats | None` - Line 1216
+- `get_gc_stats(self) -> GCStats | None` - Line 1237
+- `get_performance_summary(self) -> dict[str, Any]` - Line 1256
+- `get_metrics(self) -> dict[str, Any]` - Line 1306
+- `reset_metrics(self) -> None` - Line 1310
+- `clear_metrics(self) -> None` - Line 1321
 
 ### Implementation: `PerformanceMetrics` ✅
 
@@ -442,8 +442,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `add_metric(self, metric: PerformanceMetric) -> None` - Line 1899
-- `get_metrics_by_category(self, category: PerformanceCategory) -> list[PerformanceMetric]` - Line 1903
+- `add_metric(self, metric: PerformanceMetric) -> None` - Line 1923
+- `get_metrics_by_category(self, category: PerformanceCategory) -> list[PerformanceMetric]` - Line 1927
 
 ### Implementation: `QueryMetrics` ✅
 
@@ -451,8 +451,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `record_query(self, query: str, execution_time: float) -> None` - Line 1923
-- `get_average_query_time(self) -> float` - Line 1927
+- `record_query(self, query: str, execution_time: float) -> None` - Line 1947
+- `get_average_query_time(self) -> float` - Line 1951
 
 ### Implementation: `CacheMetrics` ✅
 
@@ -460,9 +460,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `record_hit(self) -> None` - Line 1948
-- `record_miss(self) -> None` - Line 1952
-- `get_hit_rate(self) -> float` - Line 1956
+- `record_hit(self) -> None` - Line 1972
+- `record_miss(self) -> None` - Line 1976
+- `get_hit_rate(self) -> float` - Line 1980
 
 ### Implementation: `QueryOptimizer` ✅
 
@@ -470,10 +470,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `analyze_query(self, query: str) -> dict[str, Any]` - Line 1971
-- `optimize_query(self, query: str) -> str` - Line 1975
-- `cache_query_plan(self, query: str, plan: dict[str, Any]) -> None` - Line 1979
-- `get_cached_plan(self, query: str) -> dict[str, Any] | None` - Line 1983
+- `analyze_query(self, query: str) -> dict[str, Any]` - Line 1995
+- `optimize_query(self, query: str) -> str` - Line 1999
+- `cache_query_plan(self, query: str, plan: dict[str, Any]) -> None` - Line 2003
+- `get_cached_plan(self, query: str) -> dict[str, Any] | None` - Line 2007
 
 ### Implementation: `CacheOptimizer` ✅
 
@@ -481,8 +481,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `analyze_cache_performance(self) -> dict[str, Any]` - Line 1994
-- `optimize_ttl(self, key: str) -> int` - Line 1998
+- `analyze_cache_performance(self) -> dict[str, Any]` - Line 2018
+- `optimize_ttl(self, key: str) -> int` - Line 2022
 
 ### Implementation: `AlertRequest` ✅
 
@@ -501,15 +501,15 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async create_alert(self, request: AlertRequest) -> str` - Line 88
-- `async resolve_alert(self, fingerprint: str) -> bool` - Line 166
-- `async acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool` - Line 171
-- `get_active_alerts(self, severity: AlertSeverity | None = None) -> list['Alert']` - Line 175
-- `get_alert_stats(self) -> dict[str, Any]` - Line 179
-- `add_rule(self, rule) -> None` - Line 183
-- `add_escalation_policy(self, policy) -> None` - Line 187
-- `async handle_error_event_from_error_handling(self, error_data: dict[str, Any]) -> str` - Line 191
-- `async handle_batch_error_events_from_error_handling(self, error_events: list[dict[str, Any]]) -> list[str]` - Line 236
+- `async create_alert(self, request: AlertRequest) -> str` - Line 83
+- `async resolve_alert(self, fingerprint: str) -> bool` - Line 161
+- `async acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool` - Line 166
+- `get_active_alerts(self, severity: AlertSeverity | None = None) -> list['Alert']` - Line 170
+- `get_alert_stats(self) -> dict[str, Any]` - Line 174
+- `add_rule(self, rule) -> None` - Line 178
+- `add_escalation_policy(self, policy) -> None` - Line 182
+- `async handle_error_event_from_error_handling(self, error_data: dict[str, Any]) -> str` - Line 186
+- `async handle_batch_error_events_from_error_handling(self, error_events: list[dict[str, Any]]) -> list[str]` - Line 231
 
 ### Implementation: `DefaultMetricsService` ✅
 
@@ -518,11 +518,11 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `record_counter(self, request: MetricRequest) -> None` - Line 321
-- `record_gauge(self, request: MetricRequest) -> None` - Line 416
-- `record_histogram(self, request: MetricRequest) -> None` - Line 465
-- `export_metrics(self) -> str` - Line 514
-- `record_error_pattern_metric(self, error_data: dict[str, Any]) -> None` - Line 518
+- `record_counter(self, request: MetricRequest) -> None` - Line 325
+- `record_gauge(self, request: MetricRequest) -> None` - Line 420
+- `record_histogram(self, request: MetricRequest) -> None` - Line 469
+- `export_metrics(self) -> str` - Line 518
+- `record_error_pattern_metric(self, error_data: dict[str, Any]) -> None` - Line 526
 
 ### Implementation: `DefaultPerformanceService` ✅
 
@@ -531,11 +531,11 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `get_performance_summary(self) -> dict[str, Any]` - Line 550
-- `record_order_execution(self, ...) -> None` - Line 554
-- `record_market_data_processing(self, ...) -> None` - Line 679
-- `get_latency_stats(self, metric_name: str)` - Line 691
-- `get_system_resource_stats(self)` - Line 695
+- `get_performance_summary(self) -> dict[str, Any]` - Line 558
+- `record_order_execution(self, ...) -> None` - Line 562
+- `record_market_data_processing(self, ...) -> None` - Line 697
+- `get_latency_stats(self, metric_name: str)` - Line 709
+- `get_system_resource_stats(self)` - Line 713
 
 ### Implementation: `DefaultDashboardService` ✅
 
@@ -544,23 +544,23 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async deploy_dashboard(self, dashboard: 'Dashboard') -> bool` - Line 711
-- `async deploy_all_dashboards(self) -> dict[str, bool]` - Line 715
-- `export_dashboards_to_files(self, output_dir: str) -> None` - Line 719
-- `create_trading_overview_dashboard(self) -> Dashboard` - Line 723
-- `create_system_performance_dashboard(self) -> Dashboard` - Line 727
+- `async deploy_dashboard(self, dashboard: 'Dashboard') -> bool` - Line 729
+- `async deploy_all_dashboards(self) -> dict[str, bool]` - Line 733
+- `export_dashboards_to_files(self, output_dir: str) -> None` - Line 737
+- `create_trading_overview_dashboard(self) -> Dashboard` - Line 741
+- `create_system_performance_dashboard(self) -> Dashboard` - Line 745
 
 ### Implementation: `MonitoringService` ✅
 
-**Inherits**: BaseService
+**Inherits**: BaseService, MonitoringServiceInterface
 **Purpose**: Composite service for all monitoring operations
 **Status**: Complete
 
 **Implemented Methods:**
-- `async start_monitoring(self) -> None` - Line 773
-- `async stop_monitoring(self) -> None` - Line 789
-- `async get_health_status(self) -> dict[str, Any]` - Line 805
-- `async health_check(self) -> dict[str, Any]` - Line 809
+- `async start_monitoring(self) -> None` - Line 791
+- `async stop_monitoring(self) -> None` - Line 817
+- `async get_health_status(self) -> dict[str, Any]` - Line 833
+- `async health_check(self) -> dict[str, Any]` - Line 837
 
 ### Implementation: `OpenTelemetryConfig` ✅
 
@@ -669,7 +669,7 @@ class NotificationChannel(Enum):
 
 ```python
 class AlertRule:
-    def __post_init__(self)  # Line 189
+    def __post_init__(self)  # Line 190
 ```
 
 #### Class: `Alert`
@@ -678,11 +678,11 @@ class AlertRule:
 
 ```python
 class Alert:
-    def __post_init__(self)  # Line 218
-    def is_active(self) -> bool  # Line 226
-    def to_db_model_dict(self) -> dict[str, Any]  # Line 230
-    def from_db_model(cls, db_alert: dict[str, Any]) -> 'Alert'  # Line 251
-    def duration(self) -> timedelta  # Line 278
+    def __post_init__(self)  # Line 219
+    def is_active(self) -> bool  # Line 227
+    def to_db_model_dict(self) -> dict[str, Any]  # Line 231
+    def from_db_model(cls, db_alert: dict[str, Any]) -> 'Alert'  # Line 252
+    def duration(self) -> timedelta  # Line 279
 ```
 
 #### Class: `NotificationConfig`
@@ -708,46 +708,47 @@ class EscalationPolicy:
 
 ```python
 class AlertManager(BaseComponent):
-    def __init__(self, config: NotificationConfig, error_handler = None)  # Line 336
-    def add_rule(self, rule: AlertRule) -> None  # Line 373
-    def remove_rule(self, rule_name: str) -> bool  # Line 383
-    def add_escalation_policy(self, policy: EscalationPolicy) -> None  # Line 399
-    def add_suppression_rule(self, rule: dict[str, Any]) -> None  # Line 409
-    async def fire_alert(self, alert: Alert) -> None  # Line 422
-    async def resolve_alert(self, fingerprint: str) -> None  # Line 485
-    async def acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool  # Line 553
-    def get_active_alerts(self, severity: AlertSeverity | None = None) -> list[Alert]  # Line 580
-    def get_alert_history(self, limit: int = 100) -> list[Alert]  # Line 595
-    def get_alert_stats(self) -> dict[str, Any]  # Line 609
-    async def start(self) -> None  # Line 633
-    async def stop(self) -> None  # Line 643
-    async def cleanup(self) -> None  # Line 667
-    async def __aenter__(self)  # Line 687
-    async def __aexit__(self, exc_type, exc_val, exc_tb)  # Line 692
-    def _is_suppressed(self, alert: Alert) -> bool  # Line 696
-    async def _processing_loop(self) -> None  # Line 717
-    async def _send_notifications(self, alert: Alert) -> None  # Line 792
-    async def _send_resolution_notifications(self, alert: Alert) -> None  # Line 851
-    async def _send_email_notification(self, alert: Alert) -> None  # Line 881
-    def _send_email_sync(self, subject: str, body: str) -> None  # Line 927
-    async def _send_email_resolution(self, alert: Alert) -> None  # Line 974
-    async def _send_slack_notification(self, alert: Alert) -> None  # Line 1003
-    async def _send_slack_resolution(self, alert: Alert) -> None  # Line 1080
-    async def _send_webhook_notification(self, alert: Alert) -> None  # Line 1147
-    async def _send_webhook_resolution(self, alert: Alert) -> None  # Line 1243
-    async def _send_discord_notification(self, alert: Alert) -> None  # Line 1304
-    async def _send_discord_resolution(self, alert: Alert) -> None  # Line 1371
-    async def _check_escalations(self) -> None  # Line 1433
-    def _parse_duration_minutes(self, duration: str) -> int  # Line 1452
-    async def _escalate_alert(self, alert: Alert) -> None  # Line 1510
+    def __init__(self, config: NotificationConfig, error_handler = None)  # Line 337
+    def _ensure_async_primitives(self) -> None  # Line 375
+    def add_rule(self, rule: AlertRule) -> None  # Line 380
+    def remove_rule(self, rule_name: str) -> bool  # Line 390
+    def add_escalation_policy(self, policy: EscalationPolicy) -> None  # Line 406
+    def add_suppression_rule(self, rule: dict[str, Any]) -> None  # Line 416
+    async def fire_alert(self, alert: Alert) -> None  # Line 429
+    async def resolve_alert(self, fingerprint: str) -> None  # Line 493
+    async def acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool  # Line 562
+    def get_active_alerts(self, severity: AlertSeverity | None = None) -> list[Alert]  # Line 589
+    def get_alert_history(self, limit: int = 100) -> list[Alert]  # Line 604
+    def get_alert_stats(self) -> dict[str, Any]  # Line 618
+    async def start(self) -> None  # Line 642
+    async def stop(self) -> None  # Line 653
+    async def cleanup(self) -> None  # Line 678
+    async def __aenter__(self)  # Line 698
+    async def __aexit__(self, exc_type, exc_val, exc_tb)  # Line 703
+    def _is_suppressed(self, alert: Alert) -> bool  # Line 707
+    async def _processing_loop(self) -> None  # Line 728
+    async def _send_notifications(self, alert: Alert) -> None  # Line 825
+    async def _send_resolution_notifications(self, alert: Alert) -> None  # Line 884
+    async def _send_email_notification(self, alert: Alert) -> None  # Line 914
+    def _send_email_sync(self, subject: str, body: str) -> None  # Line 960
+    async def _send_email_resolution(self, alert: Alert) -> None  # Line 1007
+    async def _send_slack_notification(self, alert: Alert) -> None  # Line 1036
+    async def _send_slack_resolution(self, alert: Alert) -> None  # Line 1113
+    async def _send_webhook_notification(self, alert: Alert) -> None  # Line 1180
+    async def _send_webhook_resolution(self, alert: Alert) -> None  # Line 1276
+    async def _send_discord_notification(self, alert: Alert) -> None  # Line 1337
+    async def _send_discord_resolution(self, alert: Alert) -> None  # Line 1404
+    async def _check_escalations(self) -> None  # Line 1466
+    def _parse_duration_minutes(self, duration: str) -> int  # Line 1485
+    async def _escalate_alert(self, alert: Alert) -> None  # Line 1543
 ```
 
 #### Functions:
 
 ```python
-def load_alert_rules_from_file(file_path: str) -> list[AlertRule]  # Line 1549
-def get_alert_manager() -> Optional['AlertManager']  # Line 1609
-def set_global_alert_manager(alert_manager: AlertManager) -> None  # Line 1630
+def load_alert_rules_from_file(file_path: str) -> list[AlertRule]  # Line 1582
+def get_alert_manager() -> Optional['AlertManager']  # Line 1642
+def set_global_alert_manager(alert_manager: AlertManager) -> None  # Line 1663
 ```
 
 ### File: dashboards.py
@@ -800,9 +801,9 @@ class DashboardBuilder:
 ```python
 class GrafanaDashboardManager:
     def __init__(self, grafana_url: str, api_key: str, error_handler = None)  # Line 709
-    async def deploy_all_dashboards(self) -> dict[str, bool]  # Line 732
-    async def deploy_dashboard(self, dashboard: Dashboard) -> bool  # Line 763
-    def export_dashboards_to_files(self, output_dir: str) -> None  # Line 844
+    async def deploy_all_dashboards(self) -> dict[str, bool]  # Line 738
+    async def deploy_dashboard(self, dashboard: Dashboard) -> bool  # Line 769
+    def export_dashboards_to_files(self, output_dir: str) -> None  # Line 850
 ```
 
 #### Functions:
@@ -812,7 +813,7 @@ def get_logger(name: str)  # Line 25
 def with_retry(max_attempts: int = 3, backoff_factor = None)  # Line 32
 async def create_http_session(timeout: int = 30, connector_limit: int = 10, connector_limit_per_host: int = 5)  # Line 67
 async def safe_session_close(session)  # Line 79
-def create_default_dashboards() -> list[Dashboard]  # Line 874
+def create_default_dashboards() -> list[Dashboard]  # Line 880
 ```
 
 ### File: data_transformer.py
@@ -880,12 +881,12 @@ def setup_monitoring_dependencies() -> None  # Line 298
 def create_metrics_collector() -> MetricsCollector  # Line 440
 def create_alert_manager() -> AlertManager  # Line 448
 def create_performance_profiler() -> PerformanceProfiler  # Line 461
-def create_monitoring_service()  # Line 490
-def create_alert_service()  # Line 525
-def create_metrics_service()  # Line 541
-def create_performance_service()  # Line 557
-def create_dashboard_service()  # Line 573
-def create_dashboard_manager() -> GrafanaDashboardManager  # Line 592
+def create_monitoring_service()  # Line 483
+def create_alert_service()  # Line 518
+def create_metrics_service()  # Line 534
+def create_performance_service()  # Line 550
+def create_dashboard_service()  # Line 567
+def create_dashboard_manager() -> GrafanaDashboardManager  # Line 586
 ```
 
 ### File: di_registration.py
@@ -1100,14 +1101,14 @@ class MetricsCollector(BaseComponent):
     async def __aenter__(self)  # Line 818
     async def __aexit__(self, exc_type, exc_val, exc_tb)  # Line 823
     async def _collection_loop(self) -> None  # Line 827
-    async def start(self) -> None  # Line 841
-    async def stop(self) -> None  # Line 845
-    async def _collect_system_metrics(self) -> None  # Line 849
-    def export_metrics(self) -> bytes  # Line 869
-    def get_metrics_content_type(self) -> str  # Line 878
-    def _register_error_handling_metrics(self) -> None  # Line 882
-    def _register_system_monitoring_metrics(self) -> None  # Line 935
-    def _register_analytics_metrics(self) -> None  # Line 983
+    async def start(self) -> None  # Line 853
+    async def stop(self) -> None  # Line 857
+    async def _collect_system_metrics(self) -> None  # Line 861
+    def export_metrics(self) -> bytes  # Line 881
+    def get_metrics_content_type(self) -> str  # Line 890
+    def _register_error_handling_metrics(self) -> None  # Line 894
+    def _register_system_monitoring_metrics(self) -> None  # Line 947
+    def _register_analytics_metrics(self) -> None  # Line 995
 ```
 
 #### Class: `TradingMetrics`
@@ -1117,15 +1118,15 @@ class MetricsCollector(BaseComponent):
 
 ```python
 class TradingMetrics(BaseComponent):
-    def __init__(self, collector: MetricsCollector)  # Line 1147
-    def _initialize_metrics(self) -> None  # Line 1158
-    def record_order(self, ...) -> None  # Line 1240
-    def record_trade(self, ...) -> None  # Line 1316
-    def update_portfolio_metrics(self, ...) -> None  # Line 1410
-    def record_strategy_signal(self, strategy: str, signal_type: str, symbol: str) -> None  # Line 1485
-    def record_pnl(self, ...) -> None  # Line 1497
-    def record_latency(self, operation: str, exchange: str, latency_ms: float, **kwargs) -> None  # Line 1524
-    def record_order_latency(self, exchange: str, latency: float, order_type: str | None = None) -> None  # Line 1539
+    def __init__(self, collector: MetricsCollector)  # Line 1159
+    def _initialize_metrics(self) -> None  # Line 1170
+    def record_order(self, ...) -> None  # Line 1252
+    def record_trade(self, ...) -> None  # Line 1328
+    def update_portfolio_metrics(self, ...) -> None  # Line 1422
+    def record_strategy_signal(self, strategy: str, signal_type: str, symbol: str) -> None  # Line 1497
+    def record_pnl(self, ...) -> None  # Line 1509
+    def record_latency(self, operation: str, exchange: str, latency_ms: float, **kwargs) -> None  # Line 1536
+    def record_order_latency(self, exchange: str, latency: float, order_type: str | None = None) -> None  # Line 1551
 ```
 
 #### Class: `SystemMetrics`
@@ -1135,13 +1136,13 @@ class TradingMetrics(BaseComponent):
 
 ```python
 class SystemMetrics(BaseComponent):
-    def __init__(self, collector: MetricsCollector)  # Line 1570
-    def _initialize_metrics(self) -> None  # Line 1581
-    def record_cpu_usage(self, cpu_percent: float) -> None  # Line 1621
-    def record_memory_usage(self, used_mb: float, total_mb: float) -> None  # Line 1630
-    def record_network_io(self, bytes_sent: float, bytes_received: float) -> None  # Line 1646
-    def record_disk_usage(self, mount_point: str, usage_percent: float) -> None  # Line 1659
-    async def collect_and_record_system_metrics(self) -> None  # Line 1670
+    def __init__(self, collector: MetricsCollector)  # Line 1582
+    def _initialize_metrics(self) -> None  # Line 1593
+    def record_cpu_usage(self, cpu_percent: float) -> None  # Line 1633
+    def record_memory_usage(self, used_mb: float, total_mb: float) -> None  # Line 1642
+    def record_network_io(self, bytes_sent: float, bytes_received: float) -> None  # Line 1658
+    def record_disk_usage(self, mount_point: str, usage_percent: float) -> None  # Line 1671
+    async def collect_and_record_system_metrics(self) -> None  # Line 1682
 ```
 
 #### Class: `ExchangeMetrics`
@@ -1151,23 +1152,23 @@ class SystemMetrics(BaseComponent):
 
 ```python
 class ExchangeMetrics(BaseComponent):
-    def __init__(self, collector: MetricsCollector)  # Line 1743
-    def _initialize_metrics(self) -> None  # Line 1754
-    def record_api_request(self, exchange: str, endpoint: str, status: str, response_time: float) -> None  # Line 1837
-    def update_rate_limits(self, exchange: str, limit_type: str, remaining: int) -> None  # Line 1857
-    def record_connection(self, success: bool, exchange: str | None = None) -> None  # Line 1869
-    def record_health_check(self, success: bool, duration: float | None = None, exchange: str | None = None) -> None  # Line 1885
-    def record_rate_limit_violation(self, endpoint: str, exchange: str | None = None) -> None  # Line 1909
-    def record_rate_limit_check(self, endpoint: str, weight: int = 1, exchange: str | None = None) -> None  # Line 1921
-    def record_order(self, order_type = None, side = None, success = None, **kwargs) -> None  # Line 1936
-    def _record_basic_order_metrics(self, exchange: str, status, order_type, symbol: str) -> None  # Line 1989
-    def record_order_latency(self, exchange: str, latency: float, order_type: str | None = None) -> None  # Line 1999
-    async def record_websocket_connection(self, exchange: str, connected: bool, error_type: str | None = None) -> None  # Line 2024
-    async def record_websocket_message(self, ...) -> None  # Line 2049
-    async def record_websocket_heartbeat(self, exchange: str, latency_seconds: float) -> None  # Line 2093
-    async def record_websocket_reconnection(self, exchange: str, reason: str) -> None  # Line 2124
-    async def _safe_increment_counter(self, metric_name: str, labels: dict) -> None  # Line 2135
-    async def _safe_observe_histogram(self, metric_name: str, value: float, labels: dict) -> None  # Line 2140
+    def __init__(self, collector: MetricsCollector)  # Line 1755
+    def _initialize_metrics(self) -> None  # Line 1766
+    def record_api_request(self, exchange: str, endpoint: str, status: str, response_time: float) -> None  # Line 1849
+    def update_rate_limits(self, exchange: str, limit_type: str, remaining: int) -> None  # Line 1869
+    def record_connection(self, success: bool, exchange: str | None = None) -> None  # Line 1881
+    def record_health_check(self, success: bool, duration: float | None = None, exchange: str | None = None) -> None  # Line 1897
+    def record_rate_limit_violation(self, endpoint: str, exchange: str | None = None) -> None  # Line 1921
+    def record_rate_limit_check(self, endpoint: str, weight: int = 1, exchange: str | None = None) -> None  # Line 1933
+    def record_order(self, order_type = None, side = None, success = None, **kwargs) -> None  # Line 1948
+    def _record_basic_order_metrics(self, exchange: str, status, order_type, symbol: str) -> None  # Line 2001
+    def record_order_latency(self, exchange: str, latency: float, order_type: str | None = None) -> None  # Line 2011
+    async def record_websocket_connection(self, exchange: str, connected: bool, error_type: str | None = None) -> None  # Line 2036
+    async def record_websocket_message(self, ...) -> None  # Line 2061
+    async def record_websocket_heartbeat(self, exchange: str, latency_seconds: float) -> None  # Line 2105
+    async def record_websocket_reconnection(self, exchange: str, reason: str) -> None  # Line 2136
+    async def _safe_increment_counter(self, metric_name: str, labels: dict) -> None  # Line 2147
+    async def _safe_observe_histogram(self, metric_name: str, value: float, labels: dict) -> None  # Line 2152
 ```
 
 #### Class: `RiskMetrics`
@@ -1177,12 +1178,12 @@ class ExchangeMetrics(BaseComponent):
 
 ```python
 class RiskMetrics(BaseComponent):
-    def __init__(self, collector: MetricsCollector)  # Line 2151
-    def record_var(self, confidence_level: float, timeframe: str, var_value: float) -> None  # Line 2162
-    def record_drawdown(self, timeframe: str, drawdown_pct: float) -> None  # Line 2198
-    def record_sharpe_ratio(self, timeframe: str, sharpe_ratio: float) -> None  # Line 2227
-    def record_position_size(self, exchange: str, symbol: str, size_usd: float) -> None  # Line 2253
-    def _initialize_metrics(self) -> None  # Line 2278
+    def __init__(self, collector: MetricsCollector)  # Line 2163
+    def record_var(self, confidence_level: float, timeframe: str, var_value: float) -> None  # Line 2174
+    def record_drawdown(self, timeframe: str, drawdown_pct: float) -> None  # Line 2210
+    def record_sharpe_ratio(self, timeframe: str, sharpe_ratio: float) -> None  # Line 2239
+    def record_position_size(self, exchange: str, symbol: str, size_usd: float) -> None  # Line 2265
+    def _initialize_metrics(self) -> None  # Line 2290
 ```
 
 #### Functions:
@@ -1190,9 +1191,9 @@ class RiskMetrics(BaseComponent):
 ```python
 def validate_null_handling(value: Any, allow_null: bool = False, field_name: str = 'value') -> Any  # Line 220
 def validate_type_conversion(value: Any, target_type: type, field_name: str = 'value', strict: bool = True) -> Any  # Line 251
-def get_metrics_collector() -> MetricsCollector  # Line 2327
-def set_metrics_collector(collector: MetricsCollector) -> None  # Line 2355
-def setup_prometheus_server(...) -> None  # Line 2368
+def get_metrics_collector() -> MetricsCollector  # Line 2339
+def set_metrics_collector(collector: MetricsCollector) -> None  # Line 2367
+def setup_prometheus_server(...) -> None  # Line 2380
 ```
 
 ### File: performance.py
@@ -1262,43 +1263,44 @@ class GCStats:
 ```python
 class PerformanceProfiler(BaseComponent):
     def __init__(self, ...)  # Line 269
-    def _register_metrics(self) -> None  # Line 359
-    def _safe_lock(self)  # Line 468
-    async def start(self) -> None  # Line 477
-    async def start_async(self) -> None  # Line 486
-    async def stop_async(self) -> None  # Line 503
-    async def stop(self) -> None  # Line 571
-    async def cleanup(self) -> None  # Line 577
-    async def __aenter__(self)  # Line 600
-    async def __aexit__(self, exc_type, exc_val, exc_tb)  # Line 605
-    async def _monitoring_loop(self) -> None  # Line 611
-    def profile_function(self, ...)  # Line 724
-    async def profile_async_function(self, ...)  # Line 768
-    def record_order_execution(self, ...) -> None  # Line 811
-    def record_market_data_processing(self, ...) -> None  # Line 932
-    async def record_websocket_latency(self, exchange: str, message_type: str, latency_ms: Decimal) -> None  # Line 976
-    def record_database_query(self, database: str, operation: str, table: str, query_time_ms: Decimal) -> None  # Line 1032
-    def record_strategy_performance(self, ...) -> None  # Line 1080
-    def get_latency_stats(self, metric_name: str) -> LatencyStats | None  # Line 1130
-    def get_throughput_stats(self, metric_name: str) -> ThroughputStats | None  # Line 1152
-    def get_system_resource_stats(self) -> SystemResourceStats | None  # Line 1192
-    def get_gc_stats(self) -> GCStats | None  # Line 1213
-    def get_performance_summary(self) -> dict[str, Any]  # Line 1232
-    def get_metrics(self) -> dict[str, Any]  # Line 1282
-    def reset_metrics(self) -> None  # Line 1286
-    def clear_metrics(self) -> None  # Line 1297
-    def _get_memory_usage(self) -> int  # Line 1301
-    def _calculate_throughput(self, metric_name: str) -> float  # Line 1311
-    def _calculate_websocket_health(self, exchange: str) -> float  # Line 1350
-    async def _collect_system_resources(self) -> None  # Line 1390
-    async def _collect_gc_stats(self) -> None  # Line 1489
-    async def _check_performance_thresholds(self) -> None  # Line 1544
-    async def _detect_anomalies(self) -> None  # Line 1573
-    async def _update_performance_baselines(self) -> None  # Line 1610
-    async def _send_performance_alert(self, title: str, message: str, severity: AlertSeverity, labels: dict[str, str]) -> None  # Line 1670
-    def _create_managed_alert_task(self, title: str, message: str, severity, labels: dict[str, str]) -> None  # Line 1693
-    def _handle_managed_alert_task_completion(self, task: asyncio.Task) -> None  # Line 1714
-    def _handle_alert_task_completion(self, task: asyncio.Task) -> None  # Line 1727
+    def _ensure_async_primitives(self) -> None  # Line 360
+    def _register_metrics(self) -> None  # Line 367
+    def _safe_lock(self)  # Line 476
+    async def start(self) -> None  # Line 485
+    async def start_async(self) -> None  # Line 495
+    async def stop_async(self) -> None  # Line 513
+    async def stop(self) -> None  # Line 581
+    async def cleanup(self) -> None  # Line 588
+    async def __aenter__(self)  # Line 611
+    async def __aexit__(self, exc_type, exc_val, exc_tb)  # Line 616
+    async def _monitoring_loop(self) -> None  # Line 622
+    def profile_function(self, ...)  # Line 748
+    async def profile_async_function(self, ...)  # Line 792
+    def record_order_execution(self, ...) -> None  # Line 835
+    def record_market_data_processing(self, ...) -> None  # Line 956
+    async def record_websocket_latency(self, exchange: str, message_type: str, latency_ms: Decimal) -> None  # Line 1000
+    def record_database_query(self, database: str, operation: str, table: str, query_time_ms: Decimal) -> None  # Line 1056
+    def record_strategy_performance(self, ...) -> None  # Line 1104
+    def get_latency_stats(self, metric_name: str) -> LatencyStats | None  # Line 1154
+    def get_throughput_stats(self, metric_name: str) -> ThroughputStats | None  # Line 1176
+    def get_system_resource_stats(self) -> SystemResourceStats | None  # Line 1216
+    def get_gc_stats(self) -> GCStats | None  # Line 1237
+    def get_performance_summary(self) -> dict[str, Any]  # Line 1256
+    def get_metrics(self) -> dict[str, Any]  # Line 1306
+    def reset_metrics(self) -> None  # Line 1310
+    def clear_metrics(self) -> None  # Line 1321
+    def _get_memory_usage(self) -> int  # Line 1325
+    def _calculate_throughput(self, metric_name: str) -> float  # Line 1335
+    def _calculate_websocket_health(self, exchange: str) -> float  # Line 1374
+    async def _collect_system_resources(self) -> None  # Line 1414
+    async def _collect_gc_stats(self) -> None  # Line 1513
+    async def _check_performance_thresholds(self) -> None  # Line 1568
+    async def _detect_anomalies(self) -> None  # Line 1597
+    async def _update_performance_baselines(self) -> None  # Line 1634
+    async def _send_performance_alert(self, title: str, message: str, severity: AlertSeverity, labels: dict[str, str]) -> None  # Line 1694
+    def _create_managed_alert_task(self, title: str, message: str, severity, labels: dict[str, str]) -> None  # Line 1717
+    def _handle_managed_alert_task_completion(self, task: asyncio.Task) -> None  # Line 1738
+    def _handle_alert_task_completion(self, task: asyncio.Task) -> None  # Line 1751
 ```
 
 #### Class: `PerformanceMetrics`
@@ -1307,9 +1309,9 @@ class PerformanceProfiler(BaseComponent):
 
 ```python
 class PerformanceMetrics:
-    def __post_init__(self)  # Line 1895
-    def add_metric(self, metric: PerformanceMetric) -> None  # Line 1899
-    def get_metrics_by_category(self, category: PerformanceCategory) -> list[PerformanceMetric]  # Line 1903
+    def __post_init__(self)  # Line 1919
+    def add_metric(self, metric: PerformanceMetric) -> None  # Line 1923
+    def get_metrics_by_category(self, category: PerformanceCategory) -> list[PerformanceMetric]  # Line 1927
 ```
 
 #### Class: `QueryMetrics`
@@ -1318,9 +1320,9 @@ class PerformanceMetrics:
 
 ```python
 class QueryMetrics:
-    def __post_init__(self)  # Line 1919
-    def record_query(self, query: str, execution_time: float) -> None  # Line 1923
-    def get_average_query_time(self) -> float  # Line 1927
+    def __post_init__(self)  # Line 1943
+    def record_query(self, query: str, execution_time: float) -> None  # Line 1947
+    def get_average_query_time(self) -> float  # Line 1951
 ```
 
 #### Class: `CacheMetrics`
@@ -1329,10 +1331,10 @@ class QueryMetrics:
 
 ```python
 class CacheMetrics:
-    def __post_init__(self)  # Line 1943
-    def record_hit(self) -> None  # Line 1948
-    def record_miss(self) -> None  # Line 1952
-    def get_hit_rate(self) -> float  # Line 1956
+    def __post_init__(self)  # Line 1967
+    def record_hit(self) -> None  # Line 1972
+    def record_miss(self) -> None  # Line 1976
+    def get_hit_rate(self) -> float  # Line 1980
 ```
 
 #### Class: `QueryOptimizer`
@@ -1341,11 +1343,11 @@ class CacheMetrics:
 
 ```python
 class QueryOptimizer:
-    def __init__(self)  # Line 1967
-    def analyze_query(self, query: str) -> dict[str, Any]  # Line 1971
-    def optimize_query(self, query: str) -> str  # Line 1975
-    def cache_query_plan(self, query: str, plan: dict[str, Any]) -> None  # Line 1979
-    def get_cached_plan(self, query: str) -> dict[str, Any] | None  # Line 1983
+    def __init__(self)  # Line 1991
+    def analyze_query(self, query: str) -> dict[str, Any]  # Line 1995
+    def optimize_query(self, query: str) -> str  # Line 1999
+    def cache_query_plan(self, query: str, plan: dict[str, Any]) -> None  # Line 2003
+    def get_cached_plan(self, query: str) -> dict[str, Any] | None  # Line 2007
 ```
 
 #### Class: `CacheOptimizer`
@@ -1354,20 +1356,20 @@ class QueryOptimizer:
 
 ```python
 class CacheOptimizer:
-    def __init__(self)  # Line 1991
-    def analyze_cache_performance(self) -> dict[str, Any]  # Line 1994
-    def optimize_ttl(self, key: str) -> int  # Line 1998
+    def __init__(self)  # Line 2015
+    def analyze_cache_performance(self) -> dict[str, Any]  # Line 2018
+    def optimize_ttl(self, key: str) -> int  # Line 2022
 ```
 
 #### Functions:
 
 ```python
 def format_timestamp(dt: datetime | None) -> str  # Line 104
-def profile_async(...)  # Line 1738
-def profile_sync(...)  # Line 1759
-def get_performance_profiler() -> PerformanceProfiler | None  # Line 1784
-def set_global_profiler(profiler: PerformanceProfiler) -> None  # Line 1800
-def initialize_performance_monitoring(config: dict[str, Any] | None = None, **kwargs) -> PerformanceProfiler  # Line 1810
+def profile_async(...)  # Line 1762
+def profile_sync(...)  # Line 1783
+def get_performance_profiler() -> PerformanceProfiler | None  # Line 1808
+def set_global_profiler(profiler: PerformanceProfiler) -> None  # Line 1824
+def initialize_performance_monitoring(config: dict[str, Any] | None = None, **kwargs) -> PerformanceProfiler  # Line 1834
 ```
 
 ### File: services.py
@@ -1402,18 +1404,18 @@ class MetricRequest:
 
 ```python
 class DefaultAlertService(BaseService, AlertServiceInterface, ErrorPropagationMixin):
-    def __init__(self, alert_manager: 'AlertManager')  # Line 81
-    async def create_alert(self, request: AlertRequest) -> str  # Line 88
-    async def resolve_alert(self, fingerprint: str) -> bool  # Line 166
-    async def acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool  # Line 171
-    def get_active_alerts(self, severity: AlertSeverity | None = None) -> list['Alert']  # Line 175
-    def get_alert_stats(self) -> dict[str, Any]  # Line 179
-    def add_rule(self, rule) -> None  # Line 183
-    def add_escalation_policy(self, policy) -> None  # Line 187
-    async def handle_error_event_from_error_handling(self, error_data: dict[str, Any]) -> str  # Line 191
-    async def handle_batch_error_events_from_error_handling(self, error_events: list[dict[str, Any]]) -> list[str]  # Line 236
-    def _transform_error_event_data(self, error_data: dict[str, Any]) -> dict[str, Any]  # Line 263
-    def _transform_alert_request_data(self, request: AlertRequest) -> AlertRequest  # Line 282
+    def __init__(self, alert_manager: 'AlertManager')  # Line 76
+    async def create_alert(self, request: AlertRequest) -> str  # Line 83
+    async def resolve_alert(self, fingerprint: str) -> bool  # Line 161
+    async def acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool  # Line 166
+    def get_active_alerts(self, severity: AlertSeverity | None = None) -> list['Alert']  # Line 170
+    def get_alert_stats(self) -> dict[str, Any]  # Line 174
+    def add_rule(self, rule) -> None  # Line 178
+    def add_escalation_policy(self, policy) -> None  # Line 182
+    async def handle_error_event_from_error_handling(self, error_data: dict[str, Any]) -> str  # Line 186
+    async def handle_batch_error_events_from_error_handling(self, error_events: list[dict[str, Any]]) -> list[str]  # Line 231
+    def _transform_error_event_data(self, error_data: dict[str, Any]) -> dict[str, Any]  # Line 258
+    def _transform_alert_request_data(self, request: AlertRequest) -> AlertRequest  # Line 277
 ```
 
 #### Class: `DefaultMetricsService`
@@ -1423,12 +1425,12 @@ class DefaultAlertService(BaseService, AlertServiceInterface, ErrorPropagationMi
 
 ```python
 class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagationMixin):
-    def __init__(self, metrics_collector: 'MetricsCollector')  # Line 315
-    def record_counter(self, request: MetricRequest) -> None  # Line 321
-    def record_gauge(self, request: MetricRequest) -> None  # Line 416
-    def record_histogram(self, request: MetricRequest) -> None  # Line 465
-    def export_metrics(self) -> str  # Line 514
-    def record_error_pattern_metric(self, error_data: dict[str, Any]) -> None  # Line 518
+    def __init__(self, metrics_collector: 'MetricsCollector')  # Line 319
+    def record_counter(self, request: MetricRequest) -> None  # Line 325
+    def record_gauge(self, request: MetricRequest) -> None  # Line 420
+    def record_histogram(self, request: MetricRequest) -> None  # Line 469
+    def export_metrics(self) -> str  # Line 518
+    def record_error_pattern_metric(self, error_data: dict[str, Any]) -> None  # Line 526
 ```
 
 #### Class: `DefaultPerformanceService`
@@ -1438,12 +1440,12 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
 
 ```python
 class DefaultPerformanceService(BaseService, PerformanceServiceInterface, ErrorPropagationMixin):
-    def __init__(self, performance_profiler: 'PerformanceProfiler')  # Line 544
-    def get_performance_summary(self) -> dict[str, Any]  # Line 550
-    def record_order_execution(self, ...) -> None  # Line 554
-    def record_market_data_processing(self, ...) -> None  # Line 679
-    def get_latency_stats(self, metric_name: str)  # Line 691
-    def get_system_resource_stats(self)  # Line 695
+    def __init__(self, performance_profiler: 'PerformanceProfiler')  # Line 552
+    def get_performance_summary(self) -> dict[str, Any]  # Line 558
+    def record_order_execution(self, ...) -> None  # Line 562
+    def record_market_data_processing(self, ...) -> None  # Line 697
+    def get_latency_stats(self, metric_name: str)  # Line 709
+    def get_system_resource_stats(self)  # Line 713
 ```
 
 #### Class: `DefaultDashboardService`
@@ -1453,26 +1455,26 @@ class DefaultPerformanceService(BaseService, PerformanceServiceInterface, ErrorP
 
 ```python
 class DefaultDashboardService(BaseService, DashboardServiceInterface):
-    def __init__(self, dashboard_manager: 'GrafanaDashboardManager')  # Line 704
-    async def deploy_dashboard(self, dashboard: 'Dashboard') -> bool  # Line 711
-    async def deploy_all_dashboards(self) -> dict[str, bool]  # Line 715
-    def export_dashboards_to_files(self, output_dir: str) -> None  # Line 719
-    def create_trading_overview_dashboard(self) -> Dashboard  # Line 723
-    def create_system_performance_dashboard(self) -> Dashboard  # Line 727
+    def __init__(self, dashboard_manager: 'GrafanaDashboardManager')  # Line 722
+    async def deploy_dashboard(self, dashboard: 'Dashboard') -> bool  # Line 729
+    async def deploy_all_dashboards(self) -> dict[str, bool]  # Line 733
+    def export_dashboards_to_files(self, output_dir: str) -> None  # Line 737
+    def create_trading_overview_dashboard(self) -> Dashboard  # Line 741
+    def create_system_performance_dashboard(self) -> Dashboard  # Line 745
 ```
 
 #### Class: `MonitoringService`
 
-**Inherits**: BaseService
+**Inherits**: BaseService, MonitoringServiceInterface
 **Purpose**: Composite service for all monitoring operations
 
 ```python
-class MonitoringService(BaseService):
-    def __init__(self, ...)  # Line 735
-    async def start_monitoring(self) -> None  # Line 773
-    async def stop_monitoring(self) -> None  # Line 789
-    async def get_health_status(self) -> dict[str, Any]  # Line 805
-    async def health_check(self) -> dict[str, Any]  # Line 809
+class MonitoringService(BaseService, MonitoringServiceInterface):
+    def __init__(self, ...)  # Line 753
+    async def start_monitoring(self) -> None  # Line 791
+    async def stop_monitoring(self) -> None  # Line 817
+    async def get_health_status(self) -> dict[str, Any]  # Line 833
+    async def health_check(self) -> dict[str, Any]  # Line 837
 ```
 
 ### File: telemetry.py
@@ -1515,11 +1517,11 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer  # Line 546
 def _setup_auto_instrumentation(config: OpenTelemetryConfig) -> None  # Line 692
 def get_tracer(name: str = 'tbot-trading')  # Line 770
 def instrument_fastapi(app: Any, config: OpenTelemetryConfig) -> None  # Line 792
-def trace_async_function(operation_name: str, attributes: dict[str, Any] | None = None) -> Callable  # Line 839
-def trace_function(operation_name: str, attributes: dict[str, Any] | None = None) -> Callable  # Line 880
-async def trace_async_context(operation_name: str, attributes: dict[str, Any] | None = None) -> Any  # Line 922
-def get_trading_tracer() -> TradingTracer | None  # Line 948
-def set_global_trading_tracer(tracer: TradingTracer) -> None  # Line 958
+def trace_async_function(operation_name: str, attributes: dict[str, Any] | None = None) -> Callable  # Line 844
+def trace_function(operation_name: str, attributes: dict[str, Any] | None = None) -> Callable  # Line 885
+async def trace_async_context(operation_name: str, attributes: dict[str, Any] | None = None) -> Any  # Line 927
+def get_trading_tracer() -> TradingTracer | None  # Line 953
+def set_global_trading_tracer(tracer: TradingTracer) -> None  # Line 963
 ```
 
 ### File: trace_wrapper.py

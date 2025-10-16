@@ -102,7 +102,7 @@ class RiskConfiguration(Base, TimestampMixin):
 
     # Additional configuration
     position_sizing_method: Mapped[PositionSizeMethod] = mapped_column(
-        SQLEnum(PositionSizeMethod), nullable=False, default=PositionSizeMethod.FIXED_PERCENTAGE
+        SQLEnum(PositionSizeMethod, create_type=False), nullable=False, default=PositionSizeMethod.FIXED_PERCENTAGE
     )
     risk_assessment_method: Mapped[str] = mapped_column(
         String(50), nullable=False, default="standard"
@@ -210,7 +210,7 @@ class CircuitBreakerConfig(Base, TimestampMixin):
         nullable=False,
         index=True,
     )
-    breaker_type: Mapped[CircuitBreakerType] = mapped_column(SQLEnum(CircuitBreakerType), nullable=False, index=True)
+    breaker_type: Mapped[CircuitBreakerType] = mapped_column(SQLEnum(CircuitBreakerType, create_type=False), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
 
     # Trigger configuration
@@ -222,7 +222,7 @@ class CircuitBreakerConfig(Base, TimestampMixin):
     # Status and control
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     status: Mapped[CircuitBreakerStatus] = mapped_column(
-        SQLEnum(CircuitBreakerStatus), nullable=False, default=CircuitBreakerStatus.ACTIVE
+        SQLEnum(CircuitBreakerStatus, create_type=False), nullable=False, default=CircuitBreakerStatus.ACTIVE
     )
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
@@ -308,7 +308,7 @@ class CircuitBreakerEvent(Base, TimestampMixin):
     trigger_value: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
     threshold_value: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
     severity: Mapped[AlertSeverity] = mapped_column(
-        SQLEnum(AlertSeverity), nullable=False, default=AlertSeverity.MEDIUM
+        SQLEnum(AlertSeverity, create_type=False), nullable=False, default=AlertSeverity.MEDIUM
     )
 
     # Status and resolution
@@ -406,7 +406,7 @@ class RiskViolation(Base, TimestampMixin):
     rule_name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     severity: Mapped[AlertSeverity] = mapped_column(
-        SQLEnum(AlertSeverity), nullable=False, default=AlertSeverity.MEDIUM
+        SQLEnum(AlertSeverity, create_type=False), nullable=False, default=AlertSeverity.MEDIUM
     )
 
     # Context

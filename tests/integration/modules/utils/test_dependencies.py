@@ -36,8 +36,17 @@ from src.utils.validation.service import ValidationService
 class TestUtilsDependencyInjection:
     """Test dependency injection patterns for utils module."""
 
-    def setup_method(self):
-        """Setup clean DI container for each test."""
+    @pytest.fixture(autouse=True)
+    def setup_and_teardown(self):
+        """
+        Setup clean DI container for each test with proper cleanup.
+
+        This fixture ensures:
+        1. Clean DI container before each test
+        2. Proper state reset after each test
+        3. No resource leaks between tests
+        """
+        # Setup: Clear and reset before test
         injector.get_container().clear()
 
         # Reset the registration flag to allow re-registration
@@ -45,14 +54,19 @@ class TestUtilsDependencyInjection:
 
         registry_module._services_registered = False
 
-    def teardown_method(self):
-        """Cleanup DI container after each test."""
-        injector.get_container().clear()
+        yield
+
+        # Teardown: Clean up after test
+        try:
+            injector.get_container().clear()
+        except Exception:
+            pass  # Ignore cleanup errors to prevent cascade failures
 
         # Reset the registration flag
-        import src.utils.service_registry as registry_module
-
-        registry_module._services_registered = False
+        try:
+            registry_module._services_registered = False
+        except Exception:
+            pass
 
     def test_service_registry_registration(self):
         """Test that register_util_services properly registers all services."""
@@ -347,8 +361,17 @@ class TestUtilsDependencyInjection:
 class TestUtilsDependencyInjectionEdgeCases:
     """Test edge cases for utils dependency injection."""
 
-    def setup_method(self):
-        """Setup clean DI container."""
+    @pytest.fixture(autouse=True)
+    def setup_and_teardown(self):
+        """
+        Setup clean DI container for each test with proper cleanup.
+
+        This fixture ensures:
+        1. Clean DI container before each test
+        2. Proper state reset after each test
+        3. No resource leaks between tests
+        """
+        # Setup: Clear and reset before test
         injector.get_container().clear()
 
         # Reset the registration flag to allow re-registration
@@ -356,14 +379,19 @@ class TestUtilsDependencyInjectionEdgeCases:
 
         registry_module._services_registered = False
 
-    def teardown_method(self):
-        """Cleanup DI container."""
-        injector.get_container().clear()
+        yield
+
+        # Teardown: Clean up after test
+        try:
+            injector.get_container().clear()
+        except Exception:
+            pass  # Ignore cleanup errors to prevent cascade failures
 
         # Reset the registration flag
-        import src.utils.service_registry as registry_module
-
-        registry_module._services_registered = False
+        try:
+            registry_module._services_registered = False
+        except Exception:
+            pass
 
     def test_partial_registration_handling(self):
         """Test handling of partial service registration."""

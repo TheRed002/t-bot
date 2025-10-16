@@ -553,6 +553,9 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                     updated_metadata["adaptive_params"] = None
 
                 adjusted_signal = Signal(
+                    signal_id=signal.signal_id,
+                    strategy_id=signal.strategy_id,
+                    strategy_name=signal.strategy_name,
                     symbol=signal.symbol,
                     direction=signal.direction,
                     strength=min(adjusted_strength, 0.95),

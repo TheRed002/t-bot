@@ -182,11 +182,11 @@ class CapitalManagementFactory:
             if self._dependency_container:
                 try:
                     capital_repository = self._dependency_container.get("CapitalRepository")
-                except (KeyError, AttributeError, ServiceError):
+                except (KeyError, AttributeError, Exception):
                     pass
                 try:
                     audit_repository = self._dependency_container.get("AuditRepository")
-                except (KeyError, AttributeError, ServiceError):
+                except (KeyError, AttributeError, Exception):
                     pass
 
             capital_repository = kwargs.get("capital_repository", capital_repository)
@@ -224,25 +224,25 @@ class CapitalManagementFactory:
             if self._dependency_container:
                 try:
                     capital_service = self._dependency_container.get("CapitalService")
-                except (KeyError, AttributeError, ServiceError):
+                except (KeyError, AttributeError, Exception):
                     pass
                 try:
                     config_service = self._dependency_container.get("ConfigService")
-                except (KeyError, AttributeError, ServiceError):
+                except (KeyError, AttributeError, Exception):
                     pass
                 try:
                     risk_service = self._dependency_container.get("RiskService")
-                except (KeyError, AttributeError, ServiceError):
+                except (KeyError, AttributeError, Exception):
                     pass
                 try:
                     trade_lifecycle_manager = self._dependency_container.get(
                         "TradeLifecycleManager"
                     )
-                except (KeyError, AttributeError, ServiceError):
+                except (KeyError, AttributeError, Exception):
                     pass
                 try:
                     validation_service = self._dependency_container.get("ValidationService")
-                except (KeyError, AttributeError, ServiceError):
+                except (KeyError, AttributeError, Exception):
                     pass
 
             capital_service = kwargs.get("capital_service", capital_service)
@@ -287,15 +287,15 @@ class CapitalManagementFactory:
             if self._dependency_container:
                 try:
                     exchange_data_service = self._dependency_container.get("ExchangeDataService")
-                except (KeyError, AttributeError, ServiceError):
+                except (KeyError, AttributeError, Exception):
                     pass
                 try:
                     validation_service = self._dependency_container.get("ValidationService")
-                except (KeyError, AttributeError, ServiceError):
+                except (KeyError, AttributeError, Exception):
                     pass
                 try:
                     risk_service = self._dependency_container.get("RiskService")
-                except (KeyError, AttributeError, ServiceError):
+                except (KeyError, AttributeError, Exception):
                     pass
 
             exchange_data_service = kwargs.get("exchange_data_service", exchange_data_service)
@@ -333,15 +333,15 @@ class CapitalManagementFactory:
             if self._dependency_container:
                 try:
                     exchanges = self._dependency_container.get("Exchanges")
-                except (KeyError, AttributeError, ServiceError):
+                except (KeyError, AttributeError, Exception):
                     pass
                 try:
                     validation_service = self._dependency_container.get("ValidationService")
-                except (KeyError, AttributeError, ServiceError):
+                except (KeyError, AttributeError, Exception):
                     pass
                 try:
                     exchange_info_service = self._dependency_container.get("ExchangeInfoService")
-                except (KeyError, AttributeError, ServiceError):
+                except (KeyError, AttributeError, Exception):
                     pass
 
             exchanges = kwargs.get("exchanges", exchanges)
@@ -380,19 +380,19 @@ class CapitalManagementFactory:
             if self._dependency_container:
                 try:
                     cache_service = self._dependency_container.get("CacheService")
-                except (KeyError, AttributeError, ServiceError):
+                except (KeyError, AttributeError, Exception):
                     pass
                 try:
                     time_series_service = self._dependency_container.get("TimeSeriesService")
-                except (KeyError, AttributeError, ServiceError):
+                except (KeyError, AttributeError, Exception):
                     pass
                 try:
                     validation_service = self._dependency_container.get("ValidationService")
-                except (KeyError, AttributeError, ServiceError):
+                except (KeyError, AttributeError, Exception):
                     pass
                 try:
                     capital_allocator = self._dependency_container.get("CapitalAllocator")
-                except (KeyError, AttributeError, ServiceError):
+                except (KeyError, AttributeError, Exception):
                     pass
 
             cache_service = kwargs.get("cache_service", cache_service)

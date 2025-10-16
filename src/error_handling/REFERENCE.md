@@ -2,7 +2,7 @@
 
 ## INTEGRATION
 **Dependencies**: core, exchanges, execution, strategies, utils
-**Used By**: strategies
+**Used By**: database
 **Provides**: ConnectionManager, ErrorHandlingService, MockContextManager, SecureErrorContextManager
 **Patterns**: Async Operations, Component Architecture, Service Layer
 
@@ -25,7 +25,7 @@
 ## MODULE OVERVIEW
 **Files**: 29 Python files
 **Classes**: 78
-**Functions**: 59
+**Functions**: 60
 
 ## COMPLETE API REFERENCE
 
@@ -77,12 +77,16 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async establish_connection(self, ...) -> bool` - Line 63
-- `async close_connection(self, connection_id: str) -> bool` - Line 111
-- `async reconnect_connection(self, connection_id: str) -> bool` - Line 136
-- `get_connection_status(self, connection_id: str) -> dict[str, Any] | None` - Line 157
-- `is_connection_healthy(self, connection_id: str) -> bool` - Line 172
-- `async cleanup_resources(self) -> None` - Line 181
+- `async initialize(self) -> None` - Line 64
+- `async cleanup(self) -> None` - Line 68
+- `async establish_connection(self, ...) -> bool` - Line 72
+- `async close_connection(self, connection_id: str) -> bool` - Line 120
+- `async reconnect_connection(self, connection_id: str) -> bool` - Line 145
+- `get_connection_status(self, connection_id: str) -> dict[str, Any] | None` - Line 166
+- `is_connection_healthy(self, connection_id: str) -> bool` - Line 181
+- `async queue_message(self, connection_id: str, message: dict[str, Any]) -> None` - Line 190
+- `async flush_message_queue(self, connection_id: str) -> int` - Line 198
+- `async cleanup_resources(self) -> None` - Line 208
 
 ### Implementation: `ErrorContext` ✅
 
@@ -90,21 +94,22 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `error_type(self) -> str` - Line 96
-- `error_message(self) -> str` - Line 101
-- `from_exception(cls, ...) -> 'ErrorContext'` - Line 106
-- `function(self) -> str | None` - Line 169
-- `function(self, value: str | None)` - Line 174
-- `to_dict(self, ...) -> dict[str, Any]` - Line 178
-- `to_legacy_dict(self, ...) -> dict[str, Any]` - Line 261
-- `add_detail(self, key: str, value: Any) -> None` - Line 302
-- `add_metadata(self, key: str, value: Any) -> None` - Line 306
-- `increment_recovery_attempts(self) -> None` - Line 310
-- `can_retry_recovery(self) -> bool` - Line 314
-- `is_critical(self) -> bool` - Line 318
-- `is_high_severity(self) -> bool` - Line 322
-- `requires_escalation(self) -> bool` - Line 326
-- `from_decorator_context(cls, ...) -> 'ErrorContext'` - Line 331
+- `context(self) -> dict[str, Any]` - Line 71
+- `error_type(self) -> str` - Line 101
+- `error_message(self) -> str` - Line 106
+- `from_exception(cls, ...) -> 'ErrorContext'` - Line 111
+- `function(self) -> str | None` - Line 174
+- `function(self, value: str | None)` - Line 179
+- `to_dict(self, ...) -> dict[str, Any]` - Line 183
+- `to_legacy_dict(self, ...) -> dict[str, Any]` - Line 266
+- `add_detail(self, key: str, value: Any) -> None` - Line 307
+- `add_metadata(self, key: str, value: Any) -> None` - Line 311
+- `increment_recovery_attempts(self) -> None` - Line 315
+- `can_retry_recovery(self) -> bool` - Line 319
+- `is_critical(self) -> bool` - Line 323
+- `is_high_severity(self) -> bool` - Line 327
+- `requires_escalation(self) -> bool` - Line 331
+- `from_decorator_context(cls, ...) -> 'ErrorContext'` - Line 336
 
 ### Implementation: `ErrorContextFactory` ✅
 
@@ -113,12 +118,12 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `create_context_dict(self, error: Exception, **kwargs) -> dict[str, Any]` - Line 374
-- `create(self, error: Exception, **kwargs) -> dict[str, Any]` - Line 437
-- `create_context(self, context_type: str = 'standard', error: Exception | None = None, **kwargs) -> ErrorContext` - Line 450
-- `create_from_frame(self, error: Exception, frame: Any | None = None, **kwargs) -> dict[str, Any]` - Line 469
-- `create_minimal(self, error: Exception) -> dict[str, Any]` - Line 513
-- `enrich_context(self, base_context: dict[str, Any], **additional) -> dict[str, Any]` - Line 529
+- `create_context_dict(self, error: Exception, **kwargs) -> dict[str, Any]` - Line 379
+- `create(self, error: Exception, **kwargs) -> dict[str, Any]` - Line 442
+- `create_context(self, context_type: str = 'standard', error: Exception | None = None, **kwargs) -> ErrorContext` - Line 455
+- `create_from_frame(self, error: Exception, frame: Any | None = None, **kwargs) -> dict[str, Any]` - Line 474
+- `create_minimal(self, error: Exception) -> dict[str, Any]` - Line 518
+- `enrich_context(self, base_context: dict[str, Any], **additional) -> dict[str, Any]` - Line 534
 
 ### Implementation: `ErrorDataTransformer` ✅
 
@@ -162,12 +167,12 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `call(self, func: Callable[Ellipsis, Any], *args: Any, **kwargs: Any) -> Any` - Line 86
-- `should_transition_to_half_open(self) -> bool` - Line 115
-- `open(self) -> None` - Line 122
-- `is_open(self) -> bool` - Line 128
-- `reset(self) -> None` - Line 132
-- `threshold(self) -> int` - Line 140
+- `call(self, func: Callable[Ellipsis, Any], *args: Any, **kwargs: Any) -> Any` - Line 102
+- `should_transition_to_half_open(self) -> bool` - Line 131
+- `open(self) -> None` - Line 138
+- `is_open(self) -> bool` - Line 144
+- `reset(self) -> None` - Line 148
+- `threshold(self) -> int` - Line 156
 
 ### Implementation: `ErrorPatternCache` ✅
 
@@ -175,12 +180,12 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `add_pattern(self, pattern: dict[str, Any] | Any) -> None` - Line 166
-- `get_pattern(self, pattern_id: str) -> dict[str, Any] | None` - Line 182
-- `get_all_patterns(self) -> dict[str, dict[str, Any]]` - Line 200
-- `cleanup_expired(self) -> None` - Line 234
-- `size(self) -> int` - Line 238
-- `get_last_cleanup(self) -> datetime` - Line 242
+- `add_pattern(self, pattern: dict[str, Any] | Any) -> None` - Line 182
+- `get_pattern(self, pattern_id: str) -> dict[str, Any] | None` - Line 198
+- `get_all_patterns(self) -> dict[str, dict[str, Any]]` - Line 216
+- `cleanup_expired(self) -> None` - Line 250
+- `size(self) -> int` - Line 254
+- `get_last_cleanup(self) -> datetime` - Line 258
 
 ### Implementation: `ErrorHandler` ✅
 
@@ -188,20 +193,22 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `configure_dependencies(self, injector) -> None` - Line 301
-- `classify_error(self, error: Exception) -> ErrorSeverity` - Line 336
-- `validate_module_boundary_input(self, data: dict[str, Any], source_module: str) -> dict[str, Any]` - Line 367
-- `create_error_context(self, error: Exception, component: str, operation: str, **kwargs) -> 'ErrorContext'` - Line 434
-- `async handle_error(self, ...) -> bool` - Line 584
-- `handle_error_sync(self, ...) -> bool` - Line 740
-- `handle_error_batch(self, ...) -> list[bool]` - Line 839
-- `get_retry_policy(self, error_type: str) -> dict[str, Any]` - Line 1024
-- `get_circuit_breaker_status(self) -> dict[str, str]` - Line 1028
-- `get_error_patterns(self) -> dict[str, dict[str, Any]]` - Line 1032
-- `get_memory_usage_stats(self) -> dict[str, Any]` - Line 1036
-- `async cleanup_resources(self) -> None` - Line 1045
-- `validate_data_flow_consistency(self, data: dict[str, Any]) -> dict[str, Any]` - Line 1112
-- `async shutdown(self) -> None` - Line 1161
+- `configure_dependencies(self, injector) -> None` - Line 317
+- `async initialize(self) -> None` - Line 351
+- `async cleanup(self) -> None` - Line 365
+- `classify_error(self, error: Exception) -> ErrorSeverity` - Line 375
+- `validate_module_boundary_input(self, data: dict[str, Any], source_module: str) -> dict[str, Any]` - Line 406
+- `create_error_context(self, error: Exception, component: str, operation: str, **kwargs) -> 'ErrorContext'` - Line 473
+- `async handle_error(self, ...) -> bool` - Line 645
+- `handle_error_sync(self, ...) -> bool` - Line 805
+- `handle_error_batch(self, ...) -> list[bool]` - Line 904
+- `get_retry_policy(self, error_type: str) -> dict[str, Any]` - Line 1094
+- `get_circuit_breaker_status(self) -> dict[str, str]` - Line 1098
+- `get_error_patterns(self) -> dict[str, dict[str, Any]]` - Line 1102
+- `get_memory_usage_stats(self) -> dict[str, Any]` - Line 1106
+- `async cleanup_resources(self) -> None` - Line 1115
+- `validate_data_flow_consistency(self, data: dict[str, Any]) -> dict[str, Any]` - Line 1182
+- `async shutdown(self) -> None` - Line 1231
 
 ### Implementation: `ErrorHandlerFactory` ✅
 
@@ -237,16 +244,16 @@
 **Implemented Methods:**
 - `configure_dependencies(self, injector) -> None` - Line 107
 - `register_database_handler(self)` - Line 126
-- `register_error_callback(self, callback: Callable[[Exception, dict], None])` - Line 142
-- `register_critical_callback(self, callback: Callable[[Exception, dict], None])` - Line 151
-- `register_recovery_strategy(self, error_type: type, strategy: Callable)` - Line 160
-- `async handle_error(self, ...) -> dict[str, Any]` - Line 170
-- `handle_error_sync(self, ...) -> dict[str, Any]` - Line 283
-- `handle_exception_hook(self, exc_type, exc_value, exc_traceback)` - Line 356
-- `install_global_handler(self)` - Line 413
-- `error_handler_decorator(self, severity: str = 'error', reraise: bool = True, default_return: Any = None)` - Line 417
-- `get_statistics(self) -> dict[str, Any]` - Line 483
-- `reset_statistics(self)` - Line 499
+- `register_error_callback(self, callback: Callable[[Exception, dict], None])` - Line 143
+- `register_critical_callback(self, callback: Callable[[Exception, dict], None])` - Line 152
+- `register_recovery_strategy(self, error_type: type, strategy: Callable)` - Line 161
+- `async handle_error(self, ...) -> dict[str, Any]` - Line 171
+- `handle_error_sync(self, ...) -> dict[str, Any]` - Line 284
+- `handle_exception_hook(self, exc_type, exc_value, exc_traceback)` - Line 357
+- `install_global_handler(self)` - Line 414
+- `error_handler_decorator(self, severity: str = 'error', reraise: bool = True, default_return: Any = None)` - Line 418
+- `get_statistics(self) -> dict[str, Any]` - Line 484
+- `reset_statistics(self)` - Line 500
 
 ### Implementation: `UniversalErrorHandler` ✅
 
@@ -764,21 +771,21 @@
 
 **Implemented Methods:**
 - `async initialize(self) -> None` - Line 89
-- `configure_dependencies(self, injector) -> None` - Line 128
-- `async handle_error(self, ...) -> dict[str, Any]` - Line 150
-- `async handle_global_error(self, ...) -> dict[str, Any]` - Line 309
-- `async validate_state_consistency(self, component: str = 'all') -> dict[str, Any]` - Line 340
-- `async reconcile_state_discrepancies(self, component: str, discrepancies: list[dict[str, Any]]) -> bool` - Line 372
-- `async get_error_patterns(self) -> dict[str, Any]` - Line 405
-- `async get_state_monitoring_status(self) -> dict[str, Any]` - Line 433
-- `async get_error_handler_metrics(self) -> dict[str, Any]` - Line 458
-- `async start_error_monitoring(self) -> None` - Line 542
-- `async stop_error_monitoring(self) -> None` - Line 554
-- `async handle_batch_errors(self, errors: list[tuple[Exception, str, str, dict[str, Any]]] | None) -> list[dict[str, Any]]` - Line 564
-- `async start_monitoring(self) -> None` - Line 632
-- `async cleanup_resources(self) -> None` - Line 656
-- `async shutdown(self) -> None` - Line 699
-- `async health_check(self) -> HealthCheckResult` - Line 725
+- `configure_dependencies(self, injector) -> None` - Line 144
+- `async handle_error(self, ...) -> dict[str, Any]` - Line 166
+- `async handle_global_error(self, ...) -> dict[str, Any]` - Line 333
+- `async validate_state_consistency(self, component: str = 'all') -> dict[str, Any]` - Line 364
+- `async reconcile_state_discrepancies(self, component: str, discrepancies: list[dict[str, Any]]) -> bool` - Line 396
+- `async get_error_patterns(self) -> dict[str, Any]` - Line 429
+- `async get_state_monitoring_status(self) -> dict[str, Any]` - Line 457
+- `async get_error_handler_metrics(self) -> dict[str, Any]` - Line 482
+- `async start_error_monitoring(self) -> None` - Line 569
+- `async stop_error_monitoring(self) -> None` - Line 581
+- `async handle_batch_errors(self, errors: list[tuple[Exception, str, str, dict[str, Any]]] | None) -> list[dict[str, Any]]` - Line 591
+- `async start_monitoring(self) -> None` - Line 659
+- `async cleanup_resources(self) -> None` - Line 683
+- `async shutdown(self) -> None` - Line 726
+- `async health_check(self) -> HealthCheckResult` - Line 752
 
 ### Implementation: `StateDataServiceInterface` 🔧
 
@@ -921,14 +928,18 @@ class ConnectionInfo:
 ```python
 class ConnectionManager:
     def __init__(self, config: Config) -> None  # Line 49
-    async def establish_connection(self, ...) -> bool  # Line 63
-    async def close_connection(self, connection_id: str) -> bool  # Line 111
-    async def reconnect_connection(self, connection_id: str) -> bool  # Line 136
-    def get_connection_status(self, connection_id: str) -> dict[str, Any] | None  # Line 157
-    def is_connection_healthy(self, connection_id: str) -> bool  # Line 172
-    async def cleanup_resources(self) -> None  # Line 181
-    async def __aenter__(self)  # Line 199
-    async def __aexit__(self, exc_type, exc_val, exc_tb)  # Line 203
+    async def initialize(self) -> None  # Line 64
+    async def cleanup(self) -> None  # Line 68
+    async def establish_connection(self, ...) -> bool  # Line 72
+    async def close_connection(self, connection_id: str) -> bool  # Line 120
+    async def reconnect_connection(self, connection_id: str) -> bool  # Line 145
+    def get_connection_status(self, connection_id: str) -> dict[str, Any] | None  # Line 166
+    def is_connection_healthy(self, connection_id: str) -> bool  # Line 181
+    async def queue_message(self, connection_id: str, message: dict[str, Any]) -> None  # Line 190
+    async def flush_message_queue(self, connection_id: str) -> int  # Line 198
+    async def cleanup_resources(self) -> None  # Line 208
+    async def __aenter__(self)  # Line 226
+    async def __aexit__(self, exc_type, exc_val, exc_tb)  # Line 230
 ```
 
 ### File: context.py
@@ -946,22 +957,23 @@ class ConnectionManager:
 
 ```python
 class ErrorContext:
-    def __post_init__(self)  # Line 70
-    def error_type(self) -> str  # Line 96
-    def error_message(self) -> str  # Line 101
-    def from_exception(cls, ...) -> 'ErrorContext'  # Line 106
-    def function(self) -> str | None  # Line 169
-    def function(self, value: str | None)  # Line 174
-    def to_dict(self, ...) -> dict[str, Any]  # Line 178
-    def to_legacy_dict(self, ...) -> dict[str, Any]  # Line 261
-    def add_detail(self, key: str, value: Any) -> None  # Line 302
-    def add_metadata(self, key: str, value: Any) -> None  # Line 306
-    def increment_recovery_attempts(self) -> None  # Line 310
-    def can_retry_recovery(self) -> bool  # Line 314
-    def is_critical(self) -> bool  # Line 318
-    def is_high_severity(self) -> bool  # Line 322
-    def requires_escalation(self) -> bool  # Line 326
-    def from_decorator_context(cls, ...) -> 'ErrorContext'  # Line 331
+    def context(self) -> dict[str, Any]  # Line 71
+    def __post_init__(self)  # Line 75
+    def error_type(self) -> str  # Line 101
+    def error_message(self) -> str  # Line 106
+    def from_exception(cls, ...) -> 'ErrorContext'  # Line 111
+    def function(self) -> str | None  # Line 174
+    def function(self, value: str | None)  # Line 179
+    def to_dict(self, ...) -> dict[str, Any]  # Line 183
+    def to_legacy_dict(self, ...) -> dict[str, Any]  # Line 266
+    def add_detail(self, key: str, value: Any) -> None  # Line 307
+    def add_metadata(self, key: str, value: Any) -> None  # Line 311
+    def increment_recovery_attempts(self) -> None  # Line 315
+    def can_retry_recovery(self) -> bool  # Line 319
+    def is_critical(self) -> bool  # Line 323
+    def is_high_severity(self) -> bool  # Line 327
+    def requires_escalation(self) -> bool  # Line 331
+    def from_decorator_context(cls, ...) -> 'ErrorContext'  # Line 336
 ```
 
 #### Class: `ErrorContextFactory`
@@ -971,13 +983,13 @@ class ErrorContext:
 
 ```python
 class ErrorContextFactory(BaseFactory[ErrorContext]):
-    def __init__(self, dependency_container: Any | None = None)  # Line 356
-    def create_context_dict(self, error: Exception, **kwargs) -> dict[str, Any]  # Line 374
-    def create(self, error: Exception, **kwargs) -> dict[str, Any]  # Line 437
-    def create_context(self, context_type: str = 'standard', error: Exception | None = None, **kwargs) -> ErrorContext  # Line 450
-    def create_from_frame(self, error: Exception, frame: Any | None = None, **kwargs) -> dict[str, Any]  # Line 469
-    def create_minimal(self, error: Exception) -> dict[str, Any]  # Line 513
-    def enrich_context(self, base_context: dict[str, Any], **additional) -> dict[str, Any]  # Line 529
+    def __init__(self, dependency_container: Any | None = None)  # Line 361
+    def create_context_dict(self, error: Exception, **kwargs) -> dict[str, Any]  # Line 379
+    def create(self, error: Exception, **kwargs) -> dict[str, Any]  # Line 442
+    def create_context(self, context_type: str = 'standard', error: Exception | None = None, **kwargs) -> ErrorContext  # Line 455
+    def create_from_frame(self, error: Exception, frame: Any | None = None, **kwargs) -> dict[str, Any]  # Line 474
+    def create_minimal(self, error: Exception) -> dict[str, Any]  # Line 518
+    def enrich_context(self, base_context: dict[str, Any], **additional) -> dict[str, Any]  # Line 534
 ```
 
 ### File: data_transformer.py
@@ -1046,18 +1058,18 @@ class FallbackConfig:
 #### Functions:
 
 ```python
-def error_handler(...)  # Line 70
-def _should_circuit_break(func_name: str, config: CircuitBreakerConfig) -> bool  # Line 183
-def _should_retry(error: Exception, config: RetryConfig | None, exceptions: tuple | None = None) -> bool  # Line 189
-def _calculate_delay(attempt: int, config: RetryConfig | None) -> float  # Line 204
-def _handle_fallback(config: FallbackConfig | None) -> Any  # Line 217
-def with_retry(...)  # Line 235
-def with_circuit_breaker(...)  # Line 266
-def with_fallback(...)  # Line 290
-def with_error_context(**context_kwargs)  # Line 317
-def get_active_handler_count() -> int  # Line 364
-def shutdown_all_error_handlers() -> None  # Line 369
-def retry_with_backoff(...)  # Line 382
+def error_handler(...)  # Line 71
+def _should_circuit_break(func_name: str, config: CircuitBreakerConfig) -> bool  # Line 196
+def _should_retry(error: Exception, config: RetryConfig | None, exceptions: tuple | None = None) -> bool  # Line 212
+def _calculate_delay(attempt: int, config: RetryConfig | None) -> float  # Line 227
+def _handle_fallback(config: FallbackConfig | None) -> Any  # Line 240
+def with_retry(...)  # Line 258
+def with_circuit_breaker(...)  # Line 289
+def with_fallback(...)  # Line 313
+def with_error_context(**context_kwargs)  # Line 340
+def get_active_handler_count() -> int  # Line 387
+def shutdown_all_error_handlers() -> None  # Line 392
+def retry_with_backoff(...)  # Line 406
 ```
 
 ### File: di_registration.py
@@ -1070,11 +1082,11 @@ def retry_with_backoff(...)  # Line 382
 
 ```python
 def register_error_handling_services(injector, config: Config | None = None) -> None  # Line 17
-def _configure_service_dependencies(injector) -> None  # Line 342
-def get_error_handling_service(injector) -> Any  # Line 384
-def _setup_global_error_handler(injector) -> None  # Line 397
-def _register_error_handlers(factory) -> None  # Line 412
-def configure_error_handling_di(injector, config: Config | None = None) -> None  # Line 443
+def _configure_service_dependencies(injector) -> None  # Line 359
+def get_error_handling_service(injector) -> Any  # Line 404
+def _setup_global_error_handler(injector) -> None  # Line 417
+def _register_error_handlers(factory) -> None  # Line 435
+def configure_error_handling_di(injector, config: Config | None = None) -> None  # Line 466
 ```
 
 ### File: error_handler.py
@@ -1092,13 +1104,13 @@ def configure_error_handling_di(injector, config: Config | None = None) -> None 
 
 ```python
 class CircuitBreaker:
-    def __init__(self, ...) -> None  # Line 74
-    def call(self, func: Callable[Ellipsis, Any], *args: Any, **kwargs: Any) -> Any  # Line 86
-    def should_transition_to_half_open(self) -> bool  # Line 115
-    def open(self) -> None  # Line 122
-    def is_open(self) -> bool  # Line 128
-    def reset(self) -> None  # Line 132
-    def threshold(self) -> int  # Line 140
+    def __init__(self, ...) -> None  # Line 90
+    def call(self, func: Callable[Ellipsis, Any], *args: Any, **kwargs: Any) -> Any  # Line 102
+    def should_transition_to_half_open(self) -> bool  # Line 131
+    def open(self) -> None  # Line 138
+    def is_open(self) -> bool  # Line 144
+    def reset(self) -> None  # Line 148
+    def threshold(self) -> int  # Line 156
 ```
 
 #### Class: `ErrorPatternCache`
@@ -1107,15 +1119,15 @@ class CircuitBreaker:
 
 ```python
 class ErrorPatternCache:
-    def __init__(self, ...) -> None  # Line 155
-    def add_pattern(self, pattern: dict[str, Any] | Any) -> None  # Line 166
-    def get_pattern(self, pattern_id: str) -> dict[str, Any] | None  # Line 182
-    def get_all_patterns(self) -> dict[str, dict[str, Any]]  # Line 200
-    def _should_cleanup(self) -> bool  # Line 205
-    def _cleanup_expired(self) -> None  # Line 214
-    def cleanup_expired(self) -> None  # Line 234
-    def size(self) -> int  # Line 238
-    def get_last_cleanup(self) -> datetime  # Line 242
+    def __init__(self, ...) -> None  # Line 171
+    def add_pattern(self, pattern: dict[str, Any] | Any) -> None  # Line 182
+    def get_pattern(self, pattern_id: str) -> dict[str, Any] | None  # Line 198
+    def get_all_patterns(self) -> dict[str, dict[str, Any]]  # Line 216
+    def _should_cleanup(self) -> bool  # Line 221
+    def _cleanup_expired(self) -> None  # Line 230
+    def cleanup_expired(self) -> None  # Line 250
+    def size(self) -> int  # Line 254
+    def get_last_cleanup(self) -> datetime  # Line 258
 ```
 
 #### Class: `ErrorHandler`
@@ -1124,40 +1136,43 @@ class ErrorPatternCache:
 
 ```python
 class ErrorHandler:
-    def __init__(self, config: Config, sanitizer = None, rate_limiter = None) -> None  # Line 250
-    def configure_dependencies(self, injector) -> None  # Line 301
-    def _initialize_circuit_breakers(self) -> None  # Line 326
-    def classify_error(self, error: Exception) -> ErrorSeverity  # Line 336
-    def validate_module_boundary_input(self, data: dict[str, Any], source_module: str) -> dict[str, Any]  # Line 367
-    def create_error_context(self, error: Exception, component: str, operation: str, **kwargs) -> 'ErrorContext'  # Line 434
-    def _get_stack_trace(self) -> str  # Line 533
-    def _validate_cross_module_boundary(self, data: dict[str, Any], source: str, operation: str) -> None  # Line 537
-    async def handle_error(self, ...) -> bool  # Line 584
-    def handle_error_sync(self, ...) -> bool  # Line 740
-    def handle_error_batch(self, ...) -> list[bool]  # Line 839
-    def _update_error_patterns(self, context: 'ErrorContext') -> None  # Line 916
-    def _calculate_frequency(self, pattern: dict[str, Any]) -> Decimal  # Line 950
-    def _log_performance_metrics(self) -> None  # Line 967
-    def _get_circuit_breaker_key(self, context: 'ErrorContext') -> str | None  # Line 984
-    def _raise_error(self, error: Exception) -> None  # Line 997
-    async def _escalate_error(self, context: 'ErrorContext') -> None  # Line 1001
-    def get_retry_policy(self, error_type: str) -> dict[str, Any]  # Line 1024
-    def get_circuit_breaker_status(self) -> dict[str, str]  # Line 1028
-    def get_error_patterns(self) -> dict[str, dict[str, Any]]  # Line 1032
-    def get_memory_usage_stats(self) -> dict[str, Any]  # Line 1036
-    async def cleanup_resources(self) -> None  # Line 1045
-    def _get_sensitivity_level(self, severity: ErrorSeverity, component: str) -> SensitivityLevel  # Line 1096
-    def validate_data_flow_consistency(self, data: dict[str, Any]) -> dict[str, Any]  # Line 1112
-    async def shutdown(self) -> None  # Line 1161
+    def __init__(self, config: Config, sanitizer = None, rate_limiter = None) -> None  # Line 266
+    def configure_dependencies(self, injector) -> None  # Line 317
+    def _initialize_circuit_breakers(self) -> None  # Line 342
+    async def initialize(self) -> None  # Line 351
+    async def cleanup(self) -> None  # Line 365
+    def classify_error(self, error: Exception) -> ErrorSeverity  # Line 375
+    def validate_module_boundary_input(self, data: dict[str, Any], source_module: str) -> dict[str, Any]  # Line 406
+    def create_error_context(self, error: Exception, component: str, operation: str, **kwargs) -> 'ErrorContext'  # Line 473
+    def _get_stack_trace(self) -> str  # Line 594
+    def _validate_cross_module_boundary(self, data: dict[str, Any], source: str, operation: str) -> None  # Line 598
+    async def handle_error(self, ...) -> bool  # Line 645
+    def handle_error_sync(self, ...) -> bool  # Line 805
+    def handle_error_batch(self, ...) -> list[bool]  # Line 904
+    def _update_error_patterns(self, context: 'ErrorContext') -> None  # Line 981
+    def _calculate_frequency(self, pattern: dict[str, Any]) -> Decimal  # Line 1015
+    def _log_performance_metrics(self) -> None  # Line 1032
+    def _get_circuit_breaker_key(self, context: 'ErrorContext') -> str | None  # Line 1049
+    def _raise_error(self, error: Exception) -> None  # Line 1062
+    async def _escalate_error(self, context: 'ErrorContext') -> None  # Line 1066
+    def get_retry_policy(self, error_type: str) -> dict[str, Any]  # Line 1094
+    def get_circuit_breaker_status(self) -> dict[str, str]  # Line 1098
+    def get_error_patterns(self) -> dict[str, dict[str, Any]]  # Line 1102
+    def get_memory_usage_stats(self) -> dict[str, Any]  # Line 1106
+    async def cleanup_resources(self) -> None  # Line 1115
+    def _get_sensitivity_level(self, severity: ErrorSeverity, component: str) -> SensitivityLevel  # Line 1166
+    def validate_data_flow_consistency(self, data: dict[str, Any]) -> dict[str, Any]  # Line 1182
+    async def shutdown(self) -> None  # Line 1231
 ```
 
 #### Functions:
 
 ```python
-def ensure_timezone_aware(dt: datetime) -> datetime  # Line 145
-def create_error_handler_factory(config: Config | None = None, dependency_container: Any | None = None)  # Line 1177
-def register_error_handler_with_di(injector, config: Config | None = None) -> None  # Line 1214
-def error_handler_decorator(...) -> Callable[Ellipsis, Any]  # Line 1225
+def _create_error_handler_with_dependencies() -> 'ErrorHandler'  # Line 71
+def ensure_timezone_aware(dt: datetime) -> datetime  # Line 161
+def create_error_handler_factory(config: Config | None = None, dependency_container: Any | None = None)  # Line 1247
+def register_error_handler_with_di(injector, config: Config | None = None) -> None  # Line 1284
+def error_handler_decorator(...) -> Callable[Ellipsis, Any]  # Line 1295
 ```
 
 ### File: factory.py
@@ -1215,24 +1230,24 @@ class GlobalErrorHandler(BaseService):
     def _setup_error_handlers(self)  # Line 72
     def configure_dependencies(self, injector) -> None  # Line 107
     def register_database_handler(self)  # Line 126
-    def register_error_callback(self, callback: Callable[[Exception, dict], None])  # Line 142
-    def register_critical_callback(self, callback: Callable[[Exception, dict], None])  # Line 151
-    def register_recovery_strategy(self, error_type: type, strategy: Callable)  # Line 160
-    async def handle_error(self, ...) -> dict[str, Any]  # Line 170
-    def handle_error_sync(self, ...) -> dict[str, Any]  # Line 283
-    def handle_exception_hook(self, exc_type, exc_value, exc_traceback)  # Line 356
-    def _log_error_handler_exception(self, task: asyncio.Task) -> None  # Line 399
-    def install_global_handler(self)  # Line 413
-    def error_handler_decorator(self, severity: str = 'error', reraise: bool = True, default_return: Any = None)  # Line 417
-    def get_statistics(self) -> dict[str, Any]  # Line 483
-    def reset_statistics(self)  # Line 499
+    def register_error_callback(self, callback: Callable[[Exception, dict], None])  # Line 143
+    def register_critical_callback(self, callback: Callable[[Exception, dict], None])  # Line 152
+    def register_recovery_strategy(self, error_type: type, strategy: Callable)  # Line 161
+    async def handle_error(self, ...) -> dict[str, Any]  # Line 171
+    def handle_error_sync(self, ...) -> dict[str, Any]  # Line 284
+    def handle_exception_hook(self, exc_type, exc_value, exc_traceback)  # Line 357
+    def _log_error_handler_exception(self, task: asyncio.Task) -> None  # Line 400
+    def install_global_handler(self)  # Line 414
+    def error_handler_decorator(self, severity: str = 'error', reraise: bool = True, default_return: Any = None)  # Line 418
+    def get_statistics(self) -> dict[str, Any]  # Line 484
+    def reset_statistics(self)  # Line 500
 ```
 
 #### Functions:
 
 ```python
-def create_global_error_handler_factory(config: Any | None = None)  # Line 506
-def register_global_error_handler_with_di(injector, config: Any | None = None) -> None  # Line 515
+def create_global_error_handler_factory(config: Any | None = None)  # Line 507
+def register_global_error_handler_with_di(injector, config: Any | None = None) -> None  # Line 516
 ```
 
 ### File: handler_pool.py
@@ -2125,34 +2140,34 @@ class StateMonitorInterface(Protocol):
 class ErrorHandlingService(BaseService, ErrorPropagationMixin):
     def __init__(self, ...) -> None  # Line 49
     async def initialize(self) -> None  # Line 89
-    def configure_dependencies(self, injector) -> None  # Line 128
-    async def handle_error(self, ...) -> dict[str, Any]  # Line 150
-    async def _handle_error_impl(self, ...) -> dict[str, Any]  # Line 190
-    async def _notify_monitoring_of_error_handling(self, error_response: dict[str, Any]) -> None  # Line 274
-    async def handle_global_error(self, ...) -> dict[str, Any]  # Line 309
-    async def _handle_global_error_impl(self, ...) -> dict[str, Any]  # Line 327
-    async def validate_state_consistency(self, component: str = 'all') -> dict[str, Any]  # Line 340
-    async def reconcile_state_discrepancies(self, component: str, discrepancies: list[dict[str, Any]]) -> bool  # Line 372
-    async def get_error_patterns(self) -> dict[str, Any]  # Line 405
-    async def get_state_monitoring_status(self) -> dict[str, Any]  # Line 433
-    async def get_error_handler_metrics(self) -> dict[str, Any]  # Line 458
-    def _transform_error_context(self, context: dict[str, Any], component: str) -> dict[str, Any]  # Line 493
-    def _validate_data_module_boundary(self, error: Exception, component: str, operation: str, context: dict[str, Any]) -> None  # Line 523
-    async def start_error_monitoring(self) -> None  # Line 542
-    async def stop_error_monitoring(self) -> None  # Line 554
-    async def handle_batch_errors(self, errors: list[tuple[Exception, str, str, dict[str, Any]]] | None) -> list[dict[str, Any]]  # Line 564
-    async def _handle_batch_errors_impl(self, errors: list[tuple[Exception, str, str, dict[str, Any]]] | None) -> list[dict[str, Any]]  # Line 575
-    async def start_monitoring(self) -> None  # Line 632
-    async def cleanup_resources(self) -> None  # Line 656
-    async def shutdown(self) -> None  # Line 699
-    async def _ensure_initialized(self) -> None  # Line 720
-    async def health_check(self) -> HealthCheckResult  # Line 725
+    def configure_dependencies(self, injector) -> None  # Line 144
+    async def handle_error(self, ...) -> dict[str, Any]  # Line 166
+    async def _handle_error_impl(self, ...) -> dict[str, Any]  # Line 206
+    async def _notify_monitoring_of_error_handling(self, error_response: dict[str, Any]) -> None  # Line 298
+    async def handle_global_error(self, ...) -> dict[str, Any]  # Line 333
+    async def _handle_global_error_impl(self, ...) -> dict[str, Any]  # Line 351
+    async def validate_state_consistency(self, component: str = 'all') -> dict[str, Any]  # Line 364
+    async def reconcile_state_discrepancies(self, component: str, discrepancies: list[dict[str, Any]]) -> bool  # Line 396
+    async def get_error_patterns(self) -> dict[str, Any]  # Line 429
+    async def get_state_monitoring_status(self) -> dict[str, Any]  # Line 457
+    async def get_error_handler_metrics(self) -> dict[str, Any]  # Line 482
+    def _transform_error_context(self, context: dict[str, Any], component: str) -> dict[str, Any]  # Line 517
+    def _validate_data_module_boundary(self, error: Exception, component: str, operation: str, context: dict[str, Any]) -> None  # Line 550
+    async def start_error_monitoring(self) -> None  # Line 569
+    async def stop_error_monitoring(self) -> None  # Line 581
+    async def handle_batch_errors(self, errors: list[tuple[Exception, str, str, dict[str, Any]]] | None) -> list[dict[str, Any]]  # Line 591
+    async def _handle_batch_errors_impl(self, errors: list[tuple[Exception, str, str, dict[str, Any]]] | None) -> list[dict[str, Any]]  # Line 602
+    async def start_monitoring(self) -> None  # Line 659
+    async def cleanup_resources(self) -> None  # Line 683
+    async def shutdown(self) -> None  # Line 726
+    async def _ensure_initialized(self) -> None  # Line 747
+    async def health_check(self) -> HealthCheckResult  # Line 752
 ```
 
 #### Functions:
 
 ```python
-def create_error_handling_service(...) -> 'ErrorHandlingService'  # Line 766
+def create_error_handling_service(...) -> 'ErrorHandlingService'  # Line 793
 ```
 
 ### File: state_monitor.py
@@ -2275,4 +2290,4 @@ def register_state_monitor_with_di(injector, config: Config | None = None) -> No
 ---
 **Generated**: Complete reference for error_handling module
 **Total Classes**: 78
-**Total Functions**: 59
+**Total Functions**: 60

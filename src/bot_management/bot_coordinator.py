@@ -94,14 +94,10 @@ class BotCoordinator:
         self.exchange_usage: dict[str, dict[str, int]] = {}  # exchange -> metric -> count
 
         # Configuration
-        self.max_symbol_exposure = Decimal(
-            str(config.bot_management.get("max_symbol_exposure", "100000"))
-        )
-        self.coordination_interval = config.bot_management.get("coordination_interval", 10)
-        self.signal_retention_minutes = config.bot_management.get("signal_retention_minutes", 60)
-        self.arbitrage_detection_enabled = config.bot_management.get(
-            "arbitrage_detection_enabled", True
-        )
+        self.max_symbol_exposure = config.bot_management.max_symbol_exposure
+        self.coordination_interval = config.bot_management.coordination_interval
+        self.signal_retention_minutes = config.bot_management.signal_retention_minutes
+        self.arbitrage_detection_enabled = config.bot_management.arbitrage_detection_enabled
 
         # Performance tracking
         self.coordination_metrics = {

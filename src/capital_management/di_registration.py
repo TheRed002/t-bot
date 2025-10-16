@@ -74,112 +74,23 @@ def register_capital_management_services(container: Any) -> None:
 
     def create_capital_allocator():
         factory = get_capital_management_factory()
-        capital_service = container.get("CapitalService")
-        config_service = None
-        risk_service = None
-        trade_lifecycle_manager = None
-        validation_service = None
-
-        try:
-            config_service = container.get("ConfigService")
-        except (KeyError, AttributeError, ImportError):
-            pass
-        try:
-            risk_service = container.get("RiskService")
-        except (KeyError, AttributeError, ImportError):
-            pass
-        try:
-            trade_lifecycle_manager = container.get("TradeLifecycleManager")
-        except (KeyError, AttributeError, ImportError):
-            pass
-        try:
-            validation_service = container.get("ValidationService")
-        except (KeyError, AttributeError, ImportError):
-            pass
-
-        return factory.create_capital_allocator(
-            capital_service=capital_service,
-            config_service=config_service,
-            risk_service=risk_service,
-            trade_lifecycle_manager=trade_lifecycle_manager,
-            validation_service=validation_service,
-        )
+        # Pass container to factory - it will resolve dependencies internally
+        return factory.create_capital_allocator()
 
     def create_currency_manager():
-        # Resolve services from container during creation
         factory = get_capital_management_factory()
-        exchange_data_service = None
-        validation_service = None
-        risk_service = None
-
-        try:
-            exchange_data_service = container.get("ExchangeDataService")
-        except (KeyError, AttributeError, ImportError):
-            pass
-        try:
-            validation_service = container.get("ValidationService")
-        except (KeyError, AttributeError, ImportError):
-            pass
-        try:
-            risk_service = container.get("RiskService")
-        except (KeyError, AttributeError, ImportError):
-            pass
-
-        return factory.create_currency_manager(
-            exchange_data_service=exchange_data_service,
-            validation_service=validation_service,
-            risk_service=risk_service,
-        )
+        # Pass container to factory - it will resolve dependencies internally
+        return factory.create_currency_manager()
 
     def create_exchange_distributor():
         factory = get_capital_management_factory()
-        exchanges = None
-        validation_service = None
-        exchange_info_service = None
-
-        try:
-            exchanges = container.get("Exchanges")
-        except (KeyError, AttributeError, ImportError):
-            pass
-        try:
-            validation_service = container.get("ValidationService")
-        except (KeyError, AttributeError, ImportError):
-            pass
-        try:
-            exchange_info_service = container.get("ExchangeInfoService")
-        except (KeyError, AttributeError, ImportError):
-            pass
-
-        return factory.create_exchange_distributor(
-            exchanges=exchanges,
-            validation_service=validation_service,
-            exchange_info_service=exchange_info_service,
-        )
+        # Pass container to factory - it will resolve dependencies internally
+        return factory.create_exchange_distributor()
 
     def create_fund_flow_manager():
         factory = get_capital_management_factory()
-        cache_service = None
-        time_series_service = None
-        validation_service = None
-
-        try:
-            cache_service = container.get("CacheService")
-        except (KeyError, AttributeError, ImportError):
-            pass
-        try:
-            time_series_service = container.get("TimeSeriesService")
-        except (KeyError, AttributeError, ImportError):
-            pass
-        try:
-            validation_service = container.get("ValidationService")
-        except (KeyError, AttributeError, ImportError):
-            pass
-
-        return factory.create_fund_flow_manager(
-            cache_service=cache_service,
-            time_series_service=time_series_service,
-            validation_service=validation_service,
-        )
+        # Pass container to factory - it will resolve dependencies internally
+        return factory.create_fund_flow_manager()
 
     container.register("CapitalService", create_capital_service, singleton=True)
     container.register("CapitalAllocator", create_capital_allocator, singleton=True)
@@ -309,27 +220,27 @@ def _create_repository_with_fallback(
 ):
     """Create repository with fallback using service locator pattern."""
     try:
-        session_factory = container.get("AsyncSessionFactory")
-        if session_factory:
-            session = session_factory()
-            if session:
-                if (
-                    repo_class_name == "CapitalRepository"
-                    and CapitalRepository
-                    and CapitalAllocationRepository
-                ):
-                    db_repo = CapitalAllocationRepository(session)
-                    return CapitalRepository(db_repo)
-                elif (
-                    repo_class_name == "AuditRepository"
-                    and AuditRepository
-                    and CapitalAuditLogRepository
-                ):
-                    audit_db_repo = CapitalAuditLogRepository(session)
-                    return AuditRepository(audit_db_repo)
+        # Try to get AsyncSession directly (it's registered as a factory in DI)
+        session = container.get("AsyncSession")
+        if session:
+            # AsyncSession is already a session instance from the factory
+            if (
+                repo_class_name == "CapitalRepository"
+                and CapitalRepository
+                and CapitalAllocationRepository
+            ):
+                db_repo = CapitalAllocationRepository(session)
+                return CapitalRepository(db_repo)
+            elif (
+                repo_class_name == "AuditRepository"
+                and AuditRepository
+                and CapitalAuditLogRepository
+            ):
+                audit_db_repo = CapitalAuditLogRepository(session)
+                return AuditRepository(audit_db_repo)
         else:
             logger.warning(
-                f"AsyncSessionFactory not available for {repo_class_name}, using fallback"
+                f"AsyncSession not available for {repo_class_name}, using fallback"
             )
     except (KeyError, AttributeError, ImportError, Exception) as e:
         logger.warning(

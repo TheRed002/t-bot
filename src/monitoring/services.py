@@ -17,12 +17,6 @@ from src.core.types import AlertSeverity, OrderType
 if TYPE_CHECKING:
     from src.monitoring.alerting import Alert, AlertManager
     from src.monitoring.dashboards import Dashboard, GrafanaDashboardManager
-    from src.monitoring.interfaces import (
-        AlertServiceInterface,
-        DashboardServiceInterface,
-        MetricsServiceInterface,
-        PerformanceServiceInterface,
-    )
     from src.monitoring.metrics import MetricsCollector
     from src.monitoring.performance import PerformanceProfiler
 else:
@@ -34,13 +28,14 @@ else:
         class Dashboard:
             pass
 
-    # Import interfaces at runtime to avoid circular dependencies
-    from src.monitoring.interfaces import (
-        AlertServiceInterface,
-        DashboardServiceInterface,
-        MetricsServiceInterface,
-        PerformanceServiceInterface,
-    )
+# Import interfaces at runtime - they're needed for inheritance
+from src.monitoring.interfaces import (
+    AlertServiceInterface,
+    DashboardServiceInterface,
+    MetricsServiceInterface,
+    MonitoringServiceInterface,
+    PerformanceServiceInterface,
+)
 from src.monitoring.data_transformer import MonitoringDataTransformer
 from src.utils.messaging_patterns import (
     BoundaryValidator,
@@ -281,6 +276,15 @@ class DefaultAlertService(BaseService, AlertServiceInterface, ErrorPropagationMi
 
     def _transform_alert_request_data(self, request: AlertRequest) -> AlertRequest:
         """Transform alert request data consistently across operations."""
+        # Validate request is AlertRequest type
+        if not isinstance(request, AlertRequest):
+            raise ValidationError(
+                message="Request must be AlertRequest instance",
+                field_name="request",
+                field_value=type(request).__name__,
+                expected_type="AlertRequest",
+            )
+
         # Apply minimal transformation to preserve existing behavior
         transformed_annotations = request.annotations.copy() if request.annotations else {}
 
@@ -513,7 +517,11 @@ class DefaultMetricsService(BaseService, MetricsServiceInterface, ErrorPropagati
 
     def export_metrics(self) -> str:
         """Export metrics in Prometheus format."""
-        return self._metrics_collector.export_metrics()
+        metrics_bytes = self._metrics_collector.export_metrics()
+        # Convert bytes to string to match interface
+        if isinstance(metrics_bytes, bytes):
+            return metrics_bytes.decode("utf-8")
+        return str(metrics_bytes)
 
     def record_error_pattern_metric(self, error_data: dict[str, Any]) -> None:
         """Record error pattern metric from error_handling module."""
@@ -596,8 +604,8 @@ class DefaultPerformanceService(BaseService, PerformanceServiceInterface, ErrorP
             if isinstance(transformed_data["latency_ms"], str):
                 latency_val = float(transformed_data["latency_ms"])
             else:
-                latency_val = transformed_data["latency_ms"]
-            
+                latency_val = float(transformed_data["latency_ms"])
+
             if latency_val < 0:
                 raise ValidationError(
                     "Invalid latency_ms parameter",
@@ -605,13 +613,16 @@ class DefaultPerformanceService(BaseService, PerformanceServiceInterface, ErrorP
                     field_value=transformed_data["latency_ms"],
                     validation_rule="must be non-negative number",
                 )
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as e:
             raise ValidationError(
                 "Invalid latency_ms parameter",
                 field_name="latency_ms",
-                field_value=transformed_data["latency_ms"],
-                validation_rule="must be non-negative number",
-            )
+                field_value=transformed_data.get("latency_ms", "missing"),
+                validation_rule="must be numeric and non-negative",
+            ) from e
+        except ValidationError:
+            # Re-raise validation errors
+            raise
 
         # Convert string to OrderType enum with consistent error handling
         try:
@@ -655,13 +666,20 @@ class DefaultPerformanceService(BaseService, PerformanceServiceInterface, ErrorP
             ) from e
 
         try:
+            # Convert string values back to Decimal for performance profiler
+            from src.utils.decimal_utils import to_decimal
+
+            latency_decimal = to_decimal(transformed_data["latency_ms"])
+            fill_rate_decimal = to_decimal(transformed_data["fill_rate"])
+            slippage_decimal = to_decimal(transformed_data["slippage_bps"])
+
             self._performance_profiler.record_order_execution(
                 transformed_data["exchange"],
                 order_type_enum,
                 transformed_data["symbol"],
-                transformed_data["latency_ms"],
-                transformed_data["fill_rate"],
-                transformed_data["slippage_bps"],
+                latency_decimal,
+                fill_rate_decimal,
+                slippage_decimal,
             )
         except Exception as e:
             raise ComponentError(
@@ -729,7 +747,7 @@ class DefaultDashboardService(BaseService, DashboardServiceInterface):
         return self._dashboard_manager.builder.create_system_performance_dashboard()
 
 
-class MonitoringService(BaseService):
+class MonitoringService(BaseService, MonitoringServiceInterface):
     """Composite service for all monitoring operations."""
 
     def __init__(

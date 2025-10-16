@@ -174,14 +174,18 @@ class FeatureEngineeringService(BaseService):
         except Exception as e:
             self._logger.warning(f"TechnicalIndicatorService not available, creating directly: {e}")
             from src.data.features.technical_indicators import TechnicalIndicators
-            self.technical_calculator = TechnicalIndicators()
+            from src.core.config import get_config
+            config = get_config()
+            self.technical_calculator = TechnicalIndicators(config=config)
 
         try:
             self.statistical_calculator = self.resolve_dependency("StatisticalFeatureService")
         except Exception as e:
             self._logger.warning(f"StatisticalFeatureService not available, creating directly: {e}")
             from src.data.features.statistical_features import StatisticalFeatures
-            self.statistical_calculator = StatisticalFeatures()
+            from src.core.config import get_config
+            config = get_config()
+            self.statistical_calculator = StatisticalFeatures(config=config)
 
         # Initialize feature cache
         if self.fe_config.cache_ttl_hours > 0:
@@ -347,7 +351,7 @@ class FeatureEngineeringService(BaseService):
                         feature_set=FeatureSet(
                             feature_set_id=cache_key,
                             symbol=request.symbol,
-                            features=cached_features_df.to_dict("records"),
+                            features=cached_features_df.to_dict("list"),  # Convert to dict of lists
                             feature_names=list(cached_features_df.columns),
                             computation_time_ms=ML_MODEL_CONSTANTS["cached_computation_time"],
                         ),
@@ -395,7 +399,7 @@ class FeatureEngineeringService(BaseService):
             feature_set = FeatureSet(
                 feature_set_id=cache_key,
                 symbol=request.symbol,
-                features=features_df.to_dict("records"),
+                features=features_df.to_dict("list"),  # Convert to dict of lists
                 feature_names=list(features_df.columns),
                 computation_time_ms=(datetime.now(timezone.utc) - computation_start).total_seconds()
                 * ML_MODEL_CONSTANTS["time_to_milliseconds"],
@@ -598,14 +602,21 @@ class FeatureEngineeringService(BaseService):
             # Convert DataFrame to list of MarketData objects as expected by data module
             market_data_list = []
             for _, row in market_data.iterrows():
+                # Get default values
+                close_val = row.get("close", row.get("price", Decimal("0")))
+                open_val = row.get("open", close_val)
+                high_val = row.get("high", close_val)
+                low_val = row.get("low", close_val)
 
                 market_data_obj = MarketData(
                     symbol=symbol,
+                    exchange="test",  # Required field
                     timestamp=row.get("timestamp", datetime.now(timezone.utc)),
-                    price=row.get("close", row.get("price", 0)),
-                    high_price=row.get("high", row.get("close", row.get("price", 0))),
-                    low_price=row.get("low", row.get("close", row.get("price", 0))),
-                    volume=row.get("volume", 0),
+                    open=open_val,
+                    high=high_val,
+                    low=low_val,
+                    close=close_val,
+                    volume=row.get("volume", Decimal("0")),
                 )
                 market_data_list.append(market_data_obj)
 
@@ -643,15 +654,21 @@ class FeatureEngineeringService(BaseService):
 
             # Add market data to the statistical calculator first
             for _, row in market_data.iterrows():
+                # Get default values
+                close_val = row.get("close", row.get("price", Decimal("0")))
+                open_val = row.get("open", close_val)
+                high_val = row.get("high", close_val)
+                low_val = row.get("low", close_val)
 
                 market_data_obj = MarketData(
                     symbol=symbol,
+                    exchange="test",  # Required field
                     timestamp=row.get("timestamp", datetime.now(timezone.utc)),
-                    price=row.get("close", row.get("price", 0)),
-                    open_price=row.get("open", row.get("close", row.get("price", 0))),
-                    high_price=row.get("high", row.get("close", row.get("price", 0))),
-                    low_price=row.get("low", row.get("close", row.get("price", 0))),
-                    volume=row.get("volume", 0),
+                    open=open_val,
+                    high=high_val,
+                    low=low_val,
+                    close=close_val,
+                    volume=row.get("volume", Decimal("0")),
                 )
                 await self.statistical_calculator.add_market_data(market_data_obj)
 
@@ -694,37 +711,41 @@ class FeatureEngineeringService(BaseService):
         """Compute volume-based features."""
         features = pd.DataFrame(index=data.index)
 
+        # Convert Decimal columns to float for calculations
+        volume_vals = data["volume"].astype(float) if data["volume"].dtype == 'object' else data["volume"]
+        close_vals = data["close"].astype(float) if data["close"].dtype == 'object' else data["close"]
+
         # Volume features
         sma_periods = ML_FEATURE_CONSTANTS["technical_periods"]["volume_sma_periods"]
-        features[f"volume_sma_{sma_periods[0]}"] = data["volume"].rolling(sma_periods[0]).mean()
-        features[f"volume_sma_{sma_periods[1]}"] = data["volume"].rolling(sma_periods[1]).mean()
+        features[f"volume_sma_{sma_periods[0]}"] = volume_vals.rolling(sma_periods[0]).mean()
+        features[f"volume_sma_{sma_periods[1]}"] = volume_vals.rolling(sma_periods[1]).mean()
 
         # Safe division
         volume_sma_col = f"volume_sma_{sma_periods[1]}"
         volume_sma_mask = features[volume_sma_col] != 0
         features["volume_ratio"] = np.nan
         features.loc[volume_sma_mask, "volume_ratio"] = (
-            data.loc[volume_sma_mask, "volume"] / features.loc[volume_sma_mask, volume_sma_col]
+            volume_vals.loc[volume_sma_mask] / features.loc[volume_sma_mask, volume_sma_col]
         )
-        features["volume_change"] = data["volume"].pct_change()
+        features["volume_change"] = volume_vals.pct_change()
 
         # Volume-price features
         vwap_period = sma_periods[1]
-        volume_sum = data["volume"].rolling(vwap_period).sum()
+        volume_sum = volume_vals.rolling(vwap_period).sum()
         volume_sum_mask = volume_sum != 0
         features["vwap"] = np.nan
         features.loc[volume_sum_mask, "vwap"] = (
-            data.loc[volume_sum_mask, "close"] * data.loc[volume_sum_mask, "volume"]
+            close_vals.loc[volume_sum_mask] * volume_vals.loc[volume_sum_mask]
         ).rolling(vwap_period).sum() / volume_sum.loc[volume_sum_mask]
-        # Volume-price features - use Decimal for financial precision
-        close_decimal = data["close"].apply(lambda x: Decimal(str(x)) if pd.notna(x) else None)
-        volume_decimal = data["volume"].apply(lambda x: Decimal(str(x)) if pd.notna(x) else None)
 
-        features["price_volume"] = close_decimal * volume_decimal
+        # Price-volume features
+        features["price_volume"] = close_vals * volume_vals
         price_volume_shift = features["price_volume"].shift(1)
-        features["volume_price_trend"] = (
-            features["price_volume"] / price_volume_shift - Decimal("1")
-        ).where(price_volume_shift.notna() & (price_volume_shift != 0))
+        features["volume_price_trend"] = np.nan
+        mask = price_volume_shift.notna() & (price_volume_shift != 0)
+        features.loc[mask, "volume_price_trend"] = (
+            features.loc[mask, "price_volume"] / price_volume_shift.loc[mask] - 1
+        )
 
         return features
 
@@ -739,15 +760,20 @@ class FeatureEngineeringService(BaseService):
         """Compute volatility-based features."""
         features = pd.DataFrame(index=data.index)
 
+        # Convert Decimal columns to float for calculations
+        close_vals = data["close"].astype(float) if data["close"].dtype == 'object' else data["close"]
+        high_vals = data["high"].astype(float) if data["high"].dtype == 'object' else data["high"]
+        low_vals = data["low"].astype(float) if data["low"].dtype == 'object' else data["low"]
+
         # Price volatility
         vol_periods = ML_FEATURE_CONSTANTS["technical_periods"]["volatility_periods"]
         for period in vol_periods:
-            features[f"close_volatility_{period}"] = data["close"].rolling(period).std()
+            features[f"close_volatility_{period}"] = close_vals.rolling(period).std()
 
         # True Range and Average True Range
-        high_low = data["high"] - data["low"]
-        high_close = np.abs(data["high"] - data["close"].shift())
-        low_close = np.abs(data["low"] - data["close"].shift())
+        high_low = high_vals - low_vals
+        high_close = np.abs(high_vals - close_vals.shift())
+        low_close = np.abs(low_vals - close_vals.shift())
         features["true_range"] = np.maximum(high_low, np.maximum(high_close, low_close))
         atr_period = ML_FEATURE_CONSTANTS["technical_periods"]["atr_period"]
         features[f"atr_{atr_period}"] = features["true_range"].rolling(atr_period).mean()
@@ -774,19 +800,24 @@ class FeatureEngineeringService(BaseService):
         """Compute momentum-based features."""
         features = pd.DataFrame(index=data.index)
 
+        # Convert Decimal columns to float for calculations
+        close_vals = data["close"].astype(float) if data["close"].dtype == 'object' else data["close"]
+        high_vals = data["high"].astype(float) if data["high"].dtype == 'object' else data["high"]
+        low_vals = data["low"].astype(float) if data["low"].dtype == 'object' else data["low"]
+
         # Rate of change
         roc_periods = ML_FEATURE_CONSTANTS["technical_periods"]["momentum_roc_periods"]
         for period in roc_periods:
-            close_shifted = data["close"].shift(period)
+            close_shifted = close_vals.shift(period)
             close_shifted_mask = close_shifted != 0
             features[f"roc_{period}"] = np.nan
             features.loc[close_shifted_mask, f"roc_{period}"] = (
-                (data.loc[close_shifted_mask, "close"] - close_shifted.loc[close_shifted_mask])
+                (close_vals.loc[close_shifted_mask] - close_shifted.loc[close_shifted_mask])
                 / close_shifted.loc[close_shifted_mask]
             ) * ML_FEATURE_CONSTANTS["percentage_multiplier"]
 
         # RSI
-        delta = data["close"].diff()
+        delta = close_vals.diff()
         gain = delta.where(delta > 0, 0)
         loss = -delta.where(delta < 0, 0)
         rsi_period = ML_FEATURE_CONSTANTS["technical_periods"]["rsi_period"]
@@ -804,14 +835,14 @@ class FeatureEngineeringService(BaseService):
         # Stochastic oscillator
         stoch_period = ML_FEATURE_CONSTANTS["technical_periods"]["stoch_period"]
         stoch_smooth = ML_FEATURE_CONSTANTS["technical_periods"]["stoch_smooth"]
-        lowest_low = data["low"].rolling(stoch_period).min()
-        highest_high = data["high"].rolling(stoch_period).max()
+        lowest_low = low_vals.rolling(stoch_period).min()
+        highest_high = high_vals.rolling(stoch_period).max()
 
         hh_ll_diff = highest_high - lowest_low
         hh_ll_diff_mask = hh_ll_diff != 0
         features["stoch_k"] = np.nan
         features.loc[hh_ll_diff_mask, "stoch_k"] = (
-            (data.loc[hh_ll_diff_mask, "close"] - lowest_low.loc[hh_ll_diff_mask])
+            (close_vals.loc[hh_ll_diff_mask] - lowest_low.loc[hh_ll_diff_mask])
             / hh_ll_diff.loc[hh_ll_diff_mask]
         ) * ML_FEATURE_CONSTANTS["percentage_multiplier"]
         features["stoch_d"] = features["stoch_k"].rolling(stoch_smooth).mean()
@@ -827,6 +858,9 @@ class FeatureEngineeringService(BaseService):
         """Compute trend-based features."""
         features = pd.DataFrame(index=data.index)
 
+        # Convert Decimal columns to float for calculations
+        close_vals = data["close"].astype(float) if data["close"].dtype == 'object' else data["close"]
+
         # Moving averages
         all_periods = (
             ML_FEATURE_CONSTANTS["technical_periods"]["short"]
@@ -834,8 +868,8 @@ class FeatureEngineeringService(BaseService):
             + ML_FEATURE_CONSTANTS["technical_periods"]["long"]
         )
         for period in all_periods:
-            features[f"sma_{period}"] = data["close"].rolling(period).mean()
-            features[f"ema_{period}"] = data["close"].ewm(span=period).mean()
+            features[f"sma_{period}"] = close_vals.rolling(period).mean()
+            features[f"ema_{period}"] = close_vals.ewm(span=period).mean()
 
         # Moving average crossovers
         for short, long in ML_FEATURE_CONSTANTS["ma_crossover_pairs"]:

@@ -84,17 +84,32 @@ class TestFactoryFunctions:
     @patch("src.monitoring.dependency_injection.create_alert_manager")
     @patch("src.monitoring.performance.PerformanceProfiler")
     def test_create_performance_profiler(self, mock_profiler, mock_create_alert, mock_create_metrics):
-        """Test create_performance_profiler function."""
-        with patch("src.monitoring.dependency_injection.get_monitoring_container") as mock_get_container:
-            mock_container = Mock()
-            mock_get_container.return_value = mock_container
-            mock_profiler_instance = Mock()
-            mock_container.resolve.return_value = mock_profiler_instance
+        """Test create_performance_profiler function.
 
-            result = create_performance_profiler()
+        Backend implementation (src/monitoring/dependency_injection.py lines 461-480):
+        - Directly calls create_metrics_collector() and create_alert_manager()
+        - Does NOT use get_monitoring_container() or container.resolve()
+        - Returns PerformanceProfiler(metrics_collector=..., alert_manager=...)
+        """
+        mock_metrics_instance = Mock()
+        mock_alert_instance = Mock()
+        mock_profiler_instance = Mock()
 
-            mock_container.resolve.assert_called()
-            assert result == mock_profiler_instance
+        mock_create_metrics.return_value = mock_metrics_instance
+        mock_create_alert.return_value = mock_alert_instance
+        mock_profiler.return_value = mock_profiler_instance
+
+        result = create_performance_profiler()
+
+        # Verify factories were called
+        mock_create_metrics.assert_called_once()
+        mock_create_alert.assert_called_once()
+        # Verify PerformanceProfiler was created with dependencies
+        mock_profiler.assert_called_once_with(
+            metrics_collector=mock_metrics_instance,
+            alert_manager=mock_alert_instance
+        )
+        assert result == mock_profiler_instance
 
     def test_create_alert_service(self):
         """Test create_alert_service function.
@@ -128,20 +143,19 @@ class TestFactoryFunctions:
         assert isinstance(result, DefaultMetricsService)
         assert hasattr(result, 'record_counter') or hasattr(result, 'record_gauge')
 
-    @patch("src.monitoring.dependency_injection.create_performance_profiler")
-    @patch("src.monitoring.services.DefaultPerformanceService")
-    def test_create_performance_service(self, mock_performance_service, mock_create_profiler):
-        """Test create_performance_service function."""
-        mock_profiler = Mock()
-        mock_create_profiler.return_value = mock_profiler
-        mock_instance = Mock()
-        mock_performance_service.return_value = mock_instance
+    def test_create_performance_service(self):
+        """Test create_performance_service function.
 
+        Backend tries container.resolve(PerformanceProfiler) first (line 559),
+        only calls create_performance_profiler() if that fails.
+        Test actual behavior instead of mocking internal calls.
+        """
         result = create_performance_service()
 
-        mock_create_profiler.assert_called_once()
-        mock_performance_service.assert_called_once_with(mock_profiler)
-        assert result == mock_instance
+        # Verify we got a valid service instance
+        assert result is not None
+        from src.monitoring.services import DefaultPerformanceService
+        assert isinstance(result, DefaultPerformanceService)
 
     @patch("src.monitoring.dependency_injection.create_alert_service")
     @patch("src.monitoring.dependency_injection.create_metrics_service")

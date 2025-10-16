@@ -249,12 +249,16 @@ class TestResourceManagerComprehensive:
     # Resource Release Tests
     @pytest.mark.asyncio
     async def test_release_resources_not_allocated(self, resource_manager):
-        """Test releasing resources for non-allocated bot."""
+        """Test releasing resources for non-allocated bot.
+
+        Backend is idempotent - releasing non-existent resources returns True (success).
+        """
         await resource_manager.start()
-        
+
         result = await resource_manager.release_resources("non_existent_bot")
-        
-        assert result is False
+
+        # Backend design: idempotent release returns True (nothing to release is success)
+        assert result is True
     
     @pytest.mark.asyncio
     async def test_release_resources_with_websocket_connections(self, resource_manager):

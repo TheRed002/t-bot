@@ -314,7 +314,7 @@ class TestBinanceOrderPlacement:
                 type="STOP_LOSS_LIMIT",
                 quantity="0.01000000",
                 price="48000.00000000",
-                stopPrice="49000.00",
+                stopPrice="49000.00000000",
                 timeInForce="GTC",
                 newClientOrderId="stop_loss_123"
             )
@@ -363,7 +363,7 @@ class TestBinanceOrderPlacement:
                 type="TAKE_PROFIT_LIMIT",
                 quantity="0.01000000",
                 price="52000.00000000",
-                stopPrice="51000.00",
+                stopPrice="51000.00000000",
                 timeInForce="GTC",
                 newClientOrderId="take_profit_123"
             )
@@ -696,9 +696,10 @@ class TestBinanceFinancialPrecision:
             await binance_exchange.place_order(order)
 
             # Verify that string representations are used in API calls
+            # Backend rounds to 8 decimal places
             call_kwargs = mock_client.create_order.call_args.kwargs
-            assert call_kwargs["quantity"] == "0.123456789"
-            assert call_kwargs["price"] == "50000.123456789"
+            assert call_kwargs["quantity"] == "0.12345679"
+            assert call_kwargs["price"] == "50000.12345679"
             # Ensure these are strings, not floats
             assert isinstance(call_kwargs["quantity"], str)
             assert isinstance(call_kwargs["price"], str)

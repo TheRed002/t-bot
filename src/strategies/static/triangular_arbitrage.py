@@ -222,12 +222,14 @@ class TriangularArbitrageStrategy(BaseStrategy):
                 if await self._validate_triangular_timing(path):
                     # Create triangular arbitrage signal
                     signal = Signal(
+                        signal_id=f"triangular_arb_{datetime.now(timezone.utc).timestamp()}",
+                        strategy_id=self.strategy_id,
+                        strategy_name=self.name,
                         direction=SignalDirection.BUY,  # Direction doesn't matter for triangular
                         # Scale confidence with profit
                         confidence=min(0.9, net_profit_percentage / 2),
                         timestamp=datetime.now(timezone.utc),
                         symbol=pair1,  # Use first pair as primary symbol
-                        strategy_name=self.name,
                         metadata={
                             "arbitrage_type": "triangular",
                             "path": path,

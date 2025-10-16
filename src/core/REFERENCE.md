@@ -1,8 +1,8 @@
 # CORE Module Reference
 
 ## INTEGRATION
-**Dependencies**: backtesting, data, database, error_handling, state, utils
-**Used By**: strategies
+**Dependencies**: analytics, backtesting, bot_management, capital_management, data, database, error_handling, exchanges, execution, ml, monitoring, risk_management, state, strategies, utils, web_interface
+**Used By**: error_handling
 **Provides**: AsyncContextManager, BaseService, CacheManager, ConfigService, EnvironmentAwareService, HealthCheckManager, HighPerformanceMemoryManager, ResourceManager, ServiceManager, TaskManager, TransactionalService, WebSocketManager
 **Patterns**: Async Operations, Component Architecture, Dependency Injection, Service Layer
 
@@ -25,9 +25,9 @@
 - HealthCheckManager inherits from base architecture
 
 ## MODULE OVERVIEW
-**Files**: 58 Python files
-**Classes**: 391
-**Functions**: 92
+**Files**: 62 Python files
+**Classes**: 396
+**Functions**: 102
 
 ## COMPLETE API REFERENCE
 
@@ -500,12 +500,12 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async start(self) -> None` - Line 575
-- `async stop(self) -> None` - Line 579
-- `async health_check(self) -> HealthCheckResult` - Line 583
-- `get_performance_metrics(self) -> dict[str, Any]` - Line 587
-- `async execute_query(self, query: str, params: dict[str, Any] | None = None) -> Any` - Line 591
-- `async get_connection_pool_status(self) -> dict[str, Any]` - Line 595
+- `async start(self) -> None` - Line 576
+- `async stop(self) -> None` - Line 580
+- `async health_check(self) -> HealthCheckResult` - Line 584
+- `get_performance_metrics(self) -> dict[str, Any]` - Line 588
+- `async execute_query(self, query: str, params: dict[str, Any] | None = None) -> Any` - Line 592
+- `async get_connection_pool_status(self) -> dict[str, Any]` - Line 596
 
 ### Implementation: `BaseRepository` 🔧
 
@@ -1001,9 +1001,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_sizing_method(cls, v: str) -> str` - Line 225
-- `get_position_size_params(self) -> dict` - Line 238
-- `is_risk_exceeded(self, current_loss: Decimal) -> bool` - Line 264
+- `validate_sizing_method(cls, v: str) -> str` - Line 236
+- `get_position_size_params(self) -> dict` - Line 249
+- `is_risk_exceeded(self, current_loss: Decimal) -> bool` - Line 275
 
 ### Implementation: `SandboxEnvironment` ✅
 
@@ -1239,6 +1239,16 @@
 - `validate_positive_integers(cls, v)` - Line 931
 - `validate_positive_float(cls, v)` - Line 939
 
+### Implementation: `BotManagementConfig` ✅
+
+**Inherits**: BaseConfig
+**Purpose**: Bot management configuration for bot lifecycle and coordination
+**Status**: Complete
+
+**Implemented Methods:**
+- `validate_decimal_positive(cls, v: Decimal) -> Decimal` - Line 1030
+- `validate_positive_integers(cls, v: int) -> int` - Line 1052
+
 ### Implementation: `ExecutionConfig` ✅
 
 **Inherits**: BaseConfig
@@ -1252,17 +1262,17 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_environment(cls, v: str) -> str` - Line 1028
-- `generate_schema(self) -> None` - Line 1035
-- `from_yaml(cls, yaml_path: str | Path) -> 'Config'` - Line 1044
-- `from_yaml_with_env_override(cls, yaml_path: str | Path) -> 'Config'` - Line 1073
-- `to_yaml(self, yaml_path: str | Path) -> None` - Line 1108
-- `get_database_url(self) -> str` - Line 1123
-- `get_async_database_url(self) -> str` - Line 1137
-- `get_redis_url(self) -> str` - Line 1151
-- `is_production(self) -> bool` - Line 1168
-- `is_development(self) -> bool` - Line 1172
-- `validate_yaml_config(self, yaml_path: str | Path) -> bool` - Line 1176
+- `validate_environment(cls, v: str) -> str` - Line 1142
+- `generate_schema(self) -> None` - Line 1149
+- `from_yaml(cls, yaml_path: str | Path) -> 'Config'` - Line 1158
+- `from_yaml_with_env_override(cls, yaml_path: str | Path) -> 'Config'` - Line 1187
+- `to_yaml(self, yaml_path: str | Path) -> None` - Line 1222
+- `get_database_url(self) -> str` - Line 1237
+- `get_async_database_url(self) -> str` - Line 1251
+- `get_redis_url(self) -> str` - Line 1265
+- `is_production(self) -> bool` - Line 1282
+- `is_development(self) -> bool` - Line 1286
+- `validate_yaml_config(self, yaml_path: str | Path) -> bool` - Line 1290
 
 ### Implementation: `CoreDataTransformer` ✅
 
@@ -1287,7 +1297,15 @@
 - `register_class(self, name: str, cls: type[T], *args, **kwargs) -> None` - Line 60
 - `get(self, name: str) -> Any` - Line 124
 - `has(self, name: str) -> bool` - Line 175
-- `clear(self) -> None` - Line 183
+- `resolve(self, name: str) -> Any` - Line 179
+- `get_optional(self, name: str) -> Any | None` - Line 194
+- `register_factory(self, name: str, factory: Callable, singleton: bool = False) -> None` - Line 209
+- `register_singleton(self, name: str, service: Any) -> None` - Line 220
+- `register_service(self, name: str, service: Any, singleton: bool = False) -> None` - Line 230
+- `has_service(self, name: str) -> bool` - Line 241
+- `is_registered(self, name: str) -> bool` - Line 253
+- `get_container(self) -> 'DependencyContainer'` - Line 265
+- `clear(self) -> None` - Line 278
 
 ### Implementation: `DependencyInjector` ✅
 
@@ -1295,21 +1313,22 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `register(self, name: str | None = None, singleton: bool = False)` - Line 219
-- `inject(self, func: Callable) -> Callable` - Line 242
-- `resolve(self, name: str) -> Any` - Line 302
-- `register_service(self, name: str, service: Any, singleton: bool = False) -> None` - Line 327
-- `register_factory(self, name: str, factory: Callable, singleton: bool = False) -> None` - Line 350
-- `register_interface(self, interface: type, implementation_factory: Callable, singleton: bool = False) -> None` - Line 375
-- `register_singleton(self, name: str, service: Any) -> None` - Line 407
-- `register_transient(self, name: str, service_class: type, *args, **kwargs) -> None` - Line 420
-- `has_service(self, name: str) -> bool` - Line 456
-- `is_registered(self, name: str) -> bool` - Line 460
-- `clear(self) -> None` - Line 464
-- `get_instance(cls) -> DependencyInjector` - Line 469
-- `reset_instance(cls) -> None` - Line 476
-- `get_container(self) -> DependencyContainer` - Line 486
-- `configure_service_dependencies(self, service_instance: Any) -> None` - Line 490
+- `register(self, name: str | None = None, singleton: bool = False)` - Line 314
+- `inject(self, func: Callable) -> Callable` - Line 337
+- `resolve(self, name: str) -> Any` - Line 397
+- `get_optional(self, name: str) -> Any | None` - Line 422
+- `register_service(self, name: str, service: Any, singleton: bool = False) -> None` - Line 437
+- `register_factory(self, name: str, factory: Callable, singleton: bool = False) -> None` - Line 460
+- `register_interface(self, interface: type, implementation_factory: Callable, singleton: bool = False) -> None` - Line 485
+- `register_singleton(self, name: str, service: Any) -> None` - Line 517
+- `register_transient(self, name: str, service_class: type, *args, **kwargs) -> None` - Line 530
+- `has_service(self, name: str) -> bool` - Line 566
+- `is_registered(self, name: str) -> bool` - Line 570
+- `clear(self) -> None` - Line 574
+- `get_instance(cls) -> DependencyInjector` - Line 579
+- `reset_instance(cls) -> None` - Line 586
+- `get_container(self) -> DependencyContainer` - Line 596
+- `configure_service_dependencies(self, service_instance: Any) -> None` - Line 600
 
 ### Implementation: `ServiceLocator` ✅
 
@@ -1317,6 +1336,22 @@
 **Status**: Complete
 
 **Implemented Methods:**
+
+### Implementation: `DependencyLevel` ✅
+
+**Inherits**: IntEnum
+**Purpose**: Dependency levels for ordering service registration
+**Status**: Complete
+
+### Implementation: `DependencyRegistrar` ✅
+
+**Purpose**: Manages ordered dependency registration to prevent circular dependencies
+**Status**: Complete
+
+**Implemented Methods:**
+- `register_at_level(self, level: DependencyLevel, registration_func: Callable) -> None` - Line 79
+- `add_lazy_configuration(self, config_func: Callable) -> None` - Line 91
+- `register_all(self) -> None` - Line 100
 
 ### Implementation: `AlertEvents` ✅
 
@@ -2368,11 +2403,11 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `info(self, message: str, **kwargs) -> None` - Line 364
-- `warning(self, message: str, **kwargs) -> None` - Line 369
-- `error(self, message: str, **kwargs) -> None` - Line 374
-- `critical(self, message: str, **kwargs) -> None` - Line 379
-- `debug(self, message: str, **kwargs) -> None` - Line 384
+- `info(self, message: str, **kwargs) -> None` - Line 370
+- `warning(self, message: str, **kwargs) -> None` - Line 375
+- `error(self, message: str, **kwargs) -> None` - Line 380
+- `critical(self, message: str, **kwargs) -> None` - Line 385
+- `debug(self, message: str, **kwargs) -> None` - Line 390
 
 ### Implementation: `PerformanceMonitor` ✅
 
@@ -3110,8 +3145,9 @@ to achieve optimal tra
 - `high_price(self) -> Decimal` - Line 46
 - `low_price(self) -> Decimal` - Line 51
 - `open_price(self) -> Decimal` - Line 56
-- `bid(self) -> Decimal | None` - Line 61
-- `ask(self) -> Decimal | None` - Line 66
+- `close_price(self) -> Decimal` - Line 61
+- `bid(self) -> Decimal | None` - Line 66
+- `ask(self) -> Decimal | None` - Line 71
 
 ### Implementation: `Ticker` ✅
 
@@ -3120,8 +3156,8 @@ to achieve optimal tra
 **Status**: Complete
 
 **Implemented Methods:**
-- `spread(self) -> Decimal` - Line 92
-- `spread_percent(self) -> Decimal` - Line 97
+- `spread(self) -> Decimal` - Line 97
+- `spread_percent(self) -> Decimal` - Line 102
 
 ### Implementation: `OrderBookLevel` ✅
 
@@ -3136,10 +3172,10 @@ to achieve optimal tra
 **Status**: Complete
 
 **Implemented Methods:**
-- `best_bid(self) -> OrderBookLevel | None` - Line 125
-- `best_ask(self) -> OrderBookLevel | None` - Line 130
-- `spread(self) -> Decimal | None` - Line 135
-- `get_depth(self, side: str, levels: int = 5) -> Decimal` - Line 141
+- `best_bid(self) -> OrderBookLevel | None` - Line 130
+- `best_ask(self) -> OrderBookLevel | None` - Line 135
+- `spread(self) -> Decimal | None` - Line 140
+- `get_depth(self, side: str, levels: int = 5) -> Decimal` - Line 146
 
 ### Implementation: `Trade` ✅
 
@@ -3160,9 +3196,9 @@ to achieve optimal tra
 **Status**: Complete
 
 **Implemented Methods:**
-- `round_price(self, price: Decimal) -> Decimal` - Line 192
-- `round_quantity(self, quantity: Decimal) -> Decimal` - Line 196
-- `validate_order(self, price: Decimal, quantity: Decimal) -> bool` - Line 200
+- `round_price(self, price: Decimal) -> Decimal` - Line 197
+- `round_quantity(self, quantity: Decimal) -> Decimal` - Line 201
+- `validate_order(self, price: Decimal, quantity: Decimal) -> bool` - Line 205
 
 ### Implementation: `RiskLevel` ✅
 
@@ -3391,9 +3427,9 @@ to achieve optimal tra
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_strength(cls, v: Decimal) -> Decimal` - Line 113
-- `validate_symbol(cls, v: str) -> str` - Line 133
-- `validate_timestamp(cls, v: datetime) -> datetime` - Line 185
+- `validate_strength(cls, v: Decimal) -> Decimal` - Line 117
+- `validate_symbol(cls, v: str) -> str` - Line 137
+- `validate_timestamp(cls, v: datetime) -> datetime` - Line 189
 
 ### Implementation: `OrderRequest` ✅
 
@@ -3402,10 +3438,10 @@ to achieve optimal tra
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_symbol(cls, v: str) -> str` - Line 215
-- `validate_quantity(cls, v: Decimal) -> Decimal` - Line 223
-- `validate_price(cls, v: Decimal | None) -> Decimal | None` - Line 252
-- `validate_quote_quantity(cls, v: Decimal | None) -> Decimal | None` - Line 279
+- `validate_symbol(cls, v: str) -> str` - Line 219
+- `validate_quantity(cls, v: Decimal) -> Decimal` - Line 227
+- `validate_price(cls, v: Decimal | None) -> Decimal | None` - Line 256
+- `validate_quote_quantity(cls, v: Decimal | None) -> Decimal | None` - Line 283
 
 ### Implementation: `OrderResponse` ✅
 
@@ -3414,8 +3450,8 @@ to achieve optimal tra
 **Status**: Complete
 
 **Implemented Methods:**
-- `id(self) -> str` - Line 324
-- `remaining_quantity(self) -> Decimal` - Line 329
+- `id(self) -> str` - Line 328
+- `remaining_quantity(self) -> Decimal` - Line 333
 
 ### Implementation: `Order` ✅
 
@@ -3424,8 +3460,8 @@ to achieve optimal tra
 **Status**: Complete
 
 **Implemented Methods:**
-- `is_filled(self) -> bool` - Line 361
-- `is_active(self) -> bool` - Line 365
+- `is_filled(self) -> bool` - Line 365
+- `is_active(self) -> bool` - Line 369
 
 ### Implementation: `Position` ✅
 
@@ -3434,8 +3470,8 @@ to achieve optimal tra
 **Status**: Complete
 
 **Implemented Methods:**
-- `is_open(self) -> bool` - Line 387
-- `calculate_pnl(self, current_price: Decimal) -> Decimal` - Line 391
+- `is_open(self) -> bool` - Line 391
+- `calculate_pnl(self, current_price: Decimal) -> Decimal` - Line 395
 
 ### Implementation: `Trade` ✅
 
@@ -3450,7 +3486,7 @@ to achieve optimal tra
 **Status**: Complete
 
 **Implemented Methods:**
-- `free(self) -> Decimal` - Line 427
+- `free(self) -> Decimal` - Line 431
 
 ### Implementation: `ArbitrageOpportunity` ✅
 
@@ -3459,10 +3495,10 @@ to achieve optimal tra
 **Status**: Complete
 
 **Implemented Methods:**
-- `validate_prices(cls, v: Decimal) -> Decimal` - Line 449
-- `validate_quantity(cls, v: Decimal) -> Decimal` - Line 473
-- `is_expired(self) -> bool` - Line 496
-- `calculate_profit(self) -> Decimal` - Line 502
+- `validate_prices(cls, v: Decimal) -> Decimal` - Line 453
+- `validate_quantity(cls, v: Decimal) -> Decimal` - Line 477
+- `is_expired(self) -> bool` - Line 500
+- `calculate_profit(self) -> Decimal` - Line 506
 
 ### Implementation: `ValidatorInterface` 🔧
 
@@ -3551,6 +3587,20 @@ to achieve optimal tra
 - `set_disconnect_callback(self, callback: Callable[[], None]) -> None` - Line 434
 - `is_connected(self) -> bool` - Line 439
 - `get_stats(self) -> dict[str, Any]` - Line 445
+
+### Implementation: `StreamType` ✅
+
+**Inherits**: Enum
+**Purpose**: WebSocket stream types for different data subscriptions
+**Status**: Complete
+
+### Implementation: `MessagePriority` ✅
+
+**Inherits**: Enum
+**Purpose**: Message priority levels for WebSocket message handling
+**Status**: Complete
+
+**Implemented Methods:**
 
 ## COMPLETE API REFERENCE
 
@@ -4153,12 +4203,12 @@ class CacheClientInterface(Protocol):
 
 ```python
 class DatabaseServiceInterface(Protocol):
-    async def start(self) -> None  # Line 575
-    async def stop(self) -> None  # Line 579
-    async def health_check(self) -> HealthCheckResult  # Line 583
-    def get_performance_metrics(self) -> dict[str, Any]  # Line 587
-    async def execute_query(self, query: str, params: dict[str, Any] | None = None) -> Any  # Line 591
-    async def get_connection_pool_status(self) -> dict[str, Any]  # Line 595
+    async def start(self) -> None  # Line 576
+    async def stop(self) -> None  # Line 580
+    async def health_check(self) -> HealthCheckResult  # Line 584
+    def get_performance_metrics(self) -> dict[str, Any]  # Line 588
+    async def execute_query(self, query: str, params: dict[str, Any] | None = None) -> Any  # Line 592
+    async def get_connection_pool_status(self) -> dict[str, Any]  # Line 596
 ```
 
 ### File: repository.py
@@ -5002,9 +5052,9 @@ def create_service_with_fallback_injection()  # Line 282
 
 ```python
 class RiskConfig(BaseConfig):
-    def validate_sizing_method(cls, v: str) -> str  # Line 225
-    def get_position_size_params(self) -> dict  # Line 238
-    def is_risk_exceeded(self, current_loss: Decimal) -> bool  # Line 264
+    def validate_sizing_method(cls, v: str) -> str  # Line 236
+    def get_position_size_params(self) -> dict  # Line 249
+    def is_risk_exceeded(self, current_loss: Decimal) -> bool  # Line 275
 ```
 
 ### File: sandbox.py
@@ -5199,6 +5249,16 @@ class StrategyConfig(BaseConfig):
     def get_strategy_params(self, strategy_type: str) -> dict[str, Any]  # Line 132
 ```
 
+### File: validator.py
+
+#### Functions:
+
+```python
+def check_env_pollution() -> Dict[str, str]  # Line 7
+def validate_environment(strict: bool = False) -> None  # Line 28
+def validate_credentials(config_dict: Dict[str, str], source: str = 'config') -> None  # Line 62
+```
+
 ### File: config.py
 
 #### Class: `BaseConfig`
@@ -5311,6 +5371,17 @@ class MLConfig(BaseConfig):
     def validate_positive_float(cls, v)  # Line 939
 ```
 
+#### Class: `BotManagementConfig`
+
+**Inherits**: BaseConfig
+**Purpose**: Bot management configuration for bot lifecycle and coordination
+
+```python
+class BotManagementConfig(BaseConfig):
+    def validate_decimal_positive(cls, v: Decimal) -> Decimal  # Line 1030
+    def validate_positive_integers(cls, v: int) -> int  # Line 1052
+```
+
 #### Class: `ExecutionConfig`
 
 **Inherits**: BaseConfig
@@ -5327,17 +5398,17 @@ class ExecutionConfig(BaseConfig):
 
 ```python
 class Config(BaseConfig):
-    def validate_environment(cls, v: str) -> str  # Line 1028
-    def generate_schema(self) -> None  # Line 1035
-    def from_yaml(cls, yaml_path: str | Path) -> 'Config'  # Line 1044
-    def from_yaml_with_env_override(cls, yaml_path: str | Path) -> 'Config'  # Line 1073
-    def to_yaml(self, yaml_path: str | Path) -> None  # Line 1108
-    def get_database_url(self) -> str  # Line 1123
-    def get_async_database_url(self) -> str  # Line 1137
-    def get_redis_url(self) -> str  # Line 1151
-    def is_production(self) -> bool  # Line 1168
-    def is_development(self) -> bool  # Line 1172
-    def validate_yaml_config(self, yaml_path: str | Path) -> bool  # Line 1176
+    def validate_environment(cls, v: str) -> str  # Line 1142
+    def generate_schema(self) -> None  # Line 1149
+    def from_yaml(cls, yaml_path: str | Path) -> 'Config'  # Line 1158
+    def from_yaml_with_env_override(cls, yaml_path: str | Path) -> 'Config'  # Line 1187
+    def to_yaml(self, yaml_path: str | Path) -> None  # Line 1222
+    def get_database_url(self) -> str  # Line 1237
+    def get_async_database_url(self) -> str  # Line 1251
+    def get_redis_url(self) -> str  # Line 1265
+    def is_production(self) -> bool  # Line 1282
+    def is_development(self) -> bool  # Line 1286
+    def validate_yaml_config(self, yaml_path: str | Path) -> bool  # Line 1290
 ```
 
 ### File: data_transformer.py
@@ -5381,8 +5452,16 @@ class DependencyContainer:
     def register_class(self, name: str, cls: type[T], *args, **kwargs) -> None  # Line 60
     def get(self, name: str) -> Any  # Line 124
     def has(self, name: str) -> bool  # Line 175
-    def __contains__(self, name: str) -> bool  # Line 179
-    def clear(self) -> None  # Line 183
+    def resolve(self, name: str) -> Any  # Line 179
+    def get_optional(self, name: str) -> Any | None  # Line 194
+    def register_factory(self, name: str, factory: Callable, singleton: bool = False) -> None  # Line 209
+    def register_singleton(self, name: str, service: Any) -> None  # Line 220
+    def register_service(self, name: str, service: Any, singleton: bool = False) -> None  # Line 230
+    def has_service(self, name: str) -> bool  # Line 241
+    def is_registered(self, name: str) -> bool  # Line 253
+    def get_container(self) -> 'DependencyContainer'  # Line 265
+    def __contains__(self, name: str) -> bool  # Line 274
+    def clear(self) -> None  # Line 278
 ```
 
 #### Class: `DependencyInjector`
@@ -5391,23 +5470,24 @@ class DependencyContainer:
 
 ```python
 class DependencyInjector:
-    def __new__(cls) -> DependencyInjector  # Line 201
-    def __init__(self)  # Line 208
-    def register(self, name: str | None = None, singleton: bool = False)  # Line 219
-    def inject(self, func: Callable) -> Callable  # Line 242
-    def resolve(self, name: str) -> Any  # Line 302
-    def register_service(self, name: str, service: Any, singleton: bool = False) -> None  # Line 327
-    def register_factory(self, name: str, factory: Callable, singleton: bool = False) -> None  # Line 350
-    def register_interface(self, interface: type, implementation_factory: Callable, singleton: bool = False) -> None  # Line 375
-    def register_singleton(self, name: str, service: Any) -> None  # Line 407
-    def register_transient(self, name: str, service_class: type, *args, **kwargs) -> None  # Line 420
-    def has_service(self, name: str) -> bool  # Line 456
-    def is_registered(self, name: str) -> bool  # Line 460
-    def clear(self) -> None  # Line 464
-    def get_instance(cls) -> DependencyInjector  # Line 469
-    def reset_instance(cls) -> None  # Line 476
-    def get_container(self) -> DependencyContainer  # Line 486
-    def configure_service_dependencies(self, service_instance: Any) -> None  # Line 490
+    def __new__(cls) -> DependencyInjector  # Line 296
+    def __init__(self)  # Line 303
+    def register(self, name: str | None = None, singleton: bool = False)  # Line 314
+    def inject(self, func: Callable) -> Callable  # Line 337
+    def resolve(self, name: str) -> Any  # Line 397
+    def get_optional(self, name: str) -> Any | None  # Line 422
+    def register_service(self, name: str, service: Any, singleton: bool = False) -> None  # Line 437
+    def register_factory(self, name: str, factory: Callable, singleton: bool = False) -> None  # Line 460
+    def register_interface(self, interface: type, implementation_factory: Callable, singleton: bool = False) -> None  # Line 485
+    def register_singleton(self, name: str, service: Any) -> None  # Line 517
+    def register_transient(self, name: str, service_class: type, *args, **kwargs) -> None  # Line 530
+    def has_service(self, name: str) -> bool  # Line 566
+    def is_registered(self, name: str) -> bool  # Line 570
+    def clear(self) -> None  # Line 574
+    def get_instance(cls) -> DependencyInjector  # Line 579
+    def reset_instance(cls) -> None  # Line 586
+    def get_container(self) -> DependencyContainer  # Line 596
+    def configure_service_dependencies(self, service_instance: Any) -> None  # Line 600
 ```
 
 #### Class: `ServiceLocator`
@@ -5416,17 +5496,70 @@ class DependencyInjector:
 
 ```python
 class ServiceLocator:
-    def __init__(self, injector: DependencyInjector)  # Line 534
-    def __getattr__(self, name: str) -> Any  # Line 537
+    def __init__(self, injector: DependencyInjector)  # Line 644
+    def __getattr__(self, name: str) -> Any  # Line 647
 ```
 
 #### Functions:
 
 ```python
-def injectable(name: str | None = None, singleton: bool = False)  # Line 517
-def inject(func: Callable) -> Callable  # Line 522
-def get_container() -> DependencyContainer  # Line 556
-def get_global_injector() -> DependencyInjector  # Line 561
+def injectable(name: str | None = None, singleton: bool = False)  # Line 627
+def inject(func: Callable) -> Callable  # Line 632
+def get_container() -> DependencyContainer  # Line 666
+def get_global_injector() -> DependencyInjector  # Line 671
+```
+
+### File: dependency_ordering.py
+
+**Key Imports:**
+- `from src.core.logging import get_logger`
+- `from src.core.dependency_injection import DependencyInjector`
+
+#### Class: `DependencyLevel`
+
+**Inherits**: IntEnum
+**Purpose**: Dependency levels for ordering service registration
+
+```python
+class DependencyLevel(IntEnum):
+```
+
+#### Class: `DependencyRegistrar`
+
+**Purpose**: Manages ordered dependency registration to prevent circular dependencies
+
+```python
+class DependencyRegistrar:
+    def __init__(self, injector: DependencyInjector)  # Line 67
+    def register_at_level(self, level: DependencyLevel, registration_func: Callable) -> None  # Line 79
+    def add_lazy_configuration(self, config_func: Callable) -> None  # Line 91
+    def register_all(self) -> None  # Line 100
+```
+
+#### Functions:
+
+```python
+def create_ordered_registrar(injector: Optional[DependencyInjector] = None) -> DependencyRegistrar  # Line 130
+def _register_core_dependencies(registrar: DependencyRegistrar) -> None  # Line 151
+def register_module_at_level(...) -> None  # Line 212
+def register_lazy_configuration(...) -> None  # Line 228
+```
+
+### File: di_master_registration.py
+
+**Key Imports:**
+- `from src.core.dependency_injection import DependencyInjector`
+- `from src.core.dependency_ordering import DependencyRegistrar`
+- `from src.core.dependency_ordering import DependencyLevel`
+- `from src.core.dependency_ordering import create_ordered_registrar`
+- `from src.core.dependency_ordering import register_module_at_level`
+
+#### Functions:
+
+```python
+def register_all_services(injector: Optional[DependencyInjector] = None, config: Optional[Config] = None) -> DependencyInjector  # Line 21
+def _register_all_modules(registrar: DependencyRegistrar, config: Config) -> None  # Line 55
+def get_master_injector() -> DependencyInjector  # Line 312
 ```
 
 ### File: event_constants.py
@@ -6846,13 +6979,13 @@ class CorrelationContext:
 
 ```python
 class SecureLogger:
-    def __init__(self, logger: structlog.BoundLogger)  # Line 319
-    def _sanitize_data(self, data: dict[str, Any]) -> dict[str, Any]  # Line 350
-    def info(self, message: str, **kwargs) -> None  # Line 364
-    def warning(self, message: str, **kwargs) -> None  # Line 369
-    def error(self, message: str, **kwargs) -> None  # Line 374
-    def critical(self, message: str, **kwargs) -> None  # Line 379
-    def debug(self, message: str, **kwargs) -> None  # Line 384
+    def __init__(self, logger: structlog.BoundLogger)  # Line 325
+    def _sanitize_data(self, data: dict[str, Any]) -> dict[str, Any]  # Line 356
+    def info(self, message: str, **kwargs) -> None  # Line 370
+    def warning(self, message: str, **kwargs) -> None  # Line 375
+    def error(self, message: str, **kwargs) -> None  # Line 380
+    def critical(self, message: str, **kwargs) -> None  # Line 385
+    def debug(self, message: str, **kwargs) -> None  # Line 390
 ```
 
 #### Class: `PerformanceMonitor`
@@ -6861,9 +6994,9 @@ class SecureLogger:
 
 ```python
 class PerformanceMonitor:
-    def __init__(self, operation_name: str)  # Line 408
-    def __enter__(self)  # Line 413
-    def __exit__(self, exc_type, exc_val, exc_tb)  # Line 423
+    def __init__(self, operation_name: str)  # Line 414
+    def __enter__(self)  # Line 419
+    def __exit__(self, exc_type, exc_val, exc_tb)  # Line 429
 ```
 
 #### Functions:
@@ -6872,13 +7005,13 @@ class PerformanceMonitor:
 def _add_correlation_id(logger: Any, method_name: str, event_dict: dict[str, Any] | None) -> dict[str, Any]  # Line 68
 def _safe_unicode_decoder(logger: Any, method_name: str, event_dict: dict[str, Any] | None) -> dict[str, Any]  # Line 78
 def setup_logging(...) -> None  # Line 101
-def get_logger(name: str) -> structlog.BoundLogger  # Line 192
-def log_performance(func: Callable) -> Callable  # Line 204
-def log_async_performance(func: Callable) -> Callable  # Line 256
-def get_secure_logger(name: str) -> SecureLogger  # Line 390
-def _cleanup_old_logs(log_dir: Path, log_name: str, retention_days: int) -> None  # Line 446
-def setup_production_logging(log_dir: str = 'logs', app_name: str = 'trading-bot') -> None  # Line 481
-def setup_development_logging() -> None  # Line 499
+def get_logger(name: str) -> structlog.BoundLogger  # Line 198
+def log_performance(func: Callable) -> Callable  # Line 210
+def log_async_performance(func: Callable) -> Callable  # Line 262
+def get_secure_logger(name: str) -> SecureLogger  # Line 396
+def _cleanup_old_logs(log_dir: Path, log_name: str, retention_days: int) -> None  # Line 452
+def setup_production_logging(log_dir: str = 'logs', app_name: str = 'trading-bot') -> None  # Line 487
+def setup_development_logging() -> None  # Line 505
 ```
 
 ### File: memory_manager.py
@@ -8049,8 +8182,9 @@ class MarketData(BaseModel):
     def high_price(self) -> Decimal  # Line 46
     def low_price(self) -> Decimal  # Line 51
     def open_price(self) -> Decimal  # Line 56
-    def bid(self) -> Decimal | None  # Line 61
-    def ask(self) -> Decimal | None  # Line 66
+    def close_price(self) -> Decimal  # Line 61
+    def bid(self) -> Decimal | None  # Line 66
+    def ask(self) -> Decimal | None  # Line 71
 ```
 
 #### Class: `Ticker`
@@ -8060,8 +8194,8 @@ class MarketData(BaseModel):
 
 ```python
 class Ticker(BaseModel):
-    def spread(self) -> Decimal  # Line 92
-    def spread_percent(self) -> Decimal  # Line 97
+    def spread(self) -> Decimal  # Line 97
+    def spread_percent(self) -> Decimal  # Line 102
 ```
 
 #### Class: `OrderBookLevel`
@@ -8080,10 +8214,10 @@ class OrderBookLevel(BaseModel):
 
 ```python
 class OrderBook(BaseModel):
-    def best_bid(self) -> OrderBookLevel | None  # Line 125
-    def best_ask(self) -> OrderBookLevel | None  # Line 130
-    def spread(self) -> Decimal | None  # Line 135
-    def get_depth(self, side: str, levels: int = 5) -> Decimal  # Line 141
+    def best_bid(self) -> OrderBookLevel | None  # Line 130
+    def best_ask(self) -> OrderBookLevel | None  # Line 135
+    def spread(self) -> Decimal | None  # Line 140
+    def get_depth(self, side: str, levels: int = 5) -> Decimal  # Line 146
 ```
 
 #### Class: `Trade`
@@ -8111,9 +8245,9 @@ class ExchangeGeneralInfo(BaseModel):
 
 ```python
 class ExchangeInfo(BaseModel):
-    def round_price(self, price: Decimal) -> Decimal  # Line 192
-    def round_quantity(self, quantity: Decimal) -> Decimal  # Line 196
-    def validate_order(self, price: Decimal, quantity: Decimal) -> bool  # Line 200
+    def round_price(self, price: Decimal) -> Decimal  # Line 197
+    def round_quantity(self, quantity: Decimal) -> Decimal  # Line 201
+    def validate_order(self, price: Decimal, quantity: Decimal) -> bool  # Line 205
 ```
 
 ### File: risk.py
@@ -8455,9 +8589,9 @@ class TradeState(Enum):
 
 ```python
 class Signal(BaseModel):
-    def validate_strength(cls, v: Decimal) -> Decimal  # Line 113
-    def validate_symbol(cls, v: str) -> str  # Line 133
-    def validate_timestamp(cls, v: datetime) -> datetime  # Line 185
+    def validate_strength(cls, v: Decimal) -> Decimal  # Line 117
+    def validate_symbol(cls, v: str) -> str  # Line 137
+    def validate_timestamp(cls, v: datetime) -> datetime  # Line 189
 ```
 
 #### Class: `OrderRequest`
@@ -8467,10 +8601,10 @@ class Signal(BaseModel):
 
 ```python
 class OrderRequest(BaseModel):
-    def validate_symbol(cls, v: str) -> str  # Line 215
-    def validate_quantity(cls, v: Decimal) -> Decimal  # Line 223
-    def validate_price(cls, v: Decimal | None) -> Decimal | None  # Line 252
-    def validate_quote_quantity(cls, v: Decimal | None) -> Decimal | None  # Line 279
+    def validate_symbol(cls, v: str) -> str  # Line 219
+    def validate_quantity(cls, v: Decimal) -> Decimal  # Line 227
+    def validate_price(cls, v: Decimal | None) -> Decimal | None  # Line 256
+    def validate_quote_quantity(cls, v: Decimal | None) -> Decimal | None  # Line 283
 ```
 
 #### Class: `OrderResponse`
@@ -8480,8 +8614,8 @@ class OrderRequest(BaseModel):
 
 ```python
 class OrderResponse(BaseModel):
-    def id(self) -> str  # Line 324
-    def remaining_quantity(self) -> Decimal  # Line 329
+    def id(self) -> str  # Line 328
+    def remaining_quantity(self) -> Decimal  # Line 333
 ```
 
 #### Class: `Order`
@@ -8491,8 +8625,8 @@ class OrderResponse(BaseModel):
 
 ```python
 class Order(BaseModel):
-    def is_filled(self) -> bool  # Line 361
-    def is_active(self) -> bool  # Line 365
+    def is_filled(self) -> bool  # Line 365
+    def is_active(self) -> bool  # Line 369
 ```
 
 #### Class: `Position`
@@ -8502,8 +8636,8 @@ class Order(BaseModel):
 
 ```python
 class Position(BaseModel):
-    def is_open(self) -> bool  # Line 387
-    def calculate_pnl(self, current_price: Decimal) -> Decimal  # Line 391
+    def is_open(self) -> bool  # Line 391
+    def calculate_pnl(self, current_price: Decimal) -> Decimal  # Line 395
 ```
 
 #### Class: `Trade`
@@ -8522,7 +8656,7 @@ class Trade(BaseModel):
 
 ```python
 class Balance(BaseModel):
-    def free(self) -> Decimal  # Line 427
+    def free(self) -> Decimal  # Line 431
 ```
 
 #### Class: `ArbitrageOpportunity`
@@ -8532,10 +8666,10 @@ class Balance(BaseModel):
 
 ```python
 class ArbitrageOpportunity(BaseModel):
-    def validate_prices(cls, v: Decimal) -> Decimal  # Line 449
-    def validate_quantity(cls, v: Decimal) -> Decimal  # Line 473
-    def is_expired(self) -> bool  # Line 496
-    def calculate_profit(self) -> Decimal  # Line 502
+    def validate_prices(cls, v: Decimal) -> Decimal  # Line 453
+    def validate_quantity(cls, v: Decimal) -> Decimal  # Line 477
+    def is_expired(self) -> bool  # Line 500
+    def calculate_profit(self) -> Decimal  # Line 506
 ```
 
 ### File: validator_registry.py
@@ -8680,7 +8814,31 @@ class WebSocketManager:
 def create_websocket_manager(url: str, resource_manager: ResourceManager | None = None, **kwargs) -> WebSocketManager  # Line 465
 ```
 
+### File: websocket_types.py
+
+#### Class: `StreamType`
+
+**Inherits**: Enum
+**Purpose**: WebSocket stream types for different data subscriptions
+
+```python
+class StreamType(Enum):
+```
+
+#### Class: `MessagePriority`
+
+**Inherits**: Enum
+**Purpose**: Message priority levels for WebSocket message handling
+
+```python
+class MessagePriority(Enum):
+    def __lt__(self, other)  # Line 29
+    def __le__(self, other)  # Line 35
+    def __gt__(self, other)  # Line 41
+    def __ge__(self, other)  # Line 47
+```
+
 ---
 **Generated**: Complete reference for core module
-**Total Classes**: 391
-**Total Functions**: 92
+**Total Classes**: 396
+**Total Functions**: 102

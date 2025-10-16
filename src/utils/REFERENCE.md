@@ -2,7 +2,7 @@
 
 ## INTEGRATION
 **Dependencies**: core, error_handling, ml, monitoring, state, web_interface
-**Used By**: strategies
+**Used By**: error_handling
 **Provides**: AsyncTaskManager, AuthenticatedWebSocketManager, BaseMonitoringService, BaseUtilityService, BaseWebSocketManager, BotStateManager, BotStatusWebSocketManager, CacheManager, DataFlowIntegrityManager, ExchangeWebSocketReconnectionManager, GPUManager, HTTPSessionManager, MarketDataWebSocketManager, MessageQueueManager, MetricsCollectionManager, MonitoringLoopManager, MultiStreamWebSocketManager, PriceHistoryManager, ResourceManager, RetryManager, ValidationService, WebSocketConnectionManager, WebSocketHeartbeatManager, WebSocketStreamManager, WebSocketSubscriptionManager
 **Patterns**: Async Operations, Circuit Breaker, Service Layer
 
@@ -969,23 +969,23 @@
 - `validate_database_entity(entity_dict: dict[str, Any], operation: str) -> None` - Line 677
 - `validate_database_to_error_boundary(data: dict[str, Any]) -> None` - Line 701
 - `validate_monitoring_to_error_boundary(data: dict[str, Any]) -> None` - Line 743
-- `validate_error_to_monitoring_boundary(data: dict[str, Any]) -> None` - Line 833
-- `validate_web_interface_to_error_boundary(data: dict[str, Any]) -> None` - Line 924
-- `validate_risk_to_state_boundary(data: dict[str, Any]) -> None` - Line 994
-- `validate_monitoring_to_risk_boundary(data: dict[str, Any]) -> None` - Line 1058
-- `validate_state_to_risk_boundary(data: dict[str, Any]) -> None` - Line 1078
-- `validate_utils_to_ml_boundary(data: dict[str, Any]) -> None` - Line 1130
-- `validate_ml_to_utils_boundary(data: dict[str, Any]) -> None` - Line 1171
-- `validate_monitoring_to_state_boundary(data: dict[str, Any]) -> None` - Line 1224
-- `validate_analytics_to_monitoring_boundary(data: dict[str, Any]) -> None` - Line 1244
-- `validate_monitoring_to_analytics_boundary(data: dict[str, Any]) -> None` - Line 1301
-- `validate_execution_to_state_boundary(data: dict[str, Any]) -> None` - Line 1344
-- `validate_risk_to_execution_boundary(data: dict[str, Any]) -> None` - Line 1400
-- `validate_optimization_to_strategy_boundary(data: dict[str, Any]) -> None` - Line 1473
-- `validate_web_interface_to_execution_boundary(data: dict[str, Any]) -> None` - Line 1514
-- `validate_web_interface_to_strategies_boundary(data: dict[str, Any]) -> None` - Line 1586
-- `validate_web_interface_to_risk_management_boundary(data: dict[str, Any]) -> None` - Line 1679
-- `validate_strategies_to_web_interface_boundary(data: dict[str, Any]) -> None` - Line 1751
+- `validate_error_to_monitoring_boundary(data: dict[str, Any]) -> None` - Line 834
+- `validate_web_interface_to_error_boundary(data: dict[str, Any]) -> None` - Line 925
+- `validate_risk_to_state_boundary(data: dict[str, Any]) -> None` - Line 995
+- `validate_monitoring_to_risk_boundary(data: dict[str, Any]) -> None` - Line 1059
+- `validate_state_to_risk_boundary(data: dict[str, Any]) -> None` - Line 1079
+- `validate_utils_to_ml_boundary(data: dict[str, Any]) -> None` - Line 1131
+- `validate_ml_to_utils_boundary(data: dict[str, Any]) -> None` - Line 1172
+- `validate_monitoring_to_state_boundary(data: dict[str, Any]) -> None` - Line 1225
+- `validate_analytics_to_monitoring_boundary(data: dict[str, Any]) -> None` - Line 1245
+- `validate_monitoring_to_analytics_boundary(data: dict[str, Any]) -> None` - Line 1302
+- `validate_execution_to_state_boundary(data: dict[str, Any]) -> None` - Line 1345
+- `validate_risk_to_execution_boundary(data: dict[str, Any]) -> None` - Line 1401
+- `validate_optimization_to_strategy_boundary(data: dict[str, Any]) -> None` - Line 1474
+- `validate_web_interface_to_execution_boundary(data: dict[str, Any]) -> None` - Line 1515
+- `validate_web_interface_to_strategies_boundary(data: dict[str, Any]) -> None` - Line 1587
+- `validate_web_interface_to_risk_management_boundary(data: dict[str, Any]) -> None` - Line 1680
+- `validate_strategies_to_web_interface_boundary(data: dict[str, Any]) -> None` - Line 1752
 
 ### Implementation: `ProcessingParadigmAligner` ✅
 
@@ -993,9 +993,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `create_batch_from_stream(stream_items: list[dict[str, Any]]) -> dict[str, Any]` - Line 1882
-- `create_stream_from_batch(batch_data: dict[str, Any]) -> list[dict[str, Any]]` - Line 1893
-- `align_processing_modes(source_mode: str, target_mode: str, data: dict[str, Any]) -> dict[str, Any]` - Line 1909
+- `create_batch_from_stream(stream_items: list[dict[str, Any]]) -> dict[str, Any]` - Line 1883
+- `create_stream_from_batch(batch_data: dict[str, Any]) -> list[dict[str, Any]]` - Line 1894
+- `align_processing_modes(source_mode: str, target_mode: str, data: dict[str, Any]) -> dict[str, Any]` - Line 1910
 
 ### Implementation: `MessagingCoordinator` ✅
 
@@ -1003,12 +1003,12 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `register_handler(self, pattern: MessagePattern, handler: MessageHandler) -> None` - Line 1991
-- `async publish(self, ...) -> None` - Line 2000
-- `async request(self, ...) -> Any` - Line 2033
-- `async reply(self, original_message: StandardMessage, response_data: Any) -> None` - Line 2078
-- `async stream_start(self, ...) -> None` - Line 2097
-- `async batch_process(self, ...) -> None` - Line 2124
+- `register_handler(self, pattern: MessagePattern, handler: MessageHandler) -> None` - Line 1992
+- `async publish(self, ...) -> None` - Line 2001
+- `async request(self, ...) -> Any` - Line 2034
+- `async reply(self, original_message: StandardMessage, response_data: Any) -> None` - Line 2079
+- `async stream_start(self, ...) -> None` - Line 2098
+- `async batch_process(self, ...) -> None` - Line 2125
 
 ### Implementation: `DataTransformationHandler` ✅
 
@@ -1017,7 +1017,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async handle(self, message: StandardMessage) -> StandardMessage | None` - Line 2276
+- `async handle(self, message: StandardMessage) -> StandardMessage | None` - Line 2277
 
 ### Implementation: `TTLCache` ✅
 
@@ -1130,7 +1130,7 @@
 
 **Implemented Methods:**
 - `async get_session(self, key: str = 'default', **session_kwargs) -> aiohttp.ClientSession` - Line 54
-- `async close_all(self) -> None` - Line 78
+- `async close_all(self) -> None` - Line 85
 
 ### Implementation: `AsyncTaskManager` ✅
 
@@ -1138,9 +1138,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `create_task(self, coro, name: str | None = None) -> asyncio.Task` - Line 337
-- `async shutdown(self, timeout: float = 5.0) -> None` - Line 354
-- `shutdown_requested(self) -> bool` - Line 388
+- `create_task(self, coro, name: str | None = None) -> asyncio.Task` - Line 344
+- `async shutdown(self, timeout: float = 5.0) -> None` - Line 361
+- `shutdown_requested(self) -> bool` - Line 395
 
 ### Implementation: `MetricValueProcessor` ✅
 
@@ -1148,8 +1148,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `process_financial_value(value, ...) -> float` - Line 493
-- `process_latency_value(value: float, metric_name: str) -> float` - Line 510
+- `process_financial_value(value, ...) -> float` - Line 500
+- `process_latency_value(value: float, metric_name: str) -> float` - Line 517
 
 ### Implementation: `SystemMetricsCollector` ✅
 
@@ -1157,7 +1157,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async collect_system_metrics() -> dict[str, Any]` - Line 526
+- `async collect_system_metrics() -> dict[str, Any]` - Line 533
 
 ### Implementation: `MonitoringLoopManager` ✅
 
@@ -1304,7 +1304,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `calculate_size(self, ...) -> Decimal` - Line 98
+- `calculate_size(self, ...) -> Decimal` - Line 96
 
 ### Implementation: `VolatilityAdjustedAlgorithm` ✅
 
@@ -1313,7 +1313,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `calculate_size(self, ...) -> Decimal` - Line 159
+- `calculate_size(self, ...) -> Decimal` - Line 157
 
 ### Implementation: `ConfidenceWeightedAlgorithm` ✅
 
@@ -1322,7 +1322,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `calculate_size(self, ...) -> Decimal` - Line 208
+- `calculate_size(self, ...) -> Decimal` - Line 206
 
 ### Implementation: `ATRBasedAlgorithm` ✅
 
@@ -1331,7 +1331,7 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `calculate_size(self, ...) -> Decimal` - Line 241
+- `calculate_size(self, ...) -> Decimal` - Line 239
 
 ### Implementation: `PydanticValidators` ✅
 
@@ -1571,8 +1571,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `get_lock(self, key: str) -> asyncio.Lock` - Line 178
-- `async with_lock(self, key: str, operation: callable, *args, **kwargs)` - Line 203
+- `get_lock(self, key: str) -> asyncio.Lock` - Line 177
+- `async with_lock(self, key: str, operation: callable, *args, **kwargs)` - Line 202
 
 ### Implementation: `StateCache` ✅
 
@@ -1580,13 +1580,13 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `get(self, key: str) -> Any | None` - Line 237
-- `set(self, key: str, value: Any) -> None` - Line 251
-- `pop(self, key: str, default: Any = None) -> Any` - Line 263
-- `clear(self) -> None` - Line 270
-- `size(self) -> int` - Line 274
-- `keys(self) -> list[str]` - Line 278
-- `get_stats(self) -> dict[str, int | float]` - Line 308
+- `get(self, key: str) -> Any | None` - Line 236
+- `set(self, key: str, value: Any) -> None` - Line 250
+- `pop(self, key: str, default: Any = None) -> Any` - Line 262
+- `clear(self) -> None` - Line 269
+- `size(self) -> int` - Line 273
+- `keys(self) -> list[str]` - Line 277
+- `get_stats(self) -> dict[str, int | float]` - Line 307
 
 ### Implementation: `StrategyCommons` ✅
 
@@ -1774,9 +1774,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async get(self, key: str) -> ValidationResult | None` - Line 446
-- `async set(self, key: str, result: ValidationResult, ttl: int | None = None) -> None` - Line 461
-- `get_stats(self) -> dict[str, Any]` - Line 511
+- `async get(self, key: str) -> ValidationResult | None` - Line 447
+- `async set(self, key: str, result: ValidationResult, ttl: int | None = None) -> None` - Line 462
+- `get_stats(self) -> dict[str, Any]` - Line 512
 
 ### Implementation: `ValidatorRegistry` ✅
 
@@ -1784,9 +1784,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `register(self, rule: ValidationRule) -> None` - Line 531
-- `get(self, name: str) -> ValidationRule | None` - Line 536
-- `list_rules(self) -> list[str]` - Line 540
+- `register(self, rule: ValidationRule) -> None` - Line 532
+- `get(self, name: str) -> ValidationRule | None` - Line 537
+- `list_rules(self) -> list[str]` - Line 541
 
 ### Implementation: `ValidationService` ✅
 
@@ -1795,19 +1795,19 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async initialize(self) -> None` - Line 721
-- `async shutdown(self) -> None` - Line 725
-- `async validate_order(self, order_data: dict[str, Any], context: ValidationContext | None = None) -> ValidationResult` - Line 877
-- `async validate_risk_parameters(self, risk_data: dict[str, Any], context: ValidationContext | None = None) -> ValidationResult` - Line 952
-- `async validate_strategy_config(self, strategy_data: dict[str, Any], context: ValidationContext | None = None) -> ValidationResult` - Line 1044
-- `async validate_market_data(self, market_data: dict[str, Any], context: ValidationContext | None = None) -> ValidationResult` - Line 1212
-- `async validate_batch(self, ...) -> dict[str, ValidationResult]` - Line 1276
-- `validate_price(self, price: Any) -> bool` - Line 1439
-- `validate_quantity(self, quantity: Any) -> bool` - Line 1478
-- `validate_symbol(self, symbol: str) -> bool` - Line 1517
-- `register_custom_rule(self, rule: ValidationRule) -> None` - Line 1552
-- `validate_decimal(self, value: Any) -> Any` - Line 1557
-- `get_validation_stats(self) -> dict[str, Any]` - Line 1582
+- `async initialize(self) -> None` - Line 722
+- `async shutdown(self) -> None` - Line 726
+- `async validate_order(self, order_data: dict[str, Any], context: ValidationContext | None = None) -> ValidationResult` - Line 917
+- `async validate_risk_parameters(self, risk_data: dict[str, Any], context: ValidationContext | None = None) -> ValidationResult` - Line 990
+- `async validate_strategy_config(self, strategy_data: dict[str, Any], context: ValidationContext | None = None) -> ValidationResult` - Line 1094
+- `async validate_market_data(self, market_data: dict[str, Any], context: ValidationContext | None = None) -> ValidationResult` - Line 1262
+- `async validate_batch(self, ...) -> dict[str, ValidationResult]` - Line 1326
+- `validate_price(self, price: Any) -> bool` - Line 1489
+- `validate_quantity(self, quantity: Any) -> bool` - Line 1539
+- `validate_symbol(self, symbol: str) -> bool` - Line 1589
+- `register_custom_rule(self, rule: ValidationRule) -> None` - Line 1628
+- `validate_decimal(self, value: Any) -> Any` - Line 1633
+- `get_validation_stats(self) -> dict[str, Any]` - Line 1664
 
 ### Implementation: `ValidationCategory` ✅
 
@@ -3888,23 +3888,23 @@ class BoundaryValidator:
     def validate_database_entity(entity_dict: dict[str, Any], operation: str) -> None  # Line 677
     def validate_database_to_error_boundary(data: dict[str, Any]) -> None  # Line 701
     def validate_monitoring_to_error_boundary(data: dict[str, Any]) -> None  # Line 743
-    def validate_error_to_monitoring_boundary(data: dict[str, Any]) -> None  # Line 833
-    def validate_web_interface_to_error_boundary(data: dict[str, Any]) -> None  # Line 924
-    def validate_risk_to_state_boundary(data: dict[str, Any]) -> None  # Line 994
-    def validate_monitoring_to_risk_boundary(data: dict[str, Any]) -> None  # Line 1058
-    def validate_state_to_risk_boundary(data: dict[str, Any]) -> None  # Line 1078
-    def validate_utils_to_ml_boundary(data: dict[str, Any]) -> None  # Line 1130
-    def validate_ml_to_utils_boundary(data: dict[str, Any]) -> None  # Line 1171
-    def validate_monitoring_to_state_boundary(data: dict[str, Any]) -> None  # Line 1224
-    def validate_analytics_to_monitoring_boundary(data: dict[str, Any]) -> None  # Line 1244
-    def validate_monitoring_to_analytics_boundary(data: dict[str, Any]) -> None  # Line 1301
-    def validate_execution_to_state_boundary(data: dict[str, Any]) -> None  # Line 1344
-    def validate_risk_to_execution_boundary(data: dict[str, Any]) -> None  # Line 1400
-    def validate_optimization_to_strategy_boundary(data: dict[str, Any]) -> None  # Line 1473
-    def validate_web_interface_to_execution_boundary(data: dict[str, Any]) -> None  # Line 1514
-    def validate_web_interface_to_strategies_boundary(data: dict[str, Any]) -> None  # Line 1586
-    def validate_web_interface_to_risk_management_boundary(data: dict[str, Any]) -> None  # Line 1679
-    def validate_strategies_to_web_interface_boundary(data: dict[str, Any]) -> None  # Line 1751
+    def validate_error_to_monitoring_boundary(data: dict[str, Any]) -> None  # Line 834
+    def validate_web_interface_to_error_boundary(data: dict[str, Any]) -> None  # Line 925
+    def validate_risk_to_state_boundary(data: dict[str, Any]) -> None  # Line 995
+    def validate_monitoring_to_risk_boundary(data: dict[str, Any]) -> None  # Line 1059
+    def validate_state_to_risk_boundary(data: dict[str, Any]) -> None  # Line 1079
+    def validate_utils_to_ml_boundary(data: dict[str, Any]) -> None  # Line 1131
+    def validate_ml_to_utils_boundary(data: dict[str, Any]) -> None  # Line 1172
+    def validate_monitoring_to_state_boundary(data: dict[str, Any]) -> None  # Line 1225
+    def validate_analytics_to_monitoring_boundary(data: dict[str, Any]) -> None  # Line 1245
+    def validate_monitoring_to_analytics_boundary(data: dict[str, Any]) -> None  # Line 1302
+    def validate_execution_to_state_boundary(data: dict[str, Any]) -> None  # Line 1345
+    def validate_risk_to_execution_boundary(data: dict[str, Any]) -> None  # Line 1401
+    def validate_optimization_to_strategy_boundary(data: dict[str, Any]) -> None  # Line 1474
+    def validate_web_interface_to_execution_boundary(data: dict[str, Any]) -> None  # Line 1515
+    def validate_web_interface_to_strategies_boundary(data: dict[str, Any]) -> None  # Line 1587
+    def validate_web_interface_to_risk_management_boundary(data: dict[str, Any]) -> None  # Line 1680
+    def validate_strategies_to_web_interface_boundary(data: dict[str, Any]) -> None  # Line 1752
 ```
 
 #### Class: `ProcessingParadigmAligner`
@@ -3913,9 +3913,9 @@ class BoundaryValidator:
 
 ```python
 class ProcessingParadigmAligner:
-    def create_batch_from_stream(stream_items: list[dict[str, Any]]) -> dict[str, Any]  # Line 1882
-    def create_stream_from_batch(batch_data: dict[str, Any]) -> list[dict[str, Any]]  # Line 1893
-    def align_processing_modes(source_mode: str, target_mode: str, data: dict[str, Any]) -> dict[str, Any]  # Line 1909
+    def create_batch_from_stream(stream_items: list[dict[str, Any]]) -> dict[str, Any]  # Line 1883
+    def create_stream_from_batch(batch_data: dict[str, Any]) -> list[dict[str, Any]]  # Line 1894
+    def align_processing_modes(source_mode: str, target_mode: str, data: dict[str, Any]) -> dict[str, Any]  # Line 1910
 ```
 
 #### Class: `MessagingCoordinator`
@@ -3924,15 +3924,15 @@ class ProcessingParadigmAligner:
 
 ```python
 class MessagingCoordinator:
-    def __init__(self, name: str = 'MessagingCoordinator', event_emitter: Any = None)  # Line 1979
-    def register_handler(self, pattern: MessagePattern, handler: MessageHandler) -> None  # Line 1991
-    async def publish(self, ...) -> None  # Line 2000
-    async def request(self, ...) -> Any  # Line 2033
-    async def reply(self, original_message: StandardMessage, response_data: Any) -> None  # Line 2078
-    async def stream_start(self, ...) -> None  # Line 2097
-    async def batch_process(self, ...) -> None  # Line 2124
-    def _apply_data_transformation(self, data: Any) -> Any  # Line 2154
-    async def _route_message(self, message: StandardMessage) -> None  # Line 2208
+    def __init__(self, name: str = 'MessagingCoordinator', event_emitter: Any = None)  # Line 1980
+    def register_handler(self, pattern: MessagePattern, handler: MessageHandler) -> None  # Line 1992
+    async def publish(self, ...) -> None  # Line 2001
+    async def request(self, ...) -> Any  # Line 2034
+    async def reply(self, original_message: StandardMessage, response_data: Any) -> None  # Line 2079
+    async def stream_start(self, ...) -> None  # Line 2098
+    async def batch_process(self, ...) -> None  # Line 2125
+    def _apply_data_transformation(self, data: Any) -> Any  # Line 2155
+    async def _route_message(self, message: StandardMessage) -> None  # Line 2209
 ```
 
 #### Class: `DataTransformationHandler`
@@ -3942,9 +3942,9 @@ class MessagingCoordinator:
 
 ```python
 class DataTransformationHandler(MessageHandler):
-    def __init__(self, transform_func: Callable[[Any], Any] | None = None)  # Line 2273
-    async def handle(self, message: StandardMessage) -> StandardMessage | None  # Line 2276
-    async def _transform_financial_data(self, data: dict[str, Any]) -> None  # Line 2293
+    def __init__(self, transform_func: Callable[[Any], Any] | None = None)  # Line 2274
+    async def handle(self, message: StandardMessage) -> StandardMessage | None  # Line 2277
+    async def _transform_financial_data(self, data: dict[str, Any]) -> None  # Line 2294
 ```
 
 #### Functions:
@@ -3953,7 +3953,7 @@ class DataTransformationHandler(MessageHandler):
 def get_message_queue_manager() -> MessageQueueManager  # Line 406
 async def publish_market_data(source: str, symbol: str, data: dict[str, Any]) -> None  # Line 415
 async def publish_order_update(source: str, order_data: dict[str, Any]) -> None  # Line 428
-def get_messaging_coordinator(coordinator: MessagingCoordinator | None = None) -> MessagingCoordinator  # Line 2336
+def get_messaging_coordinator(coordinator: MessagingCoordinator | None = None) -> MessagingCoordinator  # Line 2337
 ```
 
 ### File: ml_cache.py
@@ -4129,12 +4129,12 @@ def create_cache_config(config_dict: dict | None = None) -> MLCacheConfig  # Lin
 def transform_market_data_to_decimal(data: dict[str, Any] | pd.DataFrame) -> dict[str, Any] | pd.DataFrame  # Line 18
 def convert_pydantic_to_dict_with_decimals(data: Any) -> dict[str, Any]  # Line 57
 def prepare_dataframe_from_market_data(market_data: dict[str, Any] | Any, apply_decimal_transform: bool = True) -> pd.DataFrame  # Line 74
-def align_training_data_lengths(X: pd.DataFrame, y: pd.Series, model_name: str = 'Unknown') -> tuple[pd.DataFrame, pd.Series]  # Line 106
-def create_returns_series(prices: pd.Series, horizon: int = 1, return_type: str = 'simple') -> pd.Series  # Line 128
-def batch_transform_requests_to_aligned_format(requests: list[Any]) -> dict[str, Any]  # Line 173
-def stream_transform_request_to_aligned_format(request: Any) -> dict[str, Any]  # Line 223
-def convert_batch_to_stream_ml_data(batch_data: dict[str, Any]) -> list[dict[str, Any]]  # Line 260
-def align_ml_processing_modes(source_mode: str, target_mode: str, data: dict[str, Any]) -> dict[str, Any]  # Line 299
+def align_training_data_lengths(X: pd.DataFrame, y: pd.Series, model_name: str = 'Unknown') -> tuple[pd.DataFrame, pd.Series]  # Line 113
+def create_returns_series(prices: pd.Series, horizon: int = 1, return_type: str = 'simple') -> pd.Series  # Line 135
+def batch_transform_requests_to_aligned_format(requests: list[Any]) -> dict[str, Any]  # Line 180
+def stream_transform_request_to_aligned_format(request: Any) -> dict[str, Any]  # Line 230
+def convert_batch_to_stream_ml_data(batch_data: dict[str, Any]) -> list[dict[str, Any]]  # Line 267
+def align_ml_processing_modes(source_mode: str, target_mode: str, data: dict[str, Any]) -> dict[str, Any]  # Line 306
 ```
 
 ### File: ml_metrics.py
@@ -4203,8 +4203,8 @@ class FinancialPrecisionWarning(UserWarning):
 class HTTPSessionManager:
     def __init__(self) -> None  # Line 50
     async def get_session(self, key: str = 'default', **session_kwargs) -> aiohttp.ClientSession  # Line 54
-    async def close_all(self) -> None  # Line 78
-    async def _safe_session_close(self, key: str, session) -> None  # Line 105
+    async def close_all(self) -> None  # Line 85
+    async def _safe_session_close(self, key: str, session) -> None  # Line 112
 ```
 
 #### Class: `AsyncTaskManager`
@@ -4213,11 +4213,11 @@ class HTTPSessionManager:
 
 ```python
 class AsyncTaskManager:
-    def __init__(self, component_name: str)  # Line 332
-    def create_task(self, coro, name: str | None = None) -> asyncio.Task  # Line 337
-    def _task_done_callback(self, task: asyncio.Task) -> None  # Line 344
-    async def shutdown(self, timeout: float = 5.0) -> None  # Line 354
-    def shutdown_requested(self) -> bool  # Line 388
+    def __init__(self, component_name: str)  # Line 339
+    def create_task(self, coro, name: str | None = None) -> asyncio.Task  # Line 344
+    def _task_done_callback(self, task: asyncio.Task) -> None  # Line 351
+    async def shutdown(self, timeout: float = 5.0) -> None  # Line 361
+    def shutdown_requested(self) -> bool  # Line 395
 ```
 
 #### Class: `MetricValueProcessor`
@@ -4226,8 +4226,8 @@ class AsyncTaskManager:
 
 ```python
 class MetricValueProcessor:
-    def process_financial_value(value, ...) -> float  # Line 493
-    def process_latency_value(value: float, metric_name: str) -> float  # Line 510
+    def process_financial_value(value, ...) -> float  # Line 500
+    def process_latency_value(value: float, metric_name: str) -> float  # Line 517
 ```
 
 #### Class: `SystemMetricsCollector`
@@ -4236,26 +4236,26 @@ class MetricValueProcessor:
 
 ```python
 class SystemMetricsCollector:
-    async def collect_system_metrics() -> dict[str, Any]  # Line 526
+    async def collect_system_metrics() -> dict[str, Any]  # Line 533
 ```
 
 #### Functions:
 
 ```python
-async def get_http_session(...) -> aiohttp.ClientSession  # Line 123
-async def cleanup_http_sessions(session_manager: HTTPSessionManager | None = None)  # Line 150
-def generate_correlation_id() -> str  # Line 163
-def generate_fingerprint(data: dict[str, Any]) -> str  # Line 168
-async def create_error_context(...) -> ErrorContext  # Line 174
-def validate_cross_module_data_consistency(source_module: str, target_module: str, data: dict[str, Any]) -> dict[str, Any]  # Line 206
-async def handle_error_with_fallback(error: Exception, error_handler: Any | None, context: ErrorContext) -> bool  # Line 257
-def validate_monitoring_parameter(...) -> None  # Line 281
-async def http_request_with_retry(...)  # Line 394
-def safe_duration_parse(duration_str: str) -> int  # Line 434
-def log_unusual_values(value: float, threshold: float, metric_name: str, unit: str = '')  # Line 482
-def safe_decimal_to_float(...) -> float  # Line 657
-def validate_financial_range(...) -> None  # Line 724
-def convert_financial_batch(...) -> dict[str, float]  # Line 763
+async def get_http_session(...) -> aiohttp.ClientSession  # Line 130
+async def cleanup_http_sessions(session_manager: HTTPSessionManager | None = None)  # Line 157
+def generate_correlation_id() -> str  # Line 170
+def generate_fingerprint(data: dict[str, Any]) -> str  # Line 175
+async def create_error_context(...) -> ErrorContext  # Line 181
+def validate_cross_module_data_consistency(source_module: str, target_module: str, data: dict[str, Any]) -> dict[str, Any]  # Line 213
+async def handle_error_with_fallback(error: Exception, error_handler: Any | None, context: ErrorContext) -> bool  # Line 264
+def validate_monitoring_parameter(...) -> None  # Line 288
+async def http_request_with_retry(...)  # Line 401
+def safe_duration_parse(duration_str: str) -> int  # Line 441
+def log_unusual_values(value: float, threshold: float, metric_name: str, unit: str = '')  # Line 489
+def safe_decimal_to_float(...) -> float  # Line 664
+def validate_financial_range(...) -> None  # Line 731
+def convert_financial_batch(...) -> dict[str, float]  # Line 770
 ```
 
 ### File: monitoring_loop_utils.py
@@ -4470,9 +4470,9 @@ class FixedPercentageAlgorithm(PositionSizingAlgorithm):
 
 ```python
 class KellyCriterionAlgorithm(PositionSizingAlgorithm):
-    def __init__(self, kelly_fraction: Decimal = Any)  # Line 94
-    def calculate_size(self, ...) -> Decimal  # Line 98
-    def _fallback_to_fixed(self, signal: Signal, portfolio_value: Decimal, risk_per_trade: Decimal) -> Decimal  # Line 148
+    def __init__(self, kelly_fraction: Decimal = Any)  # Line 92
+    def calculate_size(self, ...) -> Decimal  # Line 96
+    def _fallback_to_fixed(self, signal: Signal, portfolio_value: Decimal, risk_per_trade: Decimal) -> Decimal  # Line 146
 ```
 
 #### Class: `VolatilityAdjustedAlgorithm`
@@ -4482,8 +4482,8 @@ class KellyCriterionAlgorithm(PositionSizingAlgorithm):
 
 ```python
 class VolatilityAdjustedAlgorithm(PositionSizingAlgorithm):
-    def calculate_size(self, ...) -> Decimal  # Line 159
-    def _fallback_to_fixed(self, signal: Signal, portfolio_value: Decimal, risk_per_trade: Decimal) -> Decimal  # Line 197
+    def calculate_size(self, ...) -> Decimal  # Line 157
+    def _fallback_to_fixed(self, signal: Signal, portfolio_value: Decimal, risk_per_trade: Decimal) -> Decimal  # Line 195
 ```
 
 #### Class: `ConfidenceWeightedAlgorithm`
@@ -4493,7 +4493,7 @@ class VolatilityAdjustedAlgorithm(PositionSizingAlgorithm):
 
 ```python
 class ConfidenceWeightedAlgorithm(PositionSizingAlgorithm):
-    def calculate_size(self, ...) -> Decimal  # Line 208
+    def calculate_size(self, ...) -> Decimal  # Line 206
 ```
 
 #### Class: `ATRBasedAlgorithm`
@@ -4503,18 +4503,18 @@ class ConfidenceWeightedAlgorithm(PositionSizingAlgorithm):
 
 ```python
 class ATRBasedAlgorithm(PositionSizingAlgorithm):
-    def calculate_size(self, ...) -> Decimal  # Line 241
-    def _fallback_to_fixed(self, signal: Signal, portfolio_value: Decimal, risk_per_trade: Decimal) -> Decimal  # Line 279
+    def calculate_size(self, ...) -> Decimal  # Line 239
+    def _fallback_to_fixed(self, signal: Signal, portfolio_value: Decimal, risk_per_trade: Decimal) -> Decimal  # Line 277
 ```
 
 #### Functions:
 
 ```python
-def get_signal_confidence(signal: Signal) -> Decimal  # Line 290
-def validate_position_size(...) -> tuple[bool, Decimal]  # Line 314
-def calculate_position_size(...) -> Decimal  # Line 355
-def update_position_history(...) -> None  # Line 414
-def calculate_position_metrics(symbol: str, position_history: dict[str, list[Decimal]]) -> dict[str, Any]  # Line 442
+def get_signal_confidence(signal: Signal) -> Decimal  # Line 288
+def validate_position_size(...) -> tuple[bool, Decimal]  # Line 312
+def calculate_position_size(...) -> Decimal  # Line 353
+def update_position_history(...) -> None  # Line 412
+def calculate_position_metrics(symbol: str, position_history: dict[str, list[Decimal]]) -> dict[str, Any]  # Line 440
 ```
 
 ### File: pydantic_validators.py
@@ -4968,10 +4968,10 @@ def safe_cleanup_with_logging(...) -> None  # Line 105
 
 ```python
 class StateOperationLock:
-    def __init__(self)  # Line 174
-    def get_lock(self, key: str) -> asyncio.Lock  # Line 178
-    def _cleanup_unused_locks(self) -> None  # Line 189
-    async def with_lock(self, key: str, operation: callable, *args, **kwargs)  # Line 203
+    def __init__(self)  # Line 173
+    def get_lock(self, key: str) -> asyncio.Lock  # Line 177
+    def _cleanup_unused_locks(self) -> None  # Line 188
+    async def with_lock(self, key: str, operation: callable, *args, **kwargs)  # Line 202
 ```
 
 #### Class: `StateCache`
@@ -4980,46 +4980,46 @@ class StateOperationLock:
 
 ```python
 class StateCache:
-    def __init__(self, max_size: int = 10000, ttl_seconds: int = 300)  # Line 232
-    def get(self, key: str) -> Any | None  # Line 237
-    def set(self, key: str, value: Any) -> None  # Line 251
-    def pop(self, key: str, default: Any = None) -> Any  # Line 263
-    def clear(self) -> None  # Line 270
-    def size(self) -> int  # Line 274
-    def keys(self) -> list[str]  # Line 278
-    def _cleanup_expired(self) -> int  # Line 282
-    def _remove_oldest(self) -> None  # Line 296
-    def get_stats(self) -> dict[str, int | float]  # Line 308
+    def __init__(self, max_size: int = 10000, ttl_seconds: int = 300)  # Line 231
+    def get(self, key: str) -> Any | None  # Line 236
+    def set(self, key: str, value: Any) -> None  # Line 250
+    def pop(self, key: str, default: Any = None) -> Any  # Line 262
+    def clear(self) -> None  # Line 269
+    def size(self) -> int  # Line 273
+    def keys(self) -> list[str]  # Line 277
+    def _cleanup_expired(self) -> int  # Line 281
+    def _remove_oldest(self) -> None  # Line 295
+    def get_stats(self) -> dict[str, int | float]  # Line 307
 ```
 
 #### Functions:
 
 ```python
 def create_state_metadata(...) -> 'StateMetadata'  # Line 30
-def handle_state_error(...) -> None  # Line 98
-def log_state_operation(...) -> None  # Line 141
-def get_state_lock(key: str) -> asyncio.Lock  # Line 217
-async def with_state_lock(key: str, operation: callable, *args, **kwargs)  # Line 222
-def get_validation_cache() -> StateCache  # Line 334
-def get_metadata_cache() -> StateCache  # Line 339
-def get_general_state_cache() -> StateCache  # Line 344
-def calculate_state_checksum(data: dict[str, Any]) -> str  # Line 350
-def serialize_state_data(data: dict[str, Any], compress: bool = False, compression_threshold: int = 1024) -> bytes  # Line 355
-def deserialize_state_data(data: bytes, is_compressed: bool = False) -> dict[str, Any]  # Line 362
-async def validate_required_fields(data: dict[str, Any], required_fields: list[str]) -> list[str]  # Line 367
-async def validate_decimal_fields(data: dict[str, Any], decimal_fields: list[str]) -> list[str]  # Line 385
-async def validate_positive_values(data: dict[str, Any], positive_fields: list[str]) -> list[str]  # Line 420
-async def create_state_metadata(...) -> dict[str, Any]  # Line 462
-def format_cache_key(state_type: str, state_id: str, prefix: str = 'state') -> str  # Line 513
-async def store_in_redis_with_timeout(redis_client, key: str, value: str, ttl: int, timeout: float = 2.0) -> bool  # Line 528
-async def get_from_redis_with_timeout(redis_client, key: str, timeout: float = 2.0) -> str | None  # Line 555
-def detect_state_changes(old_state: dict[str, Any] | None, new_state: dict[str, Any]) -> set[str]  # Line 577
-def calculate_memory_usage(data_structures: list[Any]) -> float  # Line 606
-def create_state_change_record(...) -> dict[str, Any]  # Line 629
-def ensure_directory_exists(directory_path: str | Path) -> None  # Line 672
-def validate_state_transition_rules(...) -> bool  # Line 689
-def update_moving_average(current_average: float, new_value: float, count: int) -> float  # Line 718
-def format_state_for_logging(state_data: dict[str, Any], max_length: int = 200) -> str  # Line 735
+def handle_state_error(...) -> None  # Line 97
+def log_state_operation(...) -> None  # Line 140
+def get_state_lock(key: str) -> asyncio.Lock  # Line 216
+async def with_state_lock(key: str, operation: callable, *args, **kwargs)  # Line 221
+def get_validation_cache() -> StateCache  # Line 333
+def get_metadata_cache() -> StateCache  # Line 338
+def get_general_state_cache() -> StateCache  # Line 343
+def calculate_state_checksum(data: dict[str, Any]) -> str  # Line 349
+def serialize_state_data(data: dict[str, Any], compress: bool = False, compression_threshold: int = 1024) -> bytes  # Line 354
+def deserialize_state_data(data: bytes, is_compressed: bool = False) -> dict[str, Any]  # Line 361
+async def validate_required_fields(data: dict[str, Any], required_fields: list[str]) -> list[str]  # Line 366
+async def validate_decimal_fields(data: dict[str, Any], decimal_fields: list[str]) -> list[str]  # Line 384
+async def validate_positive_values(data: dict[str, Any], positive_fields: list[str]) -> list[str]  # Line 419
+async def create_state_metadata_dict(...) -> dict[str, Any]  # Line 461
+def format_cache_key(state_type: str, state_id: str, prefix: str = 'state') -> str  # Line 517
+async def store_in_redis_with_timeout(redis_client, key: str, value: str, ttl: int, timeout: float = 2.0) -> bool  # Line 532
+async def get_from_redis_with_timeout(redis_client, key: str, timeout: float = 2.0) -> str | None  # Line 559
+def detect_state_changes(old_state: dict[str, Any] | None, new_state: dict[str, Any]) -> set[str]  # Line 581
+def calculate_memory_usage(data_structures: list[Any]) -> float  # Line 610
+def create_state_change_record(...) -> dict[str, Any]  # Line 633
+def ensure_directory_exists(directory_path: str | Path) -> None  # Line 676
+def validate_state_transition_rules(...) -> bool  # Line 693
+def update_moving_average(current_average: float, new_value: float, count: int) -> float  # Line 722
+def format_state_for_logging(state_data: dict[str, Any], max_length: int = 200) -> str  # Line 739
 ```
 
 ### File: state_validation_utils.py
@@ -5378,11 +5378,11 @@ class StringValidationRule(ValidationRule):
 
 ```python
 class ValidationCache:
-    def __init__(self, default_ttl: int = 300, max_size: int = 10000)  # Line 439
-    async def get(self, key: str) -> ValidationResult | None  # Line 446
-    async def set(self, key: str, result: ValidationResult, ttl: int | None = None) -> None  # Line 461
-    async def _cleanup_cache(self) -> None  # Line 473
-    def get_stats(self) -> dict[str, Any]  # Line 511
+    def __init__(self, default_ttl: int = 300, max_size: int = 10000)  # Line 440
+    async def get(self, key: str) -> ValidationResult | None  # Line 447
+    async def set(self, key: str, result: ValidationResult, ttl: int | None = None) -> None  # Line 462
+    async def _cleanup_cache(self) -> None  # Line 474
+    def get_stats(self) -> dict[str, Any]  # Line 512
 ```
 
 #### Class: `ValidatorRegistry`
@@ -5391,11 +5391,11 @@ class ValidationCache:
 
 ```python
 class ValidatorRegistry:
-    def __init__(self) -> None  # Line 526
-    def register(self, rule: ValidationRule) -> None  # Line 531
-    def get(self, name: str) -> ValidationRule | None  # Line 536
-    def list_rules(self) -> list[str]  # Line 540
-    def _register_default_rules(self) -> None  # Line 544
+    def __init__(self) -> None  # Line 527
+    def register(self, rule: ValidationRule) -> None  # Line 532
+    def get(self, name: str) -> ValidationRule | None  # Line 537
+    def list_rules(self) -> list[str]  # Line 541
+    def _register_default_rules(self) -> None  # Line 545
 ```
 
 #### Class: `ValidationService`
@@ -5405,46 +5405,46 @@ class ValidatorRegistry:
 
 ```python
 class ValidationService(BaseService):
-    def __init__(self, ...)  # Line 639
-    async def _do_start(self) -> None  # Line 679
-    async def _do_stop(self) -> None  # Line 686
-    async def _service_health_check(self) -> HealthStatus  # Line 693
-    async def initialize(self) -> None  # Line 721
-    async def shutdown(self) -> None  # Line 725
-    def _ensure_initialized(self) -> None  # Line 729
-    async def _validate_with_rule(self, rule_name: str, value: Any, context: ValidationContext | None = None) -> ValidationResult  # Line 738
-    def _validate_required_order_fields(self, order_data: dict[str, Any], result: ValidationResult) -> None  # Line 796
-    def _setup_field_validations(self, order_data: dict[str, Any]) -> list[tuple[str, str, Any]]  # Line 812
-    def _validate_price_requirement(self, order_data: dict[str, Any], result: ValidationResult) -> None  # Line 828
-    async def _execute_field_validations(self, ...) -> None  # Line 841
-    def _store_normalized_value(self, field_result: ValidationResult, result: ValidationResult, field_name: str) -> None  # Line 865
-    async def validate_order(self, order_data: dict[str, Any], context: ValidationContext | None = None) -> ValidationResult  # Line 877
-    async def _validate_order_business_logic(self, ...) -> None  # Line 921
-    async def validate_risk_parameters(self, risk_data: dict[str, Any], context: ValidationContext | None = None) -> ValidationResult  # Line 952
-    async def _validate_risk_business_logic(self, ...) -> None  # Line 975
-    async def validate_strategy_config(self, strategy_data: dict[str, Any], context: ValidationContext | None = None) -> ValidationResult  # Line 1044
-    async def _validate_strategy_business_logic(self, ...) -> None  # Line 1067
-    async def _validate_common_strategy_params(self, strategy_data: dict[str, Any], result: ValidationResult) -> None  # Line 1099
-    async def _validate_mean_reversion_params(self, strategy_data: dict[str, Any], result: ValidationResult) -> None  # Line 1115
-    async def _validate_momentum_params(self, strategy_data: dict[str, Any], result: ValidationResult) -> None  # Line 1151
-    async def _validate_market_making_params(self, strategy_data: dict[str, Any], result: ValidationResult) -> None  # Line 1177
-    async def validate_market_data(self, market_data: dict[str, Any], context: ValidationContext | None = None) -> ValidationResult  # Line 1212
-    async def validate_batch(self, ...) -> dict[str, ValidationResult]  # Line 1276
-    def validate_price(self, price: Any) -> bool  # Line 1439
-    def validate_quantity(self, quantity: Any) -> bool  # Line 1478
-    def validate_symbol(self, symbol: str) -> bool  # Line 1517
-    def register_custom_rule(self, rule: ValidationRule) -> None  # Line 1552
-    def validate_decimal(self, value: Any) -> Any  # Line 1557
-    def get_validation_stats(self) -> dict[str, Any]  # Line 1582
-    async def __aenter__(self) -> 'ValidationService'  # Line 1596
-    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None  # Line 1601
+    def __init__(self, ...)  # Line 640
+    async def _do_start(self) -> None  # Line 680
+    async def _do_stop(self) -> None  # Line 687
+    async def _service_health_check(self) -> HealthStatus  # Line 694
+    async def initialize(self) -> None  # Line 722
+    async def shutdown(self) -> None  # Line 726
+    def _ensure_initialized(self) -> None  # Line 730
+    async def _validate_with_rule(self, rule_name: str, value: Any, context: ValidationContext | None = None) -> ValidationResult  # Line 739
+    def _validate_required_order_fields(self, order_data: dict[str, Any], result: ValidationResult) -> None  # Line 797
+    def _setup_field_validations(self, order_data: dict[str, Any]) -> list[tuple[str, str, Any]]  # Line 835
+    def _validate_price_requirement(self, order_data: dict[str, Any], result: ValidationResult) -> None  # Line 858
+    async def _execute_field_validations(self, ...) -> None  # Line 880
+    def _store_normalized_value(self, field_result: ValidationResult, result: ValidationResult, field_name: str) -> None  # Line 905
+    async def validate_order(self, order_data: dict[str, Any], context: ValidationContext | None = None) -> ValidationResult  # Line 917
+    async def _validate_order_business_logic(self, ...) -> None  # Line 959
+    async def validate_risk_parameters(self, risk_data: dict[str, Any], context: ValidationContext | None = None) -> ValidationResult  # Line 990
+    async def _validate_risk_business_logic(self, ...) -> None  # Line 1013
+    async def validate_strategy_config(self, strategy_data: dict[str, Any], context: ValidationContext | None = None) -> ValidationResult  # Line 1094
+    async def _validate_strategy_business_logic(self, ...) -> None  # Line 1117
+    async def _validate_common_strategy_params(self, strategy_data: dict[str, Any], result: ValidationResult) -> None  # Line 1149
+    async def _validate_mean_reversion_params(self, strategy_data: dict[str, Any], result: ValidationResult) -> None  # Line 1165
+    async def _validate_momentum_params(self, strategy_data: dict[str, Any], result: ValidationResult) -> None  # Line 1201
+    async def _validate_market_making_params(self, strategy_data: dict[str, Any], result: ValidationResult) -> None  # Line 1227
+    async def validate_market_data(self, market_data: dict[str, Any], context: ValidationContext | None = None) -> ValidationResult  # Line 1262
+    async def validate_batch(self, ...) -> dict[str, ValidationResult]  # Line 1326
+    def validate_price(self, price: Any) -> bool  # Line 1489
+    def validate_quantity(self, quantity: Any) -> bool  # Line 1539
+    def validate_symbol(self, symbol: str) -> bool  # Line 1589
+    def register_custom_rule(self, rule: ValidationRule) -> None  # Line 1628
+    def validate_decimal(self, value: Any) -> Any  # Line 1633
+    def get_validation_stats(self) -> dict[str, Any]  # Line 1664
+    async def __aenter__(self) -> 'ValidationService'  # Line 1678
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None  # Line 1683
 ```
 
 #### Functions:
 
 ```python
-async def get_validation_service(validation_service: ValidationService | None = None) -> ValidationService  # Line 1609
-async def shutdown_validation_service(validation_service: ValidationService | None = None) -> None  # Line 1638
+async def get_validation_service(validation_service: ValidationService | None = None) -> ValidationService  # Line 1691
+async def shutdown_validation_service(validation_service: ValidationService | None = None) -> None  # Line 1720
 ```
 
 ### File: validation_types.py

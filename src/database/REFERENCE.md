@@ -2,7 +2,7 @@
 
 ## INTEGRATION
 **Dependencies**: core, error_handling, risk_management, utils, web_interface
-**Used By**: strategies
+**Used By**: None
 **Provides**: BotService, DatabaseConnectionManager, DatabaseManager, DatabaseService, MLService, MarketDataService, TradingService
 **Patterns**: Async Operations, Circuit Breaker, Component Architecture, Service Layer
 
@@ -23,9 +23,9 @@
 - DatabaseQueries inherits from base architecture
 
 ## MODULE OVERVIEW
-**Files**: 57 Python files
+**Files**: 59 Python files
 **Classes**: 138
-**Functions**: 50
+**Functions**: 55
 
 ## COMPLETE API REFERENCE
 
@@ -37,17 +37,18 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async initialize(self) -> None` - Line 65
-- `async get_async_session(self) -> AsyncGenerator[AsyncSession, None]` - Line 257
-- `get_sync_session(self) -> Session` - Line 291
-- `async get_redis_client(self) -> redis.Redis` - Line 311
-- `get_influxdb_client(self) -> InfluxDBClient` - Line 317
-- `async close(self) -> None` - Line 323
-- `is_healthy(self) -> bool` - Line 416
-- `async_session_maker(self)` - Line 421
-- `sync_session_maker(self)` - Line 426
-- `async get_connection(self)` - Line 431
-- `async get_pool_status(self) -> dict[str, int]` - Line 439
+- `set_test_schema(self, schema: str) -> None` - Line 63
+- `async initialize(self) -> None` - Line 131
+- `async get_async_session(self) -> AsyncGenerator[AsyncSession, None]` - Line 326
+- `get_sync_session(self) -> Session` - Line 365
+- `async get_redis_client(self) -> redis.Redis` - Line 385
+- `get_influxdb_client(self) -> InfluxDBClient` - Line 391
+- `async close(self) -> None` - Line 397
+- `is_healthy(self) -> bool` - Line 491
+- `async_session_maker(self)` - Line 496
+- `sync_session_maker(self)` - Line 501
+- `async get_connection(self)` - Line 506
+- `async get_pool_status(self) -> dict[str, int]` - Line 514
 
 ### Implementation: `InfluxDBClientWrapper` ✅
 
@@ -820,33 +821,33 @@
 **Implemented Methods:**
 - `client(self) -> redis.Redis | None` - Line 105
 - `async connect(self) -> None` - Line 112
-- `async disconnect(self) -> None` - Line 242
-- `async set(self, ...) -> bool` - Line 277
-- `async get(self, key: str, namespace: str = 'trading_bot') -> Any | None` - Line 311
-- `async delete(self, key: str, namespace: str = 'trading_bot') -> bool` - Line 337
-- `async exists(self, key: str, namespace: str = 'trading_bot') -> bool` - Line 351
-- `async expire(self, key: str, ttl: int, namespace: str = 'trading_bot') -> bool` - Line 365
-- `async ttl(self, key: str, namespace: str = 'trading_bot') -> int` - Line 379
-- `async hset(self, key: str, field: str, value: Any, namespace: str = 'trading_bot') -> bool` - Line 394
-- `async hget(self, key: str, field: str, namespace: str = 'trading_bot') -> Any | None` - Line 415
-- `async hgetall(self, key: str, namespace: str = 'trading_bot') -> dict[str, Any]` - Line 437
-- `async hdel(self, key: str, field: str, namespace: str = 'trading_bot') -> bool` - Line 460
-- `async lpush(self, key: str, value: Any, namespace: str = 'trading_bot') -> int` - Line 475
-- `async rpush(self, key: str, value: Any, namespace: str = 'trading_bot') -> int` - Line 496
-- `async lrange(self, key: str, start: int = 0, end: int = Any, namespace: str = 'trading_bot') -> list[Any]` - Line 517
-- `async sadd(self, key: str, value: Any, namespace: str = 'trading_bot') -> bool` - Line 543
-- `async smembers(self, key: str, namespace: str = 'trading_bot') -> list[Any]` - Line 564
-- `async store_market_data(self, symbol: str, data: dict[str, Any], ttl: int = 300) -> bool` - Line 588
-- `async get_market_data(self, symbol: str) -> dict[str, Any] | None` - Line 593
-- `async store_position(self, bot_id: str, position: dict[str, Any]) -> bool` - Line 598
-- `async get_position(self, bot_id: str) -> dict[str, Any] | None` - Line 602
-- `async store_balance(self, user_id: str, exchange: str, balance: dict[str, Any]) -> bool` - Line 606
-- `async get_balance(self, user_id: str, exchange: str) -> dict[str, Any] | None` - Line 611
-- `async store_cache(self, key: str, value: Any, ttl: int = 3600) -> bool` - Line 616
-- `async get_cache(self, key: str) -> Any | None` - Line 620
-- `async ping(self) -> bool` - Line 625
-- `async info(self) -> dict[str, Any]` - Line 637
-- `async health_check(self) -> bool` - Line 649
+- `async disconnect(self) -> None` - Line 250
+- `async set(self, ...) -> bool` - Line 285
+- `async get(self, key: str, namespace: str = 'trading_bot') -> Any | None` - Line 319
+- `async delete(self, key: str, namespace: str = 'trading_bot') -> bool` - Line 345
+- `async exists(self, key: str, namespace: str = 'trading_bot') -> bool` - Line 359
+- `async expire(self, key: str, ttl: int, namespace: str = 'trading_bot') -> bool` - Line 373
+- `async ttl(self, key: str, namespace: str = 'trading_bot') -> int` - Line 387
+- `async hset(self, key: str, field: str, value: Any, namespace: str = 'trading_bot') -> bool` - Line 402
+- `async hget(self, key: str, field: str, namespace: str = 'trading_bot') -> Any | None` - Line 423
+- `async hgetall(self, key: str, namespace: str = 'trading_bot') -> dict[str, Any]` - Line 445
+- `async hdel(self, key: str, field: str, namespace: str = 'trading_bot') -> bool` - Line 468
+- `async lpush(self, key: str, value: Any, namespace: str = 'trading_bot') -> int` - Line 483
+- `async rpush(self, key: str, value: Any, namespace: str = 'trading_bot') -> int` - Line 504
+- `async lrange(self, key: str, start: int = 0, end: int = Any, namespace: str = 'trading_bot') -> list[Any]` - Line 525
+- `async sadd(self, key: str, value: Any, namespace: str = 'trading_bot') -> bool` - Line 551
+- `async smembers(self, key: str, namespace: str = 'trading_bot') -> list[Any]` - Line 572
+- `async store_market_data(self, symbol: str, data: dict[str, Any], ttl: int = 300) -> bool` - Line 596
+- `async get_market_data(self, symbol: str) -> dict[str, Any] | None` - Line 601
+- `async store_position(self, bot_id: str, position: dict[str, Any]) -> bool` - Line 606
+- `async get_position(self, bot_id: str) -> dict[str, Any] | None` - Line 610
+- `async store_balance(self, user_id: str, exchange: str, balance: dict[str, Any]) -> bool` - Line 614
+- `async get_balance(self, user_id: str, exchange: str) -> dict[str, Any] | None` - Line 619
+- `async store_cache(self, key: str, value: Any, ttl: int = 3600) -> bool` - Line 624
+- `async get_cache(self, key: str) -> Any | None` - Line 628
+- `async ping(self) -> bool` - Line 633
+- `async info(self) -> dict[str, Any]` - Line 645
+- `async health_check(self) -> bool` - Line 657
 
 ### Implementation: `CapitalAuditLogRepository` ✅
 
@@ -1487,23 +1488,25 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `config_service(self) -> Any` - Line 89
-- `validation_service(self) -> Any` - Line 94
-- `async start(self) -> None` - Line 98
-- `async stop(self) -> None` - Line 127
-- `async create_entity(self, entity: T, processing_mode: str = 'stream') -> T` - Line 160
-- `async get_entity_by_id(self, model_class: type[T], entity_id: K) -> T | None` - Line 229
-- `async update_entity(self, entity: T) -> T` - Line 264
-- `async delete_entity(self, model_class: type[T], entity_id: K) -> bool` - Line 293
-- `async list_entities(self, ...) -> list[T]` - Line 326
-- `async count_entities(self, model_class: type[T] | None = None, filters: dict[str, Any] | None = None) -> int` - Line 440
-- `async bulk_create(self, entities: list[T]) -> list[T]` - Line 480
-- `async transaction(self) -> AsyncGenerator[AsyncSession, None]` - Line 514
-- `async get_session(self) -> AsyncGenerator[AsyncSession, None]` - Line 531
-- `async get_health_status(self) -> HealthStatus` - Line 543
-- `get_performance_metrics(self) -> dict[str, Any]` - Line 556
-- `async execute_query(self, query: str, params: dict[str, Any] | None = None) -> Any` - Line 563
-- `async get_connection_pool_status(self) -> dict[str, Any]` - Line 577
+- `config_service(self) -> Any` - Line 94
+- `validation_service(self) -> Any` - Line 99
+- `async start(self) -> None` - Line 103
+- `async stop(self) -> None` - Line 132
+- `async get_health_status(self) -> HealthStatus` - Line 163
+- `async health_check(self) -> HealthCheckResult` - Line 189
+- `async create_entity(self, entity: T, processing_mode: str = 'stream') -> T` - Line 246
+- `async get_entity_by_id(self, model_class: type[T], entity_id: K) -> T | None` - Line 315
+- `async update_entity(self, entity: T) -> T` - Line 350
+- `async delete_entity(self, model_class: type[T], entity_id: K) -> bool` - Line 379
+- `async list_entities(self, ...) -> list[T]` - Line 412
+- `async count_entities(self, model_class: type[T] | None = None, filters: dict[str, Any] | None = None) -> int` - Line 526
+- `async bulk_create(self, entities: list[T]) -> list[T]` - Line 566
+- `async transaction(self) -> AsyncGenerator[AsyncSession, None]` - Line 600
+- `async get_session(self) -> AsyncGenerator[AsyncSession, None]` - Line 617
+- `async get_health_status(self) -> HealthStatus` - Line 629
+- `get_performance_metrics(self) -> dict[str, Any]` - Line 642
+- `async execute_query(self, query: str, params: dict[str, Any] | None = None) -> Any` - Line 649
+- `async get_connection_pool_status(self) -> dict[str, Any]` - Line 663
 
 ### Implementation: `BotService` ✅
 
@@ -1636,45 +1639,48 @@
 ```python
 class DatabaseConnectionManager:
     def __init__(self, config: Config) -> None  # Line 52
-    async def initialize(self) -> None  # Line 65
-    def _start_health_monitoring(self) -> None  # Line 74
-    async def _health_check_loop(self) -> None  # Line 88
-    async def _setup_postgresql(self) -> None  # Line 130
-    async def _setup_redis(self) -> None  # Line 223
-    async def _setup_influxdb(self) -> None  # Line 243
-    async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]  # Line 257
-    def get_sync_session(self) -> Session  # Line 291
-    async def get_redis_client(self) -> redis.Redis  # Line 311
-    def get_influxdb_client(self) -> InfluxDBClient  # Line 317
-    async def close(self) -> None  # Line 323
-    async def _stop_health_monitoring(self, health_task: Task[None] | None) -> None  # Line 344
-    async def _prepare_close_tasks(self, connections: dict[str, Any]) -> list[Any]  # Line 353
-    async def _close_redis_task(self, redis_client) -> Any  # Line 375
-    def _close_influxdb_task(self, influxdb_client) -> Any  # Line 390
-    async def _execute_close_tasks(self, close_tasks: list[Any]) -> None  # Line 399
-    def _clear_connection_references(self) -> None  # Line 408
-    def is_healthy(self) -> bool  # Line 416
-    def async_session_maker(self)  # Line 421
-    def sync_session_maker(self)  # Line 426
-    async def get_connection(self)  # Line 431
-    async def get_pool_status(self) -> dict[str, int]  # Line 439
+    def set_test_schema(self, schema: str) -> None  # Line 63
+    def _setup_test_schema_listeners(self) -> None  # Line 80
+    async def initialize(self) -> None  # Line 131
+    def _start_health_monitoring(self) -> None  # Line 143
+    async def _health_check_loop(self) -> None  # Line 157
+    async def _setup_postgresql(self) -> None  # Line 199
+    async def _setup_redis(self) -> None  # Line 292
+    async def _setup_influxdb(self) -> None  # Line 312
+    async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]  # Line 326
+    def get_sync_session(self) -> Session  # Line 365
+    async def get_redis_client(self) -> redis.Redis  # Line 385
+    def get_influxdb_client(self) -> InfluxDBClient  # Line 391
+    async def close(self) -> None  # Line 397
+    async def _stop_health_monitoring(self, health_task: Task[None] | None) -> None  # Line 418
+    async def _prepare_close_tasks(self, connections: dict[str, Any]) -> list[Any]  # Line 427
+    def _create_redis_close_task(self, redis_client) -> Any  # Line 450
+    def _close_influxdb_task(self, influxdb_client) -> Any  # Line 465
+    async def _execute_close_tasks(self, close_tasks: list[Any]) -> None  # Line 474
+    def _clear_connection_references(self) -> None  # Line 483
+    def is_healthy(self) -> bool  # Line 491
+    def async_session_maker(self)  # Line 496
+    def sync_session_maker(self)  # Line 501
+    async def get_connection(self)  # Line 506
+    async def get_pool_status(self) -> dict[str, int]  # Line 514
 ```
 
 #### Functions:
 
 ```python
-async def initialize_database(config: Config) -> None  # Line 485
-async def init_database(config: Config) -> None  # Line 492
-async def close_database() -> None  # Line 497
-async def get_async_session() -> AsyncGenerator[AsyncSession, None]  # Line 508
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]  # Line 518
-def get_sync_session() -> Session  # Line 524
-async def get_redis_client() -> redis.Redis  # Line 532
-def get_influxdb_client() -> InfluxDBClient  # Line 540
-def is_database_healthy() -> bool  # Line 548
-async def execute_query(query: str, params: dict[str, Any] | None = None) -> Any  # Line 556
-async def health_check() -> dict[str, bool]  # Line 563
-async def debug_connection_info() -> dict[str, Any]  # Line 594
+async def initialize_database(config: Config) -> None  # Line 560
+async def init_database(config: Config) -> None  # Line 567
+async def close_database() -> None  # Line 572
+async def get_async_session() -> AsyncGenerator[AsyncSession, None]  # Line 583
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]  # Line 593
+def get_sync_session() -> Session  # Line 599
+async def get_redis_client() -> redis.Redis  # Line 607
+def get_influxdb_client() -> InfluxDBClient  # Line 615
+def is_database_healthy() -> bool  # Line 623
+def set_connection_manager(manager: DatabaseConnectionManager) -> None  # Line 630
+async def execute_query(query: str, params: dict[str, Any] | None = None) -> Any  # Line 645
+async def health_check() -> dict[str, bool]  # Line 652
+async def debug_connection_info() -> dict[str, Any]  # Line 683
 ```
 
 ### File: di_registration.py
@@ -1696,17 +1702,17 @@ def _register_sync_session_factory(injector: DependencyInjector) -> None  # Line
 def _register_database_service_factory(injector: DependencyInjector) -> None  # Line 136
 def _create_database_service_with_deps(injector: DependencyInjector) -> 'DatabaseService'  # Line 150
 def _register_database_interfaces(injector: DependencyInjector) -> None  # Line 171
-def configure_database_dependencies(injector: DependencyInjector | None = None) -> DependencyInjector  # Line 366
-def get_database_service(injector: DependencyInjector) -> 'DatabaseService'  # Line 393
-def get_database_manager(injector: DependencyInjector) -> 'DatabaseManager'  # Line 398
-def get_uow_factory(injector: DependencyInjector) -> 'UnitOfWorkFactory'  # Line 403
-def _register_database_service(injector: DependencyInjector) -> None  # Line 409
-def _register_interface_implementations(injector: DependencyInjector) -> None  # Line 414
-def _register_database_manager(injector: DependencyInjector) -> None  # Line 419
-def _register_unit_of_work_factory(injector: DependencyInjector) -> None  # Line 424
-def _register_unit_of_work_instances(injector: DependencyInjector) -> None  # Line 429
-def _register_specialized_services(injector: DependencyInjector) -> None  # Line 434
-def _register_repository_instances(injector: DependencyInjector) -> None  # Line 439
+def configure_database_dependencies(injector: DependencyInjector | None = None) -> DependencyInjector  # Line 367
+def get_database_service(injector: DependencyInjector) -> 'DatabaseService'  # Line 394
+def get_database_manager(injector: DependencyInjector) -> 'DatabaseManager'  # Line 399
+def get_uow_factory(injector: DependencyInjector) -> 'UnitOfWorkFactory'  # Line 404
+def _register_database_service(injector: DependencyInjector) -> None  # Line 410
+def _register_interface_implementations(injector: DependencyInjector) -> None  # Line 415
+def _register_database_manager(injector: DependencyInjector) -> None  # Line 420
+def _register_unit_of_work_factory(injector: DependencyInjector) -> None  # Line 425
+def _register_unit_of_work_instances(injector: DependencyInjector) -> None  # Line 430
+def _register_specialized_services(injector: DependencyInjector) -> None  # Line 435
+def _register_repository_instances(injector: DependencyInjector) -> None  # Line 440
 ```
 
 ### File: influxdb_client.py
@@ -1988,6 +1994,24 @@ def downgrade() -> None  # Line 461
 ```python
 def upgrade()  # Line 20
 def downgrade()  # Line 298
+```
+
+### File: 249c01341fc2_add_default_status_to_position.py
+
+#### Functions:
+
+```python
+def upgrade() -> None  # Line 20
+def downgrade() -> None  # Line 28
+```
+
+### File: 9449369979fc_merge_heads.py
+
+#### Functions:
+
+```python
+def upgrade() -> None  # Line 20
+def downgrade() -> None  # Line 24
 ```
 
 ### File: 9dbcb25ea329_initial_migration.py
@@ -2817,40 +2841,40 @@ class RedisClient(BaseComponent, CacheClientInterface):
     def __init__(self, config_or_url: Any | str) -> None  # Line 66
     def client(self) -> redis.Redis | None  # Line 105
     async def connect(self) -> None  # Line 112
-    def _start_heartbeat_monitoring(self) -> None  # Line 155
-    async def _heartbeat_monitor(self) -> None  # Line 160
-    async def _ensure_connected(self) -> None  # Line 175
-    async def _cleanup_connection(self) -> None  # Line 198
-    async def _with_backpressure(self, operation)  # Line 208
-    async def _maybe_autoclose(self) -> None  # Line 225
-    async def disconnect(self) -> None  # Line 242
-    def _get_namespaced_key(self, key: str, namespace: str = 'trading_bot') -> str  # Line 272
-    async def set(self, ...) -> bool  # Line 277
-    async def get(self, key: str, namespace: str = 'trading_bot') -> Any | None  # Line 311
-    async def delete(self, key: str, namespace: str = 'trading_bot') -> bool  # Line 337
-    async def exists(self, key: str, namespace: str = 'trading_bot') -> bool  # Line 351
-    async def expire(self, key: str, ttl: int, namespace: str = 'trading_bot') -> bool  # Line 365
-    async def ttl(self, key: str, namespace: str = 'trading_bot') -> int  # Line 379
-    async def hset(self, key: str, field: str, value: Any, namespace: str = 'trading_bot') -> bool  # Line 394
-    async def hget(self, key: str, field: str, namespace: str = 'trading_bot') -> Any | None  # Line 415
-    async def hgetall(self, key: str, namespace: str = 'trading_bot') -> dict[str, Any]  # Line 437
-    async def hdel(self, key: str, field: str, namespace: str = 'trading_bot') -> bool  # Line 460
-    async def lpush(self, key: str, value: Any, namespace: str = 'trading_bot') -> int  # Line 475
-    async def rpush(self, key: str, value: Any, namespace: str = 'trading_bot') -> int  # Line 496
-    async def lrange(self, key: str, start: int = 0, end: int = Any, namespace: str = 'trading_bot') -> list[Any]  # Line 517
-    async def sadd(self, key: str, value: Any, namespace: str = 'trading_bot') -> bool  # Line 543
-    async def smembers(self, key: str, namespace: str = 'trading_bot') -> list[Any]  # Line 564
-    async def store_market_data(self, symbol: str, data: dict[str, Any], ttl: int = 300) -> bool  # Line 588
-    async def get_market_data(self, symbol: str) -> dict[str, Any] | None  # Line 593
-    async def store_position(self, bot_id: str, position: dict[str, Any]) -> bool  # Line 598
-    async def get_position(self, bot_id: str) -> dict[str, Any] | None  # Line 602
-    async def store_balance(self, user_id: str, exchange: str, balance: dict[str, Any]) -> bool  # Line 606
-    async def get_balance(self, user_id: str, exchange: str) -> dict[str, Any] | None  # Line 611
-    async def store_cache(self, key: str, value: Any, ttl: int = 3600) -> bool  # Line 616
-    async def get_cache(self, key: str) -> Any | None  # Line 620
-    async def ping(self) -> bool  # Line 625
-    async def info(self) -> dict[str, Any]  # Line 637
-    async def health_check(self) -> bool  # Line 649
+    def _start_heartbeat_monitoring(self) -> None  # Line 163
+    async def _heartbeat_monitor(self) -> None  # Line 168
+    async def _ensure_connected(self) -> None  # Line 183
+    async def _cleanup_connection(self) -> None  # Line 206
+    async def _with_backpressure(self, operation)  # Line 216
+    async def _maybe_autoclose(self) -> None  # Line 233
+    async def disconnect(self) -> None  # Line 250
+    def _get_namespaced_key(self, key: str, namespace: str = 'trading_bot') -> str  # Line 280
+    async def set(self, ...) -> bool  # Line 285
+    async def get(self, key: str, namespace: str = 'trading_bot') -> Any | None  # Line 319
+    async def delete(self, key: str, namespace: str = 'trading_bot') -> bool  # Line 345
+    async def exists(self, key: str, namespace: str = 'trading_bot') -> bool  # Line 359
+    async def expire(self, key: str, ttl: int, namespace: str = 'trading_bot') -> bool  # Line 373
+    async def ttl(self, key: str, namespace: str = 'trading_bot') -> int  # Line 387
+    async def hset(self, key: str, field: str, value: Any, namespace: str = 'trading_bot') -> bool  # Line 402
+    async def hget(self, key: str, field: str, namespace: str = 'trading_bot') -> Any | None  # Line 423
+    async def hgetall(self, key: str, namespace: str = 'trading_bot') -> dict[str, Any]  # Line 445
+    async def hdel(self, key: str, field: str, namespace: str = 'trading_bot') -> bool  # Line 468
+    async def lpush(self, key: str, value: Any, namespace: str = 'trading_bot') -> int  # Line 483
+    async def rpush(self, key: str, value: Any, namespace: str = 'trading_bot') -> int  # Line 504
+    async def lrange(self, key: str, start: int = 0, end: int = Any, namespace: str = 'trading_bot') -> list[Any]  # Line 525
+    async def sadd(self, key: str, value: Any, namespace: str = 'trading_bot') -> bool  # Line 551
+    async def smembers(self, key: str, namespace: str = 'trading_bot') -> list[Any]  # Line 572
+    async def store_market_data(self, symbol: str, data: dict[str, Any], ttl: int = 300) -> bool  # Line 596
+    async def get_market_data(self, symbol: str) -> dict[str, Any] | None  # Line 601
+    async def store_position(self, bot_id: str, position: dict[str, Any]) -> bool  # Line 606
+    async def get_position(self, bot_id: str) -> dict[str, Any] | None  # Line 610
+    async def store_balance(self, user_id: str, exchange: str, balance: dict[str, Any]) -> bool  # Line 614
+    async def get_balance(self, user_id: str, exchange: str) -> dict[str, Any] | None  # Line 619
+    async def store_cache(self, key: str, value: Any, ttl: int = 3600) -> bool  # Line 624
+    async def get_cache(self, key: str) -> Any | None  # Line 628
+    async def ping(self) -> bool  # Line 633
+    async def info(self) -> dict[str, Any]  # Line 645
+    async def health_check(self) -> bool  # Line 657
 ```
 
 #### Functions:
@@ -3771,11 +3795,11 @@ def main()  # Line 512
 ### File: service.py
 
 **Key Imports:**
-- `from src.core.base.interfaces import DatabaseServiceInterface`
+- `from src.core.base.interfaces import HealthCheckResult`
 - `from src.core.base.interfaces import HealthStatus`
 - `from src.core.base.service import BaseService`
+- `from src.database.interfaces import DatabaseServiceInterface`
 - `from src.core.exceptions import ComponentError`
-- `from src.core.exceptions import DatabaseError`
 
 #### Class: `DatabaseService`
 
@@ -3784,29 +3808,31 @@ def main()  # Line 512
 
 ```python
 class DatabaseService(BaseService, DatabaseServiceInterface):
-    def __init__(self, ...)  # Line 51
-    def config_service(self) -> Any  # Line 89
-    def validation_service(self) -> Any  # Line 94
-    async def start(self) -> None  # Line 98
-    async def stop(self) -> None  # Line 127
-    async def create_entity(self, entity: T, processing_mode: str = 'stream') -> T  # Line 160
-    async def get_entity_by_id(self, model_class: type[T], entity_id: K) -> T | None  # Line 229
-    async def update_entity(self, entity: T) -> T  # Line 264
-    async def delete_entity(self, model_class: type[T], entity_id: K) -> bool  # Line 293
-    async def list_entities(self, ...) -> list[T]  # Line 326
-    async def count_entities(self, model_class: type[T] | None = None, filters: dict[str, Any] | None = None) -> int  # Line 440
-    async def bulk_create(self, entities: list[T]) -> list[T]  # Line 480
-    async def transaction(self) -> AsyncGenerator[AsyncSession, None]  # Line 514
-    async def get_session(self) -> AsyncGenerator[AsyncSession, None]  # Line 531
-    async def get_health_status(self) -> HealthStatus  # Line 543
-    def get_performance_metrics(self) -> dict[str, Any]  # Line 556
-    async def execute_query(self, query: str, params: dict[str, Any] | None = None) -> Any  # Line 563
-    async def get_connection_pool_status(self) -> dict[str, Any]  # Line 577
-    async def _invalidate_cache_pattern(self, pattern: str) -> None  # Line 598
-    def _transform_entity_data(self, entity: T, processing_mode: str) -> T  # Line 612
-    def _validate_filter_boundary(self, filters: dict[str, Any], entity_name: str) -> None  # Line 632
-    def _apply_consistent_filters(self, query: Any, model_class: type[T], filters: dict[str, Any]) -> Any  # Line 677
-    def _propagate_database_error(self, error: Exception, operation: str, entity_name: str) -> None  # Line 696
+    def __init__(self, ...)  # Line 56
+    def config_service(self) -> Any  # Line 94
+    def validation_service(self) -> Any  # Line 99
+    async def start(self) -> None  # Line 103
+    async def stop(self) -> None  # Line 132
+    async def get_health_status(self) -> HealthStatus  # Line 163
+    async def health_check(self) -> HealthCheckResult  # Line 189
+    async def create_entity(self, entity: T, processing_mode: str = 'stream') -> T  # Line 246
+    async def get_entity_by_id(self, model_class: type[T], entity_id: K) -> T | None  # Line 315
+    async def update_entity(self, entity: T) -> T  # Line 350
+    async def delete_entity(self, model_class: type[T], entity_id: K) -> bool  # Line 379
+    async def list_entities(self, ...) -> list[T]  # Line 412
+    async def count_entities(self, model_class: type[T] | None = None, filters: dict[str, Any] | None = None) -> int  # Line 526
+    async def bulk_create(self, entities: list[T]) -> list[T]  # Line 566
+    async def transaction(self) -> AsyncGenerator[AsyncSession, None]  # Line 600
+    async def get_session(self) -> AsyncGenerator[AsyncSession, None]  # Line 617
+    async def get_health_status(self) -> HealthStatus  # Line 629
+    def get_performance_metrics(self) -> dict[str, Any]  # Line 642
+    async def execute_query(self, query: str, params: dict[str, Any] | None = None) -> Any  # Line 649
+    async def get_connection_pool_status(self) -> dict[str, Any]  # Line 663
+    async def _invalidate_cache_pattern(self, pattern: str) -> None  # Line 684
+    def _transform_entity_data(self, entity: T, processing_mode: str) -> T  # Line 698
+    def _validate_filter_boundary(self, filters: dict[str, Any], entity_name: str) -> None  # Line 718
+    def _apply_consistent_filters(self, query: Any, model_class: type[T], filters: dict[str, Any]) -> Any  # Line 763
+    def _propagate_database_error(self, error: Exception, operation: str, entity_name: str) -> None  # Line 782
 ```
 
 ### File: bot_service.py
@@ -4018,4 +4044,4 @@ class UnitOfWorkExample:
 ---
 **Generated**: Complete reference for database module
 **Total Classes**: 138
-**Total Functions**: 50
+**Total Functions**: 55

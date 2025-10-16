@@ -86,6 +86,9 @@ class MockStrategy(BaseStrategy):
         if direction != SignalDirection.HOLD:
             return [
                 Signal(
+                    signal_id=f"test_signal_{symbol}_{data.timestamp.timestamp()}",
+                    strategy_id="test_strategy_1",
+                    strategy_name=self.name,
                     symbol=symbol,
                     direction=direction,
                     strength=0.8,

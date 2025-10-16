@@ -66,7 +66,7 @@ class ExecutionOrchestrationService(BaseService, ExecutionOrchestrationServiceIn
         self.execution_engine = execution_engine
         self.risk_service = risk_service
 
-        self.logger = get_logger(__name__)
+        # NOTE: self.logger is already available from BaseComponent - don't override it
 
         # Dependencies are injected via constructor
 
@@ -127,10 +127,20 @@ class ExecutionOrchestrationService(BaseService, ExecutionOrchestrationServiceIn
                         else SignalDirection.SELL
                     )
                     
+                    # Generate unique signal ID
+                    import uuid
+                    signal_id = f"orch_signal_{uuid.uuid4().hex[:12]}"
+                    strategy_id_value = strategy_name or "orchestration_service"
+                    strategy_name_value = strategy_name or "ExecutionOrchestrationService"
+
                     trading_signal = Signal(
+                        signal_id=signal_id,
+                        strategy_id=strategy_id_value,
+                        strategy_name=strategy_name_value,
                         symbol=order.symbol,
                         direction=signal_direction,
                         strength=0.5,  # Default confidence
+                        confidence=Decimal("0.5"),
                         timestamp=datetime.now(timezone.utc),
                         source="ExecutionOrchestrationService",
                         metadata={

@@ -20,7 +20,7 @@ from src.core.dependency_injection import DependencyContainer
 from src.core.exceptions import ValidationError
 from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, OrderType
 from src.exchanges.base import BaseExchange
-from src.exchanges.di_registration import register_exchange_dependencies
+from src.exchanges.di_registration import register_exchange_services
 from src.exchanges.factory import ExchangeFactory
 from src.exchanges.service import ExchangeService
 
@@ -109,9 +109,11 @@ class TestExchangesModuleIntegration:
     def test_dependency_injection_registration(self, config):
         """Test that DI registration works properly."""
         container = DependencyContainer()
+        # Register config first (use "Config" with capital C to match DI convention)
+        container.register("Config", config, singleton=True)
 
         # Test registration doesn't raise exceptions
-        register_exchange_dependencies(container, config)
+        register_exchange_services(container)
 
         # Verify services are registered (DependencyContainer uses 'has', not 'is_registered')
         assert container.has("exchange_factory")

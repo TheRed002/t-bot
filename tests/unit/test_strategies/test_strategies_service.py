@@ -120,6 +120,9 @@ def mock_market_data():
 def mock_signal():
     """Create a mock signal - cached for session scope with fixed time."""
     return Signal(
+        signal_id="test_signal_1",
+        strategy_id="test_strategy_1",
+        strategy_name="test_strategy",
         symbol="BTC/USD",
         direction=SignalDirection.BUY,
         strength=Decimal("0.8"),
@@ -445,6 +448,9 @@ class TestSignalValidation:
         # Signal creation should fail with empty symbol
         with pytest.raises(ValidationError, match="Symbol cannot be empty"):
             Signal(
+                signal_id="test_signal_2",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="",  # Empty symbol
                 direction=SignalDirection.BUY,
                 strength=Decimal("0.8"),
@@ -459,6 +465,9 @@ class TestSignalValidation:
         await service.start()
 
         weak_signal = Signal(
+            signal_id="test_signal_3",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             strength=Decimal("0.05"),  # Below threshold

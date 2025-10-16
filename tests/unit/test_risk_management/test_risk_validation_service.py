@@ -70,6 +70,9 @@ class TestRiskValidationService:
         """Create a sample trading signal."""
         from datetime import datetime, timezone
         return Signal(
+            signal_id="test_signal_1",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
@@ -82,6 +85,9 @@ class TestRiskValidationService:
         """Create a weak trading signal."""
         from datetime import datetime, timezone
         return Signal(
+            signal_id="test_signal_2",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             strength=Decimal("0.2"),  # Below threshold

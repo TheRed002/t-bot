@@ -798,6 +798,11 @@ def instrument_fastapi(app: Any, config: OpenTelemetryConfig) -> None:
         config: OpenTelemetry configuration
     """
     try:
+        # Check if OpenTelemetry is available
+        if not OPENTELEMETRY_AVAILABLE or FastAPIInstrumentor is None:
+            logger.debug("OpenTelemetry not available, skipping FastAPI instrumentation")
+            return
+
         if config.instrument_fastapi:
             # Get excluded URLs safely
             try:

@@ -181,7 +181,7 @@ class MarketMakingStrategy(BaseStrategy):
         """
         try:
             # Validate input data
-            if not data or not data.price or not data.bid or not data.ask:
+            if not data or not data.bid_price or not data.ask_price:
                 self.logger.warning(
                     "Invalid market data for signal generation",
                     symbol=data.symbol if data else None,
@@ -192,7 +192,7 @@ class MarketMakingStrategy(BaseStrategy):
             self._current_symbol = data.symbol
 
             # Calculate current spread and volatility using data service
-            current_spread = (data.ask - data.bid) / data.bid
+            current_spread = (data.ask_price - data.bid_price) / data.bid_price
 
             # Use data service for volatility calculation
             if self.services.data_service:
@@ -224,10 +224,14 @@ class MarketMakingStrategy(BaseStrategy):
                 level_size = self._calculate_level_size(level)
 
                 # Generate bid signal
-                bid_price = data.bid * (Decimal("1") - level_spread / Decimal("2"))
+                bid_price = data.bid_price * (Decimal("1") - level_spread / Decimal("2"))
                 bid_signal = Signal(
+                    signal_id=f"{self.config.strategy_id}_bid_{level}_{data.timestamp.timestamp()}",
+                    strategy_id=self.config.strategy_id,
+                    strategy_name=self.name,
                     direction=SignalDirection.BUY,
                     strength=Decimal("0.8"),  # High confidence for market making
+                    confidence=Decimal("0.8"),
                     timestamp=data.timestamp,
                     symbol=data.symbol,
                     source=self.name,
@@ -243,10 +247,14 @@ class MarketMakingStrategy(BaseStrategy):
                 signals.append(bid_signal)
 
                 # Generate ask signal
-                ask_price = data.ask * (Decimal("1") + level_spread / Decimal("2"))
+                ask_price = data.ask_price * (Decimal("1") + level_spread / Decimal("2"))
                 ask_signal = Signal(
+                    signal_id=f"{self.config.strategy_id}_ask_{level}_{data.timestamp.timestamp()}",
+                    strategy_id=self.config.strategy_id,
+                    strategy_name=self.name,
                     direction=SignalDirection.SELL,
                     strength=Decimal("0.8"),  # High confidence for market making
+                    confidence=Decimal("0.8"),
                     timestamp=data.timestamp,
                     symbol=data.symbol,
                     source=self.name,
@@ -520,8 +528,8 @@ class MarketMakingStrategy(BaseStrategy):
             # Check for profit taking (if position is profitable)
             if position.unrealized_pnl > self.min_profit_per_trade:
                 # Consider closing if spread has narrowed significantly
-                if data.bid and data.ask and data.bid > 0:
-                    current_spread = (data.ask - data.bid) / data.bid
+                if data.bid_price and data.ask_price and data.bid_price > 0:
+                    current_spread = (data.ask_price - data.bid_price) / data.bid_price
                     if current_spread < self.base_spread * Decimal("0.5"):
                         self.logger.info(
                             "Closing position due to narrow spread",
@@ -530,7 +538,7 @@ class MarketMakingStrategy(BaseStrategy):
                         )
                         return True
                 # Handle case where bid/ask data is not available
-                elif not data.bid or not data.ask:
+                elif not data.bid_price or not data.ask_price:
                     return False
                 else:
                     current_spread = Decimal("0")

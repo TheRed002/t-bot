@@ -145,6 +145,9 @@ class TestSignalValidator:
         """Create a valid signal for testing - cached for class scope with current time."""
         from datetime import datetime, timezone
         return Signal(
+            signal_id="test_signal_1",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
@@ -164,6 +167,9 @@ class TestSignalValidator:
     async def test_validate_signal_low_strength(self, signal_validator):
         """Test validation fails for low strength signal."""
         weak_signal = Signal(
+            signal_id="test_signal_2",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             strength=Decimal("0.1"),  # Below min_strength of 0.3
@@ -183,6 +189,9 @@ class TestSignalValidator:
         # this test verifies the validation error is raised
         with pytest.raises(Exception) as exc_info:
             Signal(
+                signal_id="test_signal_3",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="BTC/USD",
                 direction=SignalDirection.BUY,
                 strength=Decimal("1.5"),  # Above maximum of 1.0
@@ -196,6 +205,9 @@ class TestSignalValidator:
     async def test_validate_signal_old_timestamp(self, signal_validator):
         """Test validation fails for old signal."""
         old_signal = Signal(
+            signal_id="test_signal_4",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
@@ -212,6 +224,9 @@ class TestSignalValidator:
     async def test_validate_signal_future_timestamp(self, signal_validator):
         """Test validation fails for future timestamp."""
         future_signal = Signal(
+            signal_id="test_signal_5",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
@@ -231,6 +246,9 @@ class TestSignalValidator:
         # this test verifies the validation error is raised
         with pytest.raises(Exception) as exc_info:
             Signal(
+                signal_id="test_signal_6",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="X",  # Too short, missing "/"
                 direction=SignalDirection.BUY,
                 strength=Decimal("0.8"),
@@ -265,6 +283,9 @@ class TestSignalValidator:
     async def test_validate_signal_symbol_mismatch_with_context(self, signal_validator):
         """Test validation fails when signal symbol doesn't match market data."""
         signal = Signal(
+            signal_id="test_signal_7",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="ETH/USD",  # Different from market data
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
@@ -295,6 +316,9 @@ class TestSignalValidator:
     async def test_validate_signal_target_price_deviation(self, signal_validator):
         """Test validation warns for large price deviation."""
         signal = Signal(
+            signal_id="test_signal_8",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
@@ -718,6 +742,9 @@ class TestValidationFramework:
     def valid_signal(self):
         """Create a valid signal."""
         return Signal(
+            signal_id="test_signal_9",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
@@ -895,6 +922,9 @@ class TestValidationEdgeCases:
         validator = SignalValidator({"min_strength": 0.123456789})
 
         signal = Signal(
+            signal_id="test_signal_10",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             strength=Decimal("0.123456788"),  # Slightly below threshold
@@ -944,6 +974,9 @@ class TestValidationPerformance:
         signals = []
         for i in range(100):
             signal = Signal(
+                signal_id="test_signal_11",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="BTC/USD",
                 direction=SignalDirection.BUY,
                 strength=Decimal("0.8"),

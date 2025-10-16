@@ -141,12 +141,11 @@ async def clean_database() -> AsyncGenerator[DatabaseConnectionManager, None]:
     # Create database connection manager
     connection_manager = DatabaseConnectionManager(config)
 
-    # Store test schema for cleanup and configure session isolation
+    # Store test schema for cleanup
     connection_manager._test_schema = test_schema
-    connection_manager.set_test_schema(test_schema)
 
     try:
-        # Initialize all database connections
+        # Initialize all database connections FIRST
         await connection_manager.initialize()
 
         # Create test schema for isolation
@@ -157,24 +156,62 @@ async def clean_database() -> AsyncGenerator[DatabaseConnectionManager, None]:
             await session.commit()
             logger.debug(f"Created test schema: {test_schema}")
 
-        # Set search path to use test schema
-        async with connection_manager.get_async_session() as session:
-            await session.execute(text(f"SET search_path TO {test_schema}, public"))
-            await session.commit()
+        # THEN configure session isolation (after engine and schema exist)
+        connection_manager.set_test_schema(test_schema)
 
         # Create all tables from models in the test schema
         from src.database.models.base import Base
 
+        # Import all model classes to register them with Base.metadata
+        # This ensures all SQLAlchemy models are registered before table creation
+        try:
+            logger.info("Importing database models to register with Base.metadata...")
+            from src.database.models import (  # noqa: F401
+                Alert, AlertRule, AnalyticsOperationalMetrics,
+                AnalyticsPortfolioMetrics, AnalyticsPositionMetrics,
+                AnalyticsRiskMetrics, AnalyticsStrategyMetrics, AuditLog,
+                BacktestResult, BacktestRun, BacktestTrade, BalanceSnapshot,
+                Bot, BotInstance, BotLog, CapitalAllocationDB, CapitalAuditLog,
+                CircuitBreakerConfig, CircuitBreakerEvent, CurrencyExposureDB,
+                DataPipelineRecord, DataQualityRecord, EscalationPolicy,
+                ExchangeAllocationDB, ExchangeConfiguration, ExchangeConnectionStatus,
+                ExchangeRateLimit, ExchangeTradingPair, ExecutionAuditLog,
+                FeatureRecord, FundFlowDB, MLModelMetadata, MLPrediction,
+                MLTrainingJob, MarketDataRecord, OptimizationObjectiveDB,
+                OptimizationResult, OptimizationRun, Order, OrderFill,
+                ParameterSet, PerformanceAuditLog, PerformanceMetrics, Position,
+                RiskAuditLog, RiskConfiguration, RiskViolation, Signal,
+                StateBackup, StateCheckpoint, StateHistory, StateMetadata,
+                StateSnapshot, Strategy, Trade, User
+            )
+
+            # Log registered tables
+            table_names = [table.name for table in Base.metadata.sorted_tables]
+            logger.info(f"Registered {len(table_names)} tables in Base.metadata")
+            logger.debug(f"Table names: {table_names}")
+        except Exception as e:
+            logger.error(f"Failed to import models: {e}")
+            raise
+
         # Create all tables using the connection with proper error handling
         if connection_manager.async_engine:
             try:
-                # First attempt: try creating tables with checkfirst
+                # Create tables in test schema using execution_options with schema_translate_map
                 async with connection_manager.async_engine.begin() as conn:
+                    # Set search path for this connection
                     await conn.execute(text(f"SET search_path TO {test_schema}, public"))
+
+                    logger.info(f"Creating {len(Base.metadata.sorted_tables)} tables in schema {test_schema}...")
+                    # Use checkfirst=False to force table creation in the test schema
+                    # even if tables exist in public schema (checkfirst looks globally, not per-schema)
                     await conn.run_sync(
-                        lambda sync_conn: Base.metadata.create_all(sync_conn, checkfirst=True)
+                        lambda sync_conn: Base.metadata.create_all(sync_conn, checkfirst=False)
                     )
-                    logger.info(f"Created all database tables in schema: {test_schema}")
+                    # Commit is automatic when exiting the begin() context
+                    logger.info(f"✅ Created all database tables in schema: {test_schema}")
+
+                # Brief wait to ensure transaction is fully committed
+                await asyncio.sleep(0.1)
             except Exception as e:
                 # If we get conflicts, rollback and retry with fresh schema
                 if "already exists" in str(e):
@@ -187,13 +224,17 @@ async def clean_database() -> AsyncGenerator[DatabaseConnectionManager, None]:
                             await conn.execute(text(f"CREATE SCHEMA {test_schema}"))
                             await conn.commit()  # Commit schema changes
 
-                        # Now create tables in a fresh transaction
+                        # Now create tables in a fresh transaction WITHOUT checkfirst
                         async with connection_manager.async_engine.begin() as conn:
                             await conn.execute(text(f"SET search_path TO {test_schema}, public"))
                             await conn.run_sync(
-                                lambda sync_conn: Base.metadata.create_all(sync_conn)
+                                lambda sync_conn: Base.metadata.create_all(sync_conn, checkfirst=False)
                             )
-                            logger.info(f"Recreated all database tables in schema: {test_schema}")
+                            # Commit is automatic when exiting the begin() context
+                            logger.info(f"✅ Recreated all database tables in schema: {test_schema}")
+
+                        # Brief wait to ensure transaction is fully committed
+                        await asyncio.sleep(0.1)
                     except Exception as recreate_error:
                         logger.error(f"Failed to recreate schema {test_schema}: {recreate_error}")
                         raise
@@ -252,10 +293,16 @@ async def clean_database() -> AsyncGenerator[DatabaseConnectionManager, None]:
                 """)
             )
             table_count = result.scalar()
-            logger.info(f"Created {table_count} tables in test schema")
 
             if table_count == 0:
+                # Log detailed info for debugging
+                logger.error(f"❌ No tables created in test schema {test_schema}")
+                logger.error(f"Expected {len(Base.metadata.sorted_tables)} tables from Base.metadata")
+                logger.error(f"Engine: {connection_manager.async_engine}")
+                logger.error(f"Search path should be: {test_schema}, public")
                 raise RuntimeError(f"No tables created in test schema {test_schema}")
+
+            logger.info(f"Created {table_count} tables in test schema")
 
         logger.info(
             f"✅ Clean database environment ready - schema: {test_schema} with {table_count} tables"

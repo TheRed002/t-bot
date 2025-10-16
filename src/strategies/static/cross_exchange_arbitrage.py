@@ -225,6 +225,9 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
                     if await self._validate_execution_timing(symbol):
                         # Create arbitrage signal
                         signal = Signal(
+                            signal_id="test_signal_1",
+                            strategy_id="test_strategy_1",
+                            strategy_name="test_strategy",
                             symbol=symbol,
                             direction=SignalDirection.BUY,  # Buy on lower price exchange
                             # Scale strength with profit

@@ -81,11 +81,9 @@ class FixedPercentageAlgorithm(PositionSizingAlgorithm):
         # Base size as percentage of portfolio
         base_size = portfolio_value * risk_per_trade
 
-        # Apply signal confidence/strength
-        confidence = get_signal_confidence(signal)
-        position_size = base_size * confidence
-
-        return position_size
+        # NOTE: Fixed percentage sizing uses the exact percentage WITHOUT confidence adjustment
+        # Confidence weighting is handled by the CONFIDENCE_WEIGHTED method explicitly
+        return base_size
 
 
 class KellyCriterionAlgorithm(PositionSizingAlgorithm):

@@ -425,12 +425,18 @@ class TestMeanReversionStrategy:
         """Test signal validation with batch operations."""
         # Create multiple test signals for batch validation
         valid_signal = Signal(
+            signal_id="test_signal_1",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY, strength=Decimal("0.8"),
             timestamp=FIXED_TIME, symbol="BTC/USD", source="mean_reversion",
             metadata={"z_score": 2.5, "signal_type": "entry"}
         )
         
         invalid_signal = Signal(
+            signal_id="test_signal_2",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY, strength=Decimal("0.3"),  # Below threshold
             timestamp=FIXED_TIME, symbol="BTC/USD", source="mean_reversion",
             metadata={"z_score": 2.5}
@@ -448,6 +454,9 @@ class TestMeanReversionStrategy:
     async def test_validate_signal_low_confidence(self, strategy):
         """Test signal validation with low confidence."""
         signal = Signal(
+            signal_id="test_signal_3",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.3"),  # Below min_confidence of 0.6
             timestamp=FIXED_TIME,
@@ -463,6 +472,9 @@ class TestMeanReversionStrategy:
     async def test_validate_signal_old_signal(self, strategy):
         """Test signal validation with old signal."""
         signal = Signal(
+            signal_id="test_signal_4",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME - timedelta(minutes=10),
@@ -478,6 +490,9 @@ class TestMeanReversionStrategy:
     async def test_validate_signal_missing_metadata(self, strategy):
         """Test signal validation with missing metadata."""
         signal = Signal(
+            signal_id="test_signal_5",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME,
@@ -493,6 +508,9 @@ class TestMeanReversionStrategy:
     async def test_validate_signal_invalid_zscore(self, strategy):
         """Test signal validation with invalid Z-score."""
         signal = Signal(
+            signal_id="test_signal_6",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME,
@@ -511,6 +529,9 @@ class TestMeanReversionStrategy:
     async def test_validate_signal_entry_below_threshold(self, strategy):
         """Test signal validation with entry signal below threshold."""
         signal = Signal(
+            signal_id="test_signal_7",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME,
@@ -535,6 +556,9 @@ class TestMeanReversionStrategy:
     def test_get_position_size_success(self, strategy):
         """Test position size calculation success."""
         signal = Signal(
+            signal_id="test_signal_8",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME,
@@ -550,6 +574,9 @@ class TestMeanReversionStrategy:
     def test_get_position_size_with_max_limit(self, strategy):
         """Test position size calculation with maximum limit."""
         signal = Signal(
+            signal_id="test_signal_9",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("1.0"),  # Maximum confidence
             timestamp=FIXED_TIME,
@@ -758,6 +785,9 @@ class TestMeanReversionStrategy:
     async def test_validate_signal_old_signal_edge_case(self, strategy):
         """Test signal validation edge case with slightly old signal."""
         signal = Signal(
+            signal_id="test_signal_10",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME - timedelta(minutes=4, seconds=59),  # Just under 5 minutes
@@ -773,6 +803,9 @@ class TestMeanReversionStrategy:
     async def test_validate_signal_entry_below_threshold_edge_case(self, strategy):
         """Test signal validation edge case with z-score exactly at threshold."""
         signal = Signal(
+            signal_id="test_signal_11",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=FIXED_TIME,

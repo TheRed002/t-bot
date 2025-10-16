@@ -123,6 +123,15 @@ def register_data_services(injector: DependencyInjector) -> None:
 
     injector.register_factory("DataService", data_service_factory, singleton=True)
 
+    # Register MLDataService for ML module
+    def ml_data_service_factory():
+        from src.data.services.ml_data_service import MLDataService
+
+        config = _get_config(injector)
+        return MLDataService(config=config)
+
+    injector.register_factory("MLDataService", ml_data_service_factory, singleton=True)
+
     # Register aliases for different service names
     injector.register_factory(
         "data_service", lambda: injector.resolve("DataServiceInterface"), singleton=True
@@ -267,3 +276,8 @@ def get_streaming_data_service(injector: DependencyInjector):
 def get_data_service_registry(injector: DependencyInjector):
     """Get DataServiceRegistry from DI container."""
     return injector.resolve("DataServiceRegistry")
+
+
+def get_ml_data_service(injector: DependencyInjector):
+    """Get MLDataService from DI container."""
+    return injector.resolve("MLDataService")

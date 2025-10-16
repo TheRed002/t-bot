@@ -24,18 +24,15 @@ from src.exchanges.service import ExchangeService
 logger = get_logger(__name__)
 
 
-def register_exchange_dependencies(
-    container: DependencyContainer, config: Config
-) -> None:
+def register_exchange_services(container: DependencyContainer) -> None:
     """
-    Register exchange dependencies in the DI container.
+    Register exchange services in the DI container.
 
     Args:
         container: The dependency injection container
-        config: Application configuration
     """
-    # Register configuration
-    container.register("config", config, singleton=True)
+    # Get config from container (registered as "Config" with capital C)
+    config = container.get("Config")
 
     # Register factory
     def create_exchange_factory():
@@ -89,5 +86,8 @@ def setup_exchange_services(config: Config) -> DependencyContainer:
         DependencyContainer: Configured container with exchange services
     """
     container = DependencyContainer()
-    register_exchange_dependencies(container, config)
+    # Register config first so register_exchange_services can retrieve it
+    # Use "Config" (capital C) to match DI convention
+    container.register("Config", config, singleton=True)
+    register_exchange_services(container)
     return container

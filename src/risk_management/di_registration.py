@@ -163,8 +163,18 @@ def register_risk_management_services(injector: DependencyInjector) -> None:
 
     def risk_service_factory() -> "RiskService":
         try:
-            risk_metrics_repository = injector.resolve("RiskMetricsRepository")
-            portfolio_repository = injector.resolve("PortfolioRepository")
+            # Make repositories optional - they're not always available in all test contexts
+            risk_metrics_repository = (
+                injector.resolve("RiskMetricsRepository")
+                if injector.has_service("RiskMetricsRepository")
+                else None
+            )
+            portfolio_repository = (
+                injector.resolve("PortfolioRepository")
+                if injector.has_service("PortfolioRepository")
+                else None
+            )
+            # StateService is required
             state_service = injector.resolve("StateService")
             # Use interface to avoid circular dependency
             analytics_service = (

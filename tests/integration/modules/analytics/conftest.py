@@ -7,6 +7,9 @@ Provides pytest fixtures for analytics integration tests with full DI support.
 import pytest_asyncio
 
 
+# Note: Infrastructure fixtures are available via tests/integration/conftest.py
+
+
 @pytest_asyncio.fixture
 async def di_container():
     """

@@ -428,7 +428,7 @@ class TestCrossModuleIntegration:
         injector.clear()
 
         try:
-            # Try to import strategy service
+            # Import strategy service - should succeed as module exists
             from src.strategies.service import StrategyService
 
             # Create and configure strategy service
@@ -439,9 +439,9 @@ class TestCrossModuleIntegration:
             assert isinstance(strategy_service, BaseService)
             assert strategy_service.name == "StrategyService"
 
-        except ImportError:
-            # Strategy service module might not be complete
-            pytest.skip("Strategy service not available for integration test")
+        except ImportError as e:
+            # Strategy service should be available
+            pytest.fail(f"Strategy service import failed: {e}")
         finally:
             injector.clear()
 
@@ -453,8 +453,7 @@ class TestCrossModuleIntegration:
         injector.clear()
 
         try:
-            # Try to import database service
-            # Create and configure database service
+            # Import database service - should succeed as module exists
             from unittest.mock import MagicMock
 
             from src.database.service import DatabaseService
@@ -467,9 +466,9 @@ class TestCrossModuleIntegration:
             assert isinstance(db_service, BaseService)
             assert db_service.name == "DatabaseService"
 
-        except (ImportError, Exception):
-            # Database service might have external dependencies
-            pytest.skip("Database service not available for integration test")
+        except (ImportError, Exception) as e:
+            # Database service should be available
+            pytest.fail(f"Database service integration failed: {e}")
         finally:
             injector.clear()
 
@@ -481,14 +480,15 @@ class TestCrossModuleIntegration:
         injector.clear()
 
         try:
-            # Try to import exchange base
+            # Import exchange base - should succeed as module exists
             from src.exchanges.base import BaseExchange
 
             # BaseExchange should inherit from BaseService
             assert issubclass(BaseExchange, BaseService)
 
-        except ImportError:
-            pytest.skip("Exchange service not available for integration test")
+        except ImportError as e:
+            # Exchange service should be available
+            pytest.fail(f"Exchange service import failed: {e}")
         finally:
             injector.clear()
 

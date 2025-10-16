@@ -263,8 +263,10 @@ class TestCapitalAllocatorLines:
         mock_capital_service.get_allocations_by_strategy.return_value = [allocation]
 
         result = await allocator._get_allocation("strategy1", "binance")
-        # Since CapitalAllocation doesn't have an 'exchange' field, this will return None
-        assert result is None
+        # CapitalAllocation does have an 'exchange' field (src/core/types/risk.py:231), so allocation is returned
+        assert result is not None
+        assert result.exchange == "binance"
+        assert result.strategy_id == "strategy1"
 
     # Test _get_allocation not found
     async def test_get_allocation_not_found(self, allocator, mock_capital_service):

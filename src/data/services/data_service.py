@@ -719,6 +719,29 @@ class DataService(BaseComponent):
             self.logger.error(f"Failed to calculate Bollinger Bands for {symbol}: {e}")
             return None
 
+    async def get_atr(
+        self,
+        symbol: str,
+        period: int = 14,
+        exchange: str = DEFAULT_EXCHANGE
+    ) -> Decimal | None:
+        """Calculate ATR (Average True Range) for a symbol.
+
+        Args:
+            symbol: Trading symbol
+            period: ATR period (default 14)
+            exchange: Exchange name
+
+        Returns:
+            ATR value as Decimal or None if insufficient data
+        """
+        try:
+            indicators = self._get_technical_indicators()
+            return await indicators.calculate_atr(symbol, period)
+        except Exception as e:
+            self.logger.error(f"Failed to calculate ATR for {symbol}: {e}")
+            return None
+
     async def health_check(self) -> HealthCheckResult:
         """Perform health check."""
         status = HealthStatus.HEALTHY

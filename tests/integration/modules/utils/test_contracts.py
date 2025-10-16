@@ -30,8 +30,8 @@ from src.utils.validation.service import (
 )
 
 
-@pytest.fixture
-def setup_utils_services():
+@pytest_asyncio.fixture
+async def setup_utils_services():
     """Setup utils services for testing."""
     injector.get_container().clear()
 

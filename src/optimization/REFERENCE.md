@@ -2,7 +2,7 @@
 
 ## INTEGRATION
 **Dependencies**: backtesting, core, database, utils
-**Used By**: strategies
+**Used By**: None
 **Provides**: AnalysisService, BacktestIntegrationService, IAnalysisService, IBacktestIntegrationService, IOptimizationService, OptimizationController, OptimizationEngine, OptimizationService, ParameterSpaceService, ResultTransformationService, ValidationEngine
 **Patterns**: Async Operations, Component Architecture, Service Layer
 

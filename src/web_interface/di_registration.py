@@ -38,15 +38,13 @@ def _register_core_services(injector: DependencyInjector, factory: "WebInterface
         "WebMarketDataService", factory.create_market_data_service, singleton=True
     )
 
-    injector.register_factory("PortfolioService", factory.create_portfolio_service, singleton=True)
+    # NOTE: DO NOT register generic names like "PortfolioService", "RiskService", etc.
+    # These names are reserved for the core modules. Web interface services should only
+    # register with "Web*" prefixed names to avoid conflicts.
     injector.register_factory(
         "WebPortfolioServiceImpl", factory.create_portfolio_service, singleton=True
     )
-
-    injector.register_factory("RiskService", factory.create_risk_service, singleton=True)
     injector.register_factory("WebRiskServiceImpl", factory.create_risk_service, singleton=True)
-
-    injector.register_factory("StrategyService", factory.create_strategy_service, singleton=True)
     injector.register_factory(
         "WebStrategyServiceImpl", factory.create_strategy_service, singleton=True
     )

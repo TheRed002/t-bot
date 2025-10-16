@@ -2,7 +2,7 @@
 
 ## INTEGRATION
 **Dependencies**: core, database, error_handling, monitoring, utils
-**Used By**: strategies
+**Used By**: None
 **Provides**: DataController, DataMonitoringService, DataService, DataStorageManager, EnvironmentAwareDataManager, MLDataService, StreamingDataService
 **Patterns**: Async Operations, Circuit Breaker, Component Architecture, Service Layer
 
@@ -354,13 +354,16 @@
 - `async volume_sma(self, volumes: list[Decimal], period: int = 20) -> Decimal | None` - Line 369
 - `get_calculation_stats(self) -> dict[str, Any]` - Line 379
 - `async calculate_sma(self, symbol: str, period: int) -> Decimal | None` - Line 384
-- `async calculate_rsi(self, symbol: str, period: int) -> Decimal | None` - Line 403
-- `async calculate_momentum(self, symbol: str, period: int) -> Decimal | None` - Line 422
-- `async calculate_volatility(self, symbol: str, period: int) -> Decimal | None` - Line 454
-- `async calculate_volume_ratio(self, symbol: str, period: int) -> Decimal | None` - Line 485
-- `async calculate_atr(self, symbol: str, period: int) -> Decimal | None` - Line 527
-- `async calculate_bollinger_bands(self, symbol: str, period: int = 20, std_dev: Decimal = Any) -> dict[str, Decimal] | None` - Line 574
-- `async cleanup(self) -> None` - Line 616
+- `async calculate_ema(self, symbol: str, period: int) -> Decimal | None` - Line 404
+- `async calculate_macd(self, symbol: str, fast: int = 12, slow: int = 26, signal: int = 9) -> dict[str, Decimal] | None` - Line 425
+- `async calculate_bollinger_bands(self, symbol: str, period: int = 20, std_dev: float = 2.0) -> dict[str, Decimal] | None` - Line 446
+- `async calculate_rsi(self, symbol: str, period: int) -> Decimal | None` - Line 466
+- `async calculate_momentum(self, symbol: str, period: int) -> Decimal | None` - Line 487
+- `async calculate_volatility(self, symbol: str, period: int) -> Decimal | None` - Line 515
+- `async calculate_volume_ratio(self, symbol: str, period: int) -> Decimal | None` - Line 542
+- `async calculate_atr(self, symbol: str, period: int) -> Decimal | None` - Line 580
+- `async calculate_bollinger_bands(self, symbol: str, period: int = 20, std_dev: Decimal = Any) -> dict[str, Decimal] | None` - Line 623
+- `async cleanup(self) -> None` - Line 664
 
 ### Implementation: `AlertCategory` ✅
 
@@ -730,16 +733,25 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async initialize(self) -> None` - Line 94
-- `async store_market_data(self, ...) -> bool` - Line 109
-- `async get_market_data(self, request: DataRequest) -> list[MarketDataRecord]` - Line 330
-- `async get_recent_data(self, ...) -> list[MarketData]` - Line 503
-- `async get_data_count(self, symbol: str, exchange: str = DEFAULT_EXCHANGE) -> int` - Line 540
-- `async get_volatility(self, symbol: str, period: int = 20, exchange: str = DEFAULT_EXCHANGE) -> Decimal | None` - Line 555
-- `async health_check(self) -> HealthCheckResult` - Line 596
-- `async get_metrics(self)` - Line 685
-- `async reset_metrics(self) -> None` - Line 695
-- `async cleanup(self) -> None` - Line 701
+- `async initialize(self) -> None` - Line 97
+- `async store_market_data(self, ...) -> bool` - Line 112
+- `async get_market_data(self, request: DataRequest) -> list[MarketDataRecord]` - Line 335
+- `async get_recent_data(self, ...) -> list[MarketData]` - Line 513
+- `async get_data_count(self, symbol: str, exchange: str = DEFAULT_EXCHANGE) -> int` - Line 550
+- `async get_volatility(self, symbol: str, period: int = 20, exchange: str = DEFAULT_EXCHANGE) -> Decimal | None` - Line 565
+- `async get_rsi(self, symbol: str, period: int = 14, exchange: str = DEFAULT_EXCHANGE) -> Decimal | None` - Line 616
+- `async get_sma(self, symbol: str, period: int = 20, exchange: str = DEFAULT_EXCHANGE) -> Decimal | None` - Line 634
+- `async get_ema(self, symbol: str, period: int = 20, exchange: str = DEFAULT_EXCHANGE) -> Decimal | None` - Line 652
+- `async get_macd(self, ...) -> dict[str, Decimal] | None` - Line 670
+- `async get_bollinger_bands(self, ...) -> dict[str, Decimal] | None` - Line 697
+- `async get_atr(self, symbol: str, period: int = 14, exchange: str = DEFAULT_EXCHANGE) -> Decimal | None` - Line 722
+- `async health_check(self) -> HealthCheckResult` - Line 745
+- `async get_metrics(self)` - Line 834
+- `async reset_metrics(self) -> None` - Line 844
+- `async store_market_data_batch(self, market_data_list: list[MarketData]) -> bool` - Line 850
+- `async aggregate_market_data(self, ...) -> list[MarketData]` - Line 897
+- `async get_market_data_history(self, symbol: str, limit: int = 100, exchange: str = DEFAULT_EXCHANGE) -> list[MarketData]` - Line 976
+- `async cleanup(self) -> None` - Line 1017
 
 ### Implementation: `MLDataService` ✅
 
@@ -1117,8 +1129,8 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `append_batch(self, data: np.ndarray) -> None` - Line 136
-- `get_recent_vectorized(self, n: int) -> np.ndarray` - Line 157
+- `append_batch(self, data: np.ndarray) -> None` - Line 167
+- `get_recent_vectorized(self, n: int) -> np.ndarray` - Line 188
 
 ### Implementation: `IndicatorCache` ✅
 
@@ -1126,9 +1138,9 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `is_valid(self, key: str) -> bool` - Line 185
-- `get(self, key: str) -> np.ndarray | None` - Line 189
-- `set(self, key: str, value: np.ndarray) -> None` - Line 196
+- `is_valid(self, key: str) -> bool` - Line 216
+- `get(self, key: str) -> np.ndarray | None` - Line 220
+- `set(self, key: str, value: np.ndarray) -> None` - Line 227
 
 ### Implementation: `VectorizedProcessor` ✅
 
@@ -1136,10 +1148,10 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async process_market_data_batch(self, market_data: list[dict[str, Any]]) -> dict[str, np.ndarray]` - Line 278
-- `calculate_real_time_indicators(self, current_price: Decimal) -> dict[str, Decimal]` - Line 418
-- `get_performance_metrics(self) -> dict[str, Any]` - Line 489
-- `cleanup(self) -> None` - Line 506
+- `async process_market_data_batch(self, market_data: list[dict[str, Any]]) -> dict[str, np.ndarray]` - Line 309
+- `calculate_real_time_indicators(self, current_price: Decimal) -> dict[str, Decimal]` - Line 449
+- `get_performance_metrics(self) -> dict[str, Any]` - Line 520
+- `cleanup(self) -> None` - Line 537
 
 ## COMPLETE API REFERENCE
 
@@ -1290,18 +1302,19 @@ class DataController(BaseComponent):
 def _resolve_optional_dependency(injector: DependencyInjector, service_name: str, default_factory = None)  # Line 22
 def _get_config(injector: DependencyInjector)  # Line 35
 def register_data_services(injector: DependencyInjector) -> None  # Line 47
-def configure_data_dependencies(injector: DependencyInjector | None = None) -> DependencyInjector  # Line 196
-def get_data_service(injector: DependencyInjector) -> 'DataServiceInterface'  # Line 217
-def get_data_storage(injector: DependencyInjector) -> 'DataStorageInterface'  # Line 222
-def get_data_cache(injector: DependencyInjector) -> 'DataCacheInterface'  # Line 227
-def get_data_validator(injector: DependencyInjector) -> 'DataValidatorInterface'  # Line 232
-def get_market_data_source(injector: DependencyInjector) -> 'MarketDataSource'  # Line 237
-def get_vectorized_processor(injector: DependencyInjector) -> 'VectorizedProcessor'  # Line 242
-def get_service_data_validator(injector: DependencyInjector)  # Line 247
-def get_data_service_factory(injector: DependencyInjector)  # Line 252
-def get_data_pipeline_ingestion(injector: DependencyInjector)  # Line 257
-def get_streaming_data_service(injector: DependencyInjector)  # Line 262
-def get_data_service_registry(injector: DependencyInjector)  # Line 267
+def configure_data_dependencies(injector: DependencyInjector | None = None) -> DependencyInjector  # Line 205
+def get_data_service(injector: DependencyInjector) -> 'DataServiceInterface'  # Line 226
+def get_data_storage(injector: DependencyInjector) -> 'DataStorageInterface'  # Line 231
+def get_data_cache(injector: DependencyInjector) -> 'DataCacheInterface'  # Line 236
+def get_data_validator(injector: DependencyInjector) -> 'DataValidatorInterface'  # Line 241
+def get_market_data_source(injector: DependencyInjector) -> 'MarketDataSource'  # Line 246
+def get_vectorized_processor(injector: DependencyInjector) -> 'VectorizedProcessor'  # Line 251
+def get_service_data_validator(injector: DependencyInjector)  # Line 256
+def get_data_service_factory(injector: DependencyInjector)  # Line 261
+def get_data_pipeline_ingestion(injector: DependencyInjector)  # Line 266
+def get_streaming_data_service(injector: DependencyInjector)  # Line 271
+def get_data_service_registry(injector: DependencyInjector)  # Line 276
+def get_ml_data_service(injector: DependencyInjector)  # Line 281
 ```
 
 ### File: environment_integration.py
@@ -1734,16 +1747,19 @@ class TechnicalIndicators(BaseComponent):
     async def volume_sma(self, volumes: list[Decimal], period: int = 20) -> Decimal | None  # Line 369
     def get_calculation_stats(self) -> dict[str, Any]  # Line 379
     async def calculate_sma(self, symbol: str, period: int) -> Decimal | None  # Line 384
-    async def calculate_rsi(self, symbol: str, period: int) -> Decimal | None  # Line 403
-    async def calculate_momentum(self, symbol: str, period: int) -> Decimal | None  # Line 422
-    async def calculate_volatility(self, symbol: str, period: int) -> Decimal | None  # Line 454
-    async def calculate_volume_ratio(self, symbol: str, period: int) -> Decimal | None  # Line 485
-    async def calculate_atr(self, symbol: str, period: int) -> Decimal | None  # Line 527
-    async def calculate_bollinger_bands(self, symbol: str, period: int = 20, std_dev: Decimal = Any) -> dict[str, Decimal] | None  # Line 574
-    async def _get_price_data(self, symbol: str, limit: int) -> list[Any] | None  # Line 595
-    async def cleanup(self) -> None  # Line 616
-    def __str__(self) -> str  # Line 628
-    def __repr__(self) -> str  # Line 639
+    async def calculate_ema(self, symbol: str, period: int) -> Decimal | None  # Line 404
+    async def calculate_macd(self, symbol: str, fast: int = 12, slow: int = 26, signal: int = 9) -> dict[str, Decimal] | None  # Line 425
+    async def calculate_bollinger_bands(self, symbol: str, period: int = 20, std_dev: float = 2.0) -> dict[str, Decimal] | None  # Line 446
+    async def calculate_rsi(self, symbol: str, period: int) -> Decimal | None  # Line 466
+    async def calculate_momentum(self, symbol: str, period: int) -> Decimal | None  # Line 487
+    async def calculate_volatility(self, symbol: str, period: int) -> Decimal | None  # Line 515
+    async def calculate_volume_ratio(self, symbol: str, period: int) -> Decimal | None  # Line 542
+    async def calculate_atr(self, symbol: str, period: int) -> Decimal | None  # Line 580
+    async def calculate_bollinger_bands(self, symbol: str, period: int = 20, std_dev: Decimal = Any) -> dict[str, Decimal] | None  # Line 623
+    async def _get_price_data(self, symbol: str, limit: int) -> list[Any] | None  # Line 643
+    async def cleanup(self) -> None  # Line 664
+    def __str__(self) -> str  # Line 676
+    def __repr__(self) -> str  # Line 687
 ```
 
 ### File: data_monitor.py
@@ -2462,28 +2478,38 @@ class ServiceRegistry(BaseComponent, Generic[ServiceType]):
 ```python
 class DataService(BaseComponent):
     def __init__(self, ...)  # Line 58
-    async def initialize(self) -> None  # Line 94
-    async def store_market_data(self, ...) -> bool  # Line 109
-    def _validate_market_data(self, data_list: list[MarketData], processing_mode: str = 'stream') -> list[MarketData]  # Line 193
-    def _transform_to_db_records(self, ...) -> list[MarketDataRecord]  # Line 213
-    def _apply_consistent_data_transformation(self, data: MarketData, processing_mode: str) -> MarketData  # Line 261
-    def _align_processing_paradigm(self, processing_mode: str, data_count: int) -> str  # Line 292
-    async def _store_to_database(self, records: list[MarketDataRecord], processing_mode: str = 'stream') -> None  # Line 305
-    async def _update_l1_cache(self, data_list: list[MarketData]) -> None  # Line 319
-    async def get_market_data(self, request: DataRequest) -> list[MarketDataRecord]  # Line 330
-    def _get_from_l1_cache(self, request: DataRequest) -> list[MarketDataRecord] | None  # Line 381
-    async def _get_from_l2_cache(self, request: DataRequest) -> list[MarketDataRecord] | None  # Line 400
-    async def _get_from_database(self, request: DataRequest) -> list[MarketDataRecord]  # Line 418
-    async def _cache_data(self, request: DataRequest, data: list[MarketDataRecord]) -> None  # Line 450
-    def _build_cache_key(self, request: DataRequest) -> str  # Line 486
-    async def get_recent_data(self, ...) -> list[MarketData]  # Line 503
-    async def get_data_count(self, symbol: str, exchange: str = DEFAULT_EXCHANGE) -> int  # Line 540
-    async def get_volatility(self, symbol: str, period: int = 20, exchange: str = DEFAULT_EXCHANGE) -> Decimal | None  # Line 555
-    async def health_check(self) -> HealthCheckResult  # Line 596
-    def _validate_data_to_database_boundary(self, data_list: list[MarketData], processing_mode: str) -> None  # Line 644
-    async def get_metrics(self)  # Line 685
-    async def reset_metrics(self) -> None  # Line 695
-    async def cleanup(self) -> None  # Line 701
+    async def initialize(self) -> None  # Line 97
+    async def store_market_data(self, ...) -> bool  # Line 112
+    def _validate_market_data(self, data_list: list[MarketData], processing_mode: str = 'stream') -> list[MarketData]  # Line 196
+    def _transform_to_db_records(self, ...) -> list[MarketDataRecord]  # Line 218
+    def _apply_consistent_data_transformation(self, data: MarketData, processing_mode: str) -> MarketData  # Line 266
+    def _align_processing_paradigm(self, processing_mode: str, data_count: int) -> str  # Line 297
+    async def _store_to_database(self, records: list[MarketDataRecord], processing_mode: str = 'stream') -> None  # Line 310
+    async def _update_l1_cache(self, data_list: list[MarketData]) -> None  # Line 324
+    async def get_market_data(self, request: DataRequest) -> list[MarketDataRecord]  # Line 335
+    def _get_from_l1_cache(self, request: DataRequest) -> list[MarketDataRecord] | None  # Line 386
+    async def _get_from_l2_cache(self, request: DataRequest) -> list[MarketDataRecord] | None  # Line 405
+    async def _get_from_database(self, request: DataRequest) -> list[MarketDataRecord]  # Line 423
+    async def _cache_data(self, request: DataRequest, data: list[MarketDataRecord]) -> None  # Line 460
+    def _build_cache_key(self, request: DataRequest) -> str  # Line 496
+    async def get_recent_data(self, ...) -> list[MarketData]  # Line 513
+    async def get_data_count(self, symbol: str, exchange: str = DEFAULT_EXCHANGE) -> int  # Line 550
+    async def get_volatility(self, symbol: str, period: int = 20, exchange: str = DEFAULT_EXCHANGE) -> Decimal | None  # Line 565
+    def _get_technical_indicators(self)  # Line 606
+    async def get_rsi(self, symbol: str, period: int = 14, exchange: str = DEFAULT_EXCHANGE) -> Decimal | None  # Line 616
+    async def get_sma(self, symbol: str, period: int = 20, exchange: str = DEFAULT_EXCHANGE) -> Decimal | None  # Line 634
+    async def get_ema(self, symbol: str, period: int = 20, exchange: str = DEFAULT_EXCHANGE) -> Decimal | None  # Line 652
+    async def get_macd(self, ...) -> dict[str, Decimal] | None  # Line 670
+    async def get_bollinger_bands(self, ...) -> dict[str, Decimal] | None  # Line 697
+    async def get_atr(self, symbol: str, period: int = 14, exchange: str = DEFAULT_EXCHANGE) -> Decimal | None  # Line 722
+    async def health_check(self) -> HealthCheckResult  # Line 745
+    def _validate_data_to_database_boundary(self, data_list: list[MarketData], processing_mode: str) -> None  # Line 793
+    async def get_metrics(self)  # Line 834
+    async def reset_metrics(self) -> None  # Line 844
+    async def store_market_data_batch(self, market_data_list: list[MarketData]) -> bool  # Line 850
+    async def aggregate_market_data(self, ...) -> list[MarketData]  # Line 897
+    async def get_market_data_history(self, symbol: str, limit: int = 100, exchange: str = DEFAULT_EXCHANGE) -> list[MarketData]  # Line 976
+    async def cleanup(self) -> None  # Line 1017
 ```
 
 ### File: ml_data_service.py
@@ -3144,10 +3170,10 @@ class SchemaValidator(BaseRecordValidator):
 
 ```python
 class HighPerformanceDataBuffer:
-    def __init__(self, size: int = 100000, num_fields: int = 8) -> None  # Line 93
-    def _setup_memory_map(self) -> None  # Line 120
-    def append_batch(self, data: np.ndarray) -> None  # Line 136
-    def get_recent_vectorized(self, n: int) -> np.ndarray  # Line 157
+    def __init__(self, size: int = 100000, num_fields: int = 8) -> None  # Line 124
+    def _setup_memory_map(self) -> None  # Line 151
+    def append_batch(self, data: np.ndarray) -> None  # Line 167
+    def get_recent_vectorized(self, n: int) -> np.ndarray  # Line 188
 ```
 
 #### Class: `IndicatorCache`
@@ -3156,10 +3182,10 @@ class HighPerformanceDataBuffer:
 
 ```python
 class IndicatorCache:
-    def __post_init__(self) -> None  # Line 182
-    def is_valid(self, key: str) -> bool  # Line 185
-    def get(self, key: str) -> np.ndarray | None  # Line 189
-    def set(self, key: str, value: np.ndarray) -> None  # Line 196
+    def __post_init__(self) -> None  # Line 213
+    def is_valid(self, key: str) -> bool  # Line 216
+    def get(self, key: str) -> np.ndarray | None  # Line 220
+    def set(self, key: str, value: np.ndarray) -> None  # Line 227
 ```
 
 #### Class: `VectorizedProcessor`
@@ -3168,22 +3194,21 @@ class IndicatorCache:
 
 ```python
 class VectorizedProcessor:
-    def __init__(self, ...) -> None  # Line 215
-    async def process_market_data_batch(self, market_data: list[dict[str, Any]]) -> dict[str, np.ndarray]  # Line 278
-    def _convert_to_numpy(self, market_data: list[dict[str, Any]]) -> np.ndarray  # Line 338
-    async def _calculate_indicators_parallel(self, prices: np.ndarray, volumes: np.ndarray) -> dict[str, np.ndarray]  # Line 359
-    def calculate_real_time_indicators(self, current_price: Decimal) -> dict[str, Decimal]  # Line 418
-    def _update_metrics(self, batch_size: int, processing_time_us: float) -> None  # Line 465
-    def get_performance_metrics(self) -> dict[str, Any]  # Line 489
-    def cleanup(self) -> None  # Line 506
+    def __init__(self, ...) -> None  # Line 246
+    async def process_market_data_batch(self, market_data: list[dict[str, Any]]) -> dict[str, np.ndarray]  # Line 309
+    def _convert_to_numpy(self, market_data: list[dict[str, Any]]) -> np.ndarray  # Line 369
+    async def _calculate_indicators_parallel(self, prices: np.ndarray, volumes: np.ndarray) -> dict[str, np.ndarray]  # Line 390
+    def calculate_real_time_indicators(self, current_price: Decimal) -> dict[str, Decimal]  # Line 449
+    def _update_metrics(self, batch_size: int, processing_time_us: float) -> None  # Line 496
+    def get_performance_metrics(self) -> dict[str, Any]  # Line 520
+    def cleanup(self) -> None  # Line 537
 ```
 
 #### Functions:
 
 ```python
-def fast_ema_weight(price: float, alpha: float) -> float  # Line 51
-def calculate_volume_profile_vectorized(prices: np.ndarray, volumes: np.ndarray, num_bins: int = 50) -> tuple[np.ndarray, np.ndarray]  # Line 65
-def benchmark_vectorized_vs_sequential(prices: np.ndarray, iterations: int = 1000) -> dict[str, float]  # Line 541
+def calculate_volume_profile_vectorized(prices: np.ndarray, volumes: np.ndarray, num_bins: int = 50) -> tuple[np.ndarray, np.ndarray]  # Line 96
+def benchmark_vectorized_vs_sequential(prices: np.ndarray, iterations: int = 1000) -> dict[str, float]  # Line 572
 ```
 
 ---

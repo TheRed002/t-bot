@@ -295,7 +295,7 @@ class DatabaseService(BaseService, DatabaseServiceInterface):
                 source_module="database",
                 target_module="error_handling",
                 method=PropagationMethod.DIRECT_CALL,
-                stage=ProcessingStage.ERROR_PROPAGATION
+                stage=ProcessingStage.ERROR_ESCALATION
             )
 
             # Validate boundary data before propagation
@@ -506,7 +506,7 @@ class DatabaseService(BaseService, DatabaseServiceInterface):
                 source_module="database",
                 target_module="error_handling",
                 method=PropagationMethod.DIRECT_CALL,
-                stage=ProcessingStage.ERROR_PROPAGATION
+                stage=ProcessingStage.ERROR_ESCALATION
             )
 
             # Validate boundary data before propagation

@@ -124,8 +124,15 @@ class AuthManager(BaseComponent):
 
     def _start_cleanup_tasks(self) -> None:
         """Start background cleanup tasks."""
-        # Start session cleanup task
-        asyncio.create_task(self._cleanup_expired_sessions())
+        # Only start cleanup tasks if there's a running event loop
+        try:
+            loop = asyncio.get_running_loop()
+            # Start session cleanup task
+            asyncio.create_task(self._cleanup_expired_sessions())
+        except RuntimeError:
+            # No running event loop - cleanup tasks will not run
+            # This is normal in test environments without async context
+            pass
 
     async def authenticate(
         self, credentials: dict[str, Any], provider_type: str | None = None

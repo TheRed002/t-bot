@@ -8,6 +8,7 @@ and uses ValidationService correctly through dependency injection.
 from decimal import Decimal
 
 import pytest
+import pytest_asyncio
 
 from src.core.dependency_injection import DependencyInjector
 from src.core.types import OrderRequest, OrderSide, OrderType
@@ -16,7 +17,7 @@ from src.utils.exchange_validation_utils import get_exchange_validation_utils
 from src.utils.service_registry import register_util_services
 
 
-@pytest.fixture(autouse=True)
+@pytest_asyncio.fixture(autouse=True)
 def setup_utils_services():
     """Setup utils services for each test."""
     from src.core.dependency_injection import get_global_injector
@@ -38,14 +39,14 @@ def setup_utils_services():
     # Don't cleanup - let other tests use the services
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 def injector():
     """Create a fresh dependency injector for each test."""
     injector = DependencyInjector()
     return injector
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 def sample_order():
     """Create a sample valid order for testing."""
     return OrderRequest(
@@ -57,7 +58,7 @@ def sample_order():
     )
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 def invalid_order():
     """Create an invalid order for testing."""
     return OrderRequest(

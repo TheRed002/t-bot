@@ -64,7 +64,7 @@ class WebInterfaceFactory(BaseComponent):
                 # Try to get existing registry from injector
                 try:
                     self._service_registry = self._injector.resolve("ServiceRegistry")
-                    logger.info("Resolved ServiceRegistry from injector")
+                    logger.debug("Resolved ServiceRegistry from injector")
                 except Exception:
                     # Create new registry
                     self._service_registry = ServiceRegistry()
@@ -188,7 +188,7 @@ class WebInterfaceFactory(BaseComponent):
                 # RiskFacade is optional
                 pass
 
-        service = WebRiskService(risk_facade=risk_facade)
+        service = WebRiskService(risk_service=risk_facade)
 
         # Configure dependencies if service supports it
         if hasattr(service, "configure_dependencies") and self._injector:
@@ -232,6 +232,13 @@ class WebInterfaceFactory(BaseComponent):
             def __init__(self, data_service=None):
                 self.data_service = data_service
 
+            def configure_dependencies(self, injector):
+                """Configure dependencies from injector."""
+                try:
+                    self.data_service = injector.resolve("DataService")
+                except Exception:
+                    pass
+
             async def initialize(self):
                 pass
 
@@ -251,6 +258,29 @@ class WebInterfaceFactory(BaseComponent):
                     "volume_24h": Decimal("1000000.00"),
                     "timestamp": datetime.now(timezone.utc),
                 }
+
+            async def get_ticker(self, symbol: str):
+                """Get ticker data for symbol."""
+                from datetime import datetime, timezone
+                from decimal import Decimal
+                from src.core.types.market import Ticker
+
+                return Ticker(
+                    symbol=symbol,
+                    bid_price=Decimal("44995.00"),
+                    bid_quantity=Decimal("10"),
+                    ask_price=Decimal("45005.00"),
+                    ask_quantity=Decimal("10"),
+                    last_price=Decimal("45000.00"),
+                    last_quantity=Decimal("1"),
+                    open_price=Decimal("45000.00"),
+                    high_price=Decimal("46000.00"),
+                    low_price=Decimal("44000.00"),
+                    volume=Decimal("1000"),
+                    quote_volume=Decimal("45000000.00"),
+                    timestamp=datetime.now(timezone.utc),
+                    exchange="binance",
+                )
 
         service = MockMarketDataService(data_service=data_service)
 

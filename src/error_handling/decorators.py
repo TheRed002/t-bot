@@ -196,9 +196,13 @@ def error_handler(
 def _should_circuit_break(func_name: str, config: CircuitBreakerConfig) -> bool:
     """Check if circuit breaker should be open."""
     error_count = _error_counts.get(func_name, 0)
-    last_failure_time = _last_failure_times.get(func_name, 0)
+    last_failure_time = _last_failure_times.get(func_name)
 
     if error_count >= config.failure_threshold:
+        # If no last failure time recorded, circuit should be open
+        if last_failure_time is None:
+            return True
+
         # Check if recovery timeout has elapsed
         if time.time() - last_failure_time < config.recovery_timeout:
             return True
@@ -394,6 +398,7 @@ def shutdown_all_error_handlers() -> None:
     _active_handlers.clear()
     _error_counts.clear()
     _circuit_breakers.clear()
+    _last_failure_times.clear()
 
 
 # Backward compatibility aliases

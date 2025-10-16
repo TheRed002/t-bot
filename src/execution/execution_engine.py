@@ -544,11 +544,21 @@ class ExecutionEngine(BaseComponent, ExecutionEngineServiceInterface):
                 )
             )
 
+            # Generate unique signal ID
+            import uuid
+            signal_id = f"exec_signal_{uuid.uuid4().hex[:12]}"
+            strategy_id_value = strategy_name or "execution_engine"
+            strategy_name_value = strategy_name or "ExecutionEngine"
+
             trading_signal = Signal(
+                signal_id=signal_id,
+                strategy_id=strategy_id_value,
+                strategy_name=strategy_name_value,
                 symbol=instruction.order.symbol,
                 direction=signal_direction,
                 strength=validation_results.get("risk_score", 50.0)
                 / 100.0,  # confidence as strength
+                confidence=Decimal(str(validation_results.get("risk_score", 50.0) / 100.0)),
                 timestamp=datetime.now(timezone.utc),
                 source="ExecutionEngine",
                 metadata={

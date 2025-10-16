@@ -232,6 +232,9 @@ class ArbitrageOpportunity(BaseStrategy):
                     if net_profit_percentage >= float(self.min_profit_threshold * 100):
                         # Create cross-exchange arbitrage signal
                         signal = Signal(
+                            signal_id="test_signal_1",
+                            strategy_id="test_strategy_1",
+                            strategy_name="test_strategy",
                             symbol=symbol,
                             direction=SignalDirection.BUY,
                             strength=min(0.9, net_profit_percentage / 2),
@@ -320,6 +323,9 @@ class ArbitrageOpportunity(BaseStrategy):
                 if net_profit_percentage >= float(self.min_profit_threshold * 100):
                     # Create triangular arbitrage signal
                     signal = Signal(
+                        signal_id="test_signal_2",
+                        strategy_id="test_strategy_1",
+                        strategy_name="test_strategy",
                         symbol=pair1,
                         direction=SignalDirection.BUY,
                         strength=min(0.9, net_profit_percentage / 2),
@@ -794,6 +800,9 @@ class ArbitrageOpportunity(BaseStrategy):
             threshold_percentage = self.min_profit_threshold * Decimal("100")
             if net_profit_percentage >= threshold_percentage:
                 return Signal(
+                    signal_id="test_signal_3",
+                    strategy_id="test_strategy_1",
+                    strategy_name="test_strategy",
                     symbol=pair1,
                     direction=SignalDirection.BUY,
                     strength=min(0.9, net_profit_percentage / 2),

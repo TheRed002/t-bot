@@ -18,7 +18,7 @@ from src.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session")
 def test_config():
     """Create test configuration for web interface."""
     config = Config()
@@ -39,13 +39,13 @@ def test_config():
     return config
 
 
-@pytest.fixture(scope="session")
-def real_app(test_config):
+@pytest_asyncio.fixture(scope="function")
+async def web_interface_app(test_config):
     """
     Create REAL FastAPI application with all real services.
     NO MOCKS - uses actual DI container with real services.
 
-    Using direct FastAPI creation without lifespan for testing.
+    Using function scope to ensure proper cleanup between tests.
     """
     from fastapi import FastAPI
     from fastapi.middleware.cors import CORSMiddleware
@@ -96,28 +96,35 @@ def real_app(test_config):
     except Exception as e:
         logger.warning(f"Monitoring setup skipped in tests: {e}")
 
-    return app
+    yield app
+
+    # Cleanup: Properly teardown any background tasks
+    try:
+        # FastAPI cleanup - no explicit cleanup needed for sync app
+        pass
+    except Exception as e:
+        logger.warning(f"App cleanup warning: {e}")
 
 
-@pytest.fixture
-def test_client(real_app):
-    """Create synchronous test client for FastAPI app."""
-    with TestClient(real_app) as client:
+@pytest_asyncio.fixture
+async def web_interface_client(web_interface_app):
+    """Create synchronous test client for FastAPI app - web_interface module specific."""
+    with TestClient(web_interface_app) as client:
         yield client
 
 
 @pytest_asyncio.fixture
-async def async_test_client(real_app):
-    """Create async test client for FastAPI app."""
-    async with AsyncClient(app=real_app, base_url="http://test") as client:
+async def web_interface_async_client(web_interface_app):
+    """Create async test client for FastAPI app - web_interface module specific."""
+    async with AsyncClient(app=web_interface_app, base_url="http://test") as client:
         yield client
 
 
 @pytest_asyncio.fixture
-async def authenticated_client(test_client, test_user):
-    """Create authenticated test client with valid JWT token."""
+async def web_interface_authenticated_client(web_interface_client, test_user):
+    """Create authenticated test client with valid JWT token - web_interface module specific."""
     # Login to get real JWT token
-    response = test_client.post(
+    response = web_interface_client.post(
         "/api/auth/login",
         json={"username": test_user["username"], "password": test_user["password"]},
     )
@@ -135,7 +142,7 @@ async def authenticated_client(test_client, test_user):
         )
 
         # Login again
-        response = test_client.post(
+        response = web_interface_client.post(
             "/api/auth/login",
             json={"username": test_user["username"], "password": test_user["password"]},
         )
@@ -143,16 +150,16 @@ async def authenticated_client(test_client, test_user):
         token = token_data.get("access_token")
 
     # Add authorization header to client
-    test_client.headers.update({"Authorization": f"Bearer {token}"})
+    web_interface_client.headers.update({"Authorization": f"Bearer {token}"})
 
-    yield test_client
+    yield web_interface_client
 
 
 @pytest_asyncio.fixture
-async def admin_client(test_client, admin_user):
-    """Create admin authenticated test client with valid JWT token."""
+async def web_interface_admin_client(web_interface_client, admin_user):
+    """Create admin authenticated test client with valid JWT token - web_interface module specific."""
     # Login to get real JWT token
-    response = test_client.post(
+    response = web_interface_client.post(
         "/api/auth/login",
         json={"username": admin_user["username"], "password": admin_user["password"]},
     )
@@ -173,7 +180,7 @@ async def admin_client(test_client, admin_user):
         )
 
         # Login again
-        response = test_client.post(
+        response = web_interface_client.post(
             "/api/auth/login",
             json={"username": admin_user["username"], "password": admin_user["password"]},
         )
@@ -181,12 +188,12 @@ async def admin_client(test_client, admin_user):
         token = token_data.get("access_token")
 
     # Add authorization header to client
-    test_client.headers.update({"Authorization": f"Bearer {token}"})
+    web_interface_client.headers.update({"Authorization": f"Bearer {token}"})
 
-    yield test_client
+    yield web_interface_client
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 def test_user():
     """Test user credentials."""
     return {
@@ -197,7 +204,7 @@ def test_user():
     }
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 def admin_user():
     """Admin user credentials."""
     return {
@@ -208,7 +215,7 @@ def admin_user():
     }
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 def auth_headers(test_user):
     """
     Create authentication headers with mock token for endpoints that don't validate.
@@ -217,7 +224,7 @@ def auth_headers(test_user):
     return {"Authorization": "Bearer test_jwt_token"}
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 def admin_headers(admin_user):
     """
     Create admin authentication headers with mock token.
@@ -289,7 +296,7 @@ async def real_market_data_service(clean_database):
     yield service
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 def sample_bot_config():
     """Sample bot configuration for testing."""
     return {
@@ -303,7 +310,7 @@ def sample_bot_config():
     }
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 def sample_order_request():
     """Sample order request for testing."""
     return {
@@ -317,7 +324,7 @@ def sample_order_request():
     }
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 def sample_portfolio_data():
     """Sample portfolio data for testing."""
     return {
@@ -344,7 +351,7 @@ def sample_portfolio_data():
     }
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 def sample_risk_metrics():
     """Sample risk metrics for testing."""
     return {
@@ -359,8 +366,8 @@ def sample_risk_metrics():
 
 
 @pytest_asyncio.fixture
-async def websocket_test_context(real_app):
-    """Context for WebSocket testing."""
+async def websocket_test_context(web_interface_app):
+    """Context for WebSocket testing - web_interface module specific."""
     from src.web_interface.websockets import get_unified_websocket_manager
 
     ws_manager = get_unified_websocket_manager()
@@ -374,7 +381,7 @@ async def websocket_test_context(real_app):
     # Cleanup handled by app lifespan
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 def api_endpoints():
     """List of API endpoints for testing."""
     return {
@@ -416,7 +423,7 @@ def api_endpoints():
     }
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 def expected_response_schemas():
     """Expected response schemas for validation."""
     return {

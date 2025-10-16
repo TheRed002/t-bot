@@ -136,17 +136,23 @@ class TestDataQualityIntegration:
     @pytest.fixture
     def sample_signals(self) -> list[Signal]:
         """Create sample signals for testing"""
+        from uuid import uuid4
+
         base_time = datetime.now(timezone.utc)
         signals = []
 
         for i in range(10):
+            strategy_name = f"test_strategy_{i % 3}"
             signals.append(
                 Signal(
+                    signal_id=str(uuid4()),
+                    strategy_id=str(uuid4()),
+                    strategy_name=strategy_name,
                     direction=SignalDirection.BUY if i % 2 == 0 else SignalDirection.SELL,
                     strength=Decimal(str(0.7 + (i * 0.02))),
                     timestamp=base_time + timedelta(seconds=i),
                     symbol="BTC/USDT",
-                    source=f"test_strategy_{i % 3}",
+                    source=strategy_name,
                 )
             )
 

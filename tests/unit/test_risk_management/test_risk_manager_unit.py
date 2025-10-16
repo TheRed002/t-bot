@@ -44,6 +44,9 @@ class TestRiskManager:
     def sample_signal(self):
         """Create a sample trading signal."""
         return Signal(
+            signal_id="test_signal_1",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             strength=0.8,
@@ -129,6 +132,9 @@ class TestRiskManager:
         available_capital = Decimal("10000")
         current_price = Decimal("50000")
         invalid_signal = Signal(
+            signal_id="test_signal_2",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             strength=0.0,
@@ -152,6 +158,9 @@ class TestRiskManager:
     async def test_validate_signal_invalid_confidence(self, risk_manager):
         """Test signal validation with invalid confidence."""
         invalid_signal = Signal(
+            signal_id="test_signal_3",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             strength=0.2,  # Below 0.3 threshold
@@ -169,6 +178,9 @@ class TestRiskManager:
         risk_manager.current_risk_level = RiskLevel.CRITICAL
 
         valid_signal = Signal(
+            signal_id="test_signal_4",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             strength=0.8,

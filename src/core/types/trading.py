@@ -101,9 +101,13 @@ class TradeState(Enum):
 class Signal(BaseModel):
     """Trading signal with direction and metadata - consistent validation patterns."""
 
+    signal_id: str
+    strategy_id: str
+    strategy_name: str
     symbol: str
     direction: SignalDirection
     strength: Decimal = Field(ge=Decimal("0"), le=Decimal("1"))
+    confidence: Decimal = Field(default=Decimal("0.5"), ge=Decimal("0"), le=Decimal("1"))
     timestamp: datetime
     source: str
     metadata: dict[str, Any] = Field(default_factory=dict)

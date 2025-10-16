@@ -240,6 +240,7 @@ class BotCoordinationService(BaseService, IBotCoordinationService):
                 "side": side.value if hasattr(side, 'value') else str(side),
                 "quantity": str(quantity),
                 "risk_level": "low",
+                "allowed": True,  # Default to allowed
                 "warnings": [],
                 "recommendations": [],
                 "total_exposure": Decimal("0"),

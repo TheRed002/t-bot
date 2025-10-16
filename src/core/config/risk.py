@@ -220,6 +220,17 @@ class RiskConfig(BaseConfig):
         default=Decimal("3000"), description="Emergency stop trading threshold"
     )
 
+    # Emergency controls (P-009)
+    emergency_close_positions: bool = Field(
+        default=True, description="Close all positions during emergency stop"
+    )
+    emergency_recovery_timeout_hours: int = Field(
+        default=1, ge=1, le=24, description="Recovery timeout in hours after emergency stop"
+    )
+    emergency_manual_override_enabled: bool = Field(
+        default=True, description="Enable manual override for emergency controls"
+    )
+
     @field_validator("position_sizing_method")
     @classmethod
     def validate_sizing_method(cls, v: str) -> str:

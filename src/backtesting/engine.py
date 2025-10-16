@@ -683,6 +683,9 @@ class BacktestEngine:
             current_time_with_tz = ensure_utc_timezone(self._current_time)
 
             sizing_signal = CoreSignal(
+                signal_id=f"backtest_signal_{symbol}_{current_time_with_tz.timestamp()}",
+                strategy_id=self.strategy.strategy_id if hasattr(self.strategy, 'strategy_id') else "backtest_strategy",
+                strategy_name=self.strategy.name if hasattr(self.strategy, 'name') else "backtest",
                 symbol=symbol,
                 direction=signal,
                 strength=to_decimal("0.8"),

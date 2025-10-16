@@ -768,12 +768,13 @@ class BoundaryValidator:
             "async",
             "batch",
             "stream",
+            "request_reply",
         ]:
             raise ValidationError(
                 f"Invalid processing_mode: {data.get('processing_mode')}",
                 field_name="processing_mode",
                 field_value=data.get("processing_mode"),
-                validation_rule="must be one of sync, async, batch, stream",
+                validation_rule="must be one of sync, async, batch, stream, request_reply",
             )
 
         # Ensure consistent message patterns across module boundaries (prefer pub_sub for consistency)
@@ -873,7 +874,7 @@ class BoundaryValidator:
                 f"Invalid processing_mode: {data.get('processing_mode')}",
                 field_name="processing_mode",
                 field_value=data.get("processing_mode"),
-                validation_rule="must be one of sync, async, batch, stream",
+                validation_rule="must be one of sync, async, batch, stream, request_reply",
             )
 
         # Ensure consistent message patterns across module boundaries (prefer pub_sub for consistency)

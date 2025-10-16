@@ -39,74 +39,107 @@ def register_ml_services(container: "DependencyContainer", config: ConfigDict) -
         container: The DI container instance
         config: Application configuration
     """
+    # Convert Config object to dict if needed (for Pydantic Config objects)
+    if hasattr(config, 'model_dump'):
+        config_dict = config.model_dump()
+    elif hasattr(config, 'to_dict'):
+        config_dict = config.to_dict()
+    elif hasattr(config, 'dict'):
+        config_dict = config.dict()
+    else:
+        config_dict = config
+
+    # Create a minimal injector wrapper for dependency resolution
+    # Services need an object with a resolve() method, not just a container with get()
+    class InjectorWrapper:
+        def __init__(self, container):
+            self._container = container
+
+        def resolve(self, name: str):
+            """Resolve a dependency by name."""
+            return self._container.get(name)
+
+    injector = InjectorWrapper(container)
+
     # Register ML repository as singleton (uses DataService internally)
     def create_ml_repository():
-        return MLRepository(config=config)
+        return MLRepository(config=config_dict)
     container.register("MLRepository", create_ml_repository, singleton=True)
 
     # Register model factory as singleton
     def create_model_factory():
-        factory = ModelFactory(config=config)
-        factory.set_container(container)  # Inject container for dependency resolution
+        factory = ModelFactory(config=config_dict)
+        if hasattr(factory, 'configure_dependencies'):
+            factory.configure_dependencies(container)  # Inject container for dependency resolution
         return factory
     container.register("ModelFactory", create_model_factory, singleton=True)
 
     # Register cache service as singleton (stateful)
     def create_model_cache_service():
-        return ModelCacheService(config=config)
+        service = ModelCacheService(config=config_dict)
+        service.configure_dependencies(injector)  # Inject wrapper for dependency resolution
+        return service
     container.register("ModelCacheService", create_model_cache_service, singleton=True)
 
     # Register feature store service as singleton (stateful)
     def create_feature_store_service():
-        return FeatureStoreService(config=config)
+        return FeatureStoreService(config=config_dict)
     container.register("FeatureStoreService", create_feature_store_service, singleton=True)
 
     # Register core ML services as singletons (stateful services)
     def create_feature_engineering_service():
-        return FeatureEngineeringService(config=config)
+        service = FeatureEngineeringService(config=config_dict)
+        service.configure_dependencies(injector)  # Inject wrapper for dependency resolution
+        return service
     container.register("FeatureEngineeringService", create_feature_engineering_service, singleton=True)
 
     def create_model_registry_service():
-        return ModelRegistryService(config=config)
+        service = ModelRegistryService(config=config_dict)
+        service.configure_dependencies(injector)  # Inject wrapper for dependency resolution
+        return service
     container.register("ModelRegistryService", create_model_registry_service, singleton=True)
 
     def create_inference_service():
-        return InferenceService(config=config)
+        service = InferenceService(config=config_dict)
+        service.configure_dependencies(injector)  # Inject wrapper for dependency resolution
+        return service
     container.register("InferenceService", create_inference_service, singleton=True)
 
     def create_model_manager_service():
-        return ModelManagerService(config=config)
+        return ModelManagerService(config=config_dict)
     container.register("ModelManagerService", create_model_manager_service, singleton=True)
 
     def create_ml_service():
-        return MLService(config=config)
+        service = MLService(config=config_dict)
+        service.configure_dependencies(injector)  # Inject wrapper for dependency resolution
+        return service
     container.register("MLService", create_ml_service, singleton=True)
 
     # Register mock services as singletons
     def create_model_validation_service():
-        return ModelValidationService(config=config)
+        return ModelValidationService(config=config_dict)
     container.register("ModelValidationService", create_model_validation_service, singleton=True)
 
     def create_drift_detection_service():
-        return DriftDetectionService(config=config)
+        return DriftDetectionService(config=config_dict)
     container.register("DriftDetectionService", create_drift_detection_service, singleton=True)
 
     def create_training_service():
-        return TrainingService(config=config)
+        return TrainingService(config=config_dict)
     container.register("TrainingService", create_training_service, singleton=True)
 
     def create_batch_prediction_service():
-        return BatchPredictionService(config=config)
+        return BatchPredictionService(config=config_dict)
     container.register("BatchPredictionService", create_batch_prediction_service, singleton=True)
 
     # Register ML validation service as singleton (stateless but configuration-dependent)
     def create_ml_validation_service():
-        return MLValidationService(config=config)
+        return MLValidationService(config=config_dict)
     container.register("MLValidationService", create_ml_validation_service, singleton=True)
 
     # Register ML integration service as singleton (stateless but configuration-dependent)
     def create_ml_integration_service():
-        return MLIntegrationService(config=config)
+        return MLIntegrationService(config=config_dict)
     container.register("MLIntegrationService", create_ml_integration_service, singleton=True)
 
     # Note: Service aliases would need to be handled by the container implementation

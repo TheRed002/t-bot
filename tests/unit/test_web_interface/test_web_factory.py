@@ -241,7 +241,10 @@ class TestWebInterfaceFactory:
             mock_service_class.assert_called_once_with(portfolio_facade=None)
 
     def test_create_risk_service(self, factory):
-        """Test creating risk service."""
+        """Test creating risk service.
+
+        Backend uses risk_service parameter, not risk_facade.
+        """
         with patch("src.web_interface.factory.WebRiskService") as mock_service_class:
             mock_service = Mock()
             mock_service_class.return_value = mock_service
@@ -249,7 +252,8 @@ class TestWebInterfaceFactory:
             result = factory.create_risk_service()
 
             assert result == mock_service
-            mock_service_class.assert_called_once_with(risk_facade=None)
+            # Backend uses risk_service parameter
+            mock_service_class.assert_called_once_with(risk_service=None)
 
     def test_create_strategy_service(self, factory):
         """Test creating strategy service."""

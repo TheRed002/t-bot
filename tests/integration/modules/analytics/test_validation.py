@@ -19,14 +19,14 @@ class TestAnalyticsModuleIntegration:
         required_services = [
             "AnalyticsServiceFactory",
             "AnalyticsService",
-            "PortfolioService",
-            "RiskService",
-            "ReportingService",
-            "OperationalService",
-            "AlertService",
-            "ExportService",
+            "AnalyticsPortfolioService",
+            "AnalyticsRiskService",
+            "AnalyticsReportingService",
+            "AnalyticsOperationalService",
+            "AnalyticsAlertService",
+            "AnalyticsExportService",
             "RealtimeAnalyticsService",
-            "AnalyticsRepository",
+            "AnalyticsDataRepository",
         ]
 
         for service_name in required_services:

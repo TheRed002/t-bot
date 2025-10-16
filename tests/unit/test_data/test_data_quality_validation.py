@@ -64,6 +64,9 @@ class TestDataValidator:
     def valid_signal(self) -> Signal:
         """Create valid signal for testing"""
         return Signal(
+            signal_id="test_signal_1",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             strength=0.75,
@@ -227,6 +230,9 @@ class TestDataValidator:
         # that should still pass validation but might have business logic
         # issues
         edge_signal = Signal(
+            signal_id="test_signal_2",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=0.0,  # Minimum strength (edge case)
             timestamp=datetime.now(timezone.utc),
@@ -247,6 +253,9 @@ class TestDataValidator:
         # Since Pydantic prevents None values, test with valid data
         # and test the validation logic separately
         valid_signal = Signal(
+            signal_id="test_signal_3",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=0.75,
             timestamp=datetime.now(timezone.utc),
@@ -268,6 +277,9 @@ class TestDataValidator:
         # Test that creating a Signal with empty symbol raises ValidationError
         with pytest.raises(ValidationError):
             Signal(
+                signal_id="test_signal_4",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 direction=SignalDirection.BUY,
                 strength=0.75,
                 timestamp=datetime.now(timezone.utc),

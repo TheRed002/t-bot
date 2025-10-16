@@ -315,6 +315,9 @@ class TestVolatilityBreakoutStrategy:
         # Create test signals
         test_signals = [
             Signal(
+                signal_id="test_signal_1",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="BTC/USD",
                 direction=SignalDirection.BUY,
                 confidence=Decimal("0.8"),
@@ -345,6 +348,9 @@ class TestVolatilityBreakoutStrategy:
         # Create test signals
         test_signals = [
             Signal(
+                signal_id="test_signal_2",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="BTC/USD",
                 direction=SignalDirection.BUY,
                 confidence=Decimal("0.8"),
@@ -394,6 +400,9 @@ class TestVolatilityBreakoutStrategy:
         """Test signal validity for regime."""
         # Create test signal
         test_signal = Signal(
+            signal_id="test_signal_3",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             confidence=Decimal("0.8"),
@@ -416,6 +425,9 @@ class TestVolatilityBreakoutStrategy:
         """Test time decay application to signals."""
         # Create test signals with different ages
         old_signal = Signal(
+            signal_id="test_signal_4",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             confidence=Decimal("0.8"),
@@ -427,6 +439,9 @@ class TestVolatilityBreakoutStrategy:
         )
         
         new_signal = Signal(
+            signal_id="test_signal_5",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             confidence=Decimal("0.8"),
@@ -458,6 +473,9 @@ class TestVolatilityBreakoutStrategy:
         
         # Create test signal
         test_signal = Signal(
+            signal_id="test_signal_6",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             confidence=Decimal("0.8"),
@@ -480,6 +498,9 @@ class TestVolatilityBreakoutStrategy:
         
         # Create test signal
         test_signal = Signal(
+            signal_id="test_signal_7",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             confidence=Decimal("0.8"),
@@ -505,6 +526,9 @@ class TestVolatilityBreakoutStrategy:
         """Test position size calculation without adaptive risk manager."""
         # Create test signal
         test_signal = Signal(
+            signal_id="test_signal_8",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USD",
             direction=SignalDirection.BUY,
             confidence=Decimal("0.8"),

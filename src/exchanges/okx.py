@@ -16,12 +16,15 @@ from typing import Any
 # OKX-specific imports
 try:
     from okx.api import Account, Market, Public, Trade as OKXTrade
+
+    OKX_AVAILABLE = True
 except ImportError:
     # Fallback if OKX library is not available
     Account = None
     Market = None
     Public = None
     OKXTrade = None
+    OKX_AVAILABLE = False
 
 # MANDATORY: Core imports as per CLAUDE.md
 from src.core.exceptions import (
@@ -817,7 +820,7 @@ class OKXExchange(BaseExchange):
             "partially_filled": OrderStatus.PARTIALLY_FILLED,
             "pending_cancel": OrderStatus.PENDING,
         }
-        return status_mapping.get(status, OrderStatus.NEW)
+        return status_mapping.get(status, OrderStatus.UNKNOWN)
 
     def _convert_order_type_to_okx(self, order_type: OrderType) -> str:
         """Convert unified order type to OKX format."""

@@ -77,6 +77,9 @@ class TestBaseRiskManager:
     def sample_signal(self):
         """Create a sample trading signal."""
         return Signal(
+            signal_id="test_signal_1",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             strength=0.8,

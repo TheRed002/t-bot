@@ -196,9 +196,9 @@ class TestMonitoringModuleBoundaries:
     def mock_monitoring_service(self):
         """Mock monitoring service."""
         service = MagicMock()
-        service.start = AsyncMock()
-        service.stop = AsyncMock()
-        service.health_check = AsyncMock()
+        service.start_monitoring = AsyncMock()
+        service.stop_monitoring = AsyncMock()
+        service.get_health_status = AsyncMock(return_value={"status": "ok"})
         return service
 
     @pytest.mark.asyncio
@@ -206,17 +206,17 @@ class TestMonitoringModuleBoundaries:
     async def test_main_app_monitoring_integration(self, mock_monitoring_service):
         """Test that main application correctly integrates monitoring service."""
         from src.main import Application
+        from unittest.mock import MagicMock
 
         app = Application()
-        app.components["injector"] = MagicMock()
 
-        # Mock the dependency registration and resolution
-        with (
-            patch("src.monitoring.di_registration.register_monitoring_services") as mock_register,
-            patch.object(
-                app.components["injector"], "resolve", return_value=mock_monitoring_service
-            ),
-        ):
+        # Mock injector properly
+        mock_injector = MagicMock()
+        mock_injector.resolve = MagicMock(return_value=mock_monitoring_service)
+        app.components["injector"] = mock_injector
+
+        # Mock the dependency registration
+        with patch("src.monitoring.di_registration.register_monitoring_services") as mock_register:
             await app._initialize_monitoring()
 
             # Verify registration was called
@@ -224,7 +224,7 @@ class TestMonitoringModuleBoundaries:
 
             # Verify service was resolved and started
             app.components["injector"].resolve.assert_called_with("MonitoringServiceInterface")
-            mock_monitoring_service.start.assert_called_once()
+            mock_monitoring_service.start_monitoring.assert_called_once()
 
             # Verify service was stored
             assert app.components["monitoring_service"] is mock_monitoring_service

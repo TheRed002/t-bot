@@ -70,6 +70,9 @@ class TestRiskManagementController:
         """Create a sample trading signal."""
         from datetime import datetime, timezone
         return Signal(
+            signal_id="test_signal_1",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
@@ -191,13 +194,19 @@ class TestRiskManagementController:
         assert isinstance(controller._messaging_coordinator, MessagingCoordinator)
 
     async def test_calculate_position_size_success(self, controller, mock_position_sizing_service, sample_signal):
-        """Test successful position size calculation."""
+        """Test successful position size calculation.
+
+        IMPORTANT: Controller converts USD position size to coin quantity.
+        Service returns: 0.2 USD
+        Controller returns: 0.2 / 50000 = 0.000004 BTC
+        See src/risk_management/controller.py lines 119-132 for conversion logic.
+        """
         available_capital = Decimal("10000.00")
         current_price = Decimal("50000.00")
-        expected_size = Decimal("0.2")
-        
-        mock_position_sizing_service.calculate_size.return_value = expected_size
-        
+        position_size_usd = Decimal("0.2")
+
+        mock_position_sizing_service.calculate_size.return_value = position_size_usd
+
         with patch('src.utils.messaging_patterns.BoundaryValidator.validate_database_entity'):
             result = await controller.calculate_position_size(
                 signal=sample_signal,
@@ -205,8 +214,10 @@ class TestRiskManagementController:
                 current_price=current_price,
                 method="kelly"
             )
-        
-        assert result == expected_size
+
+        # Controller converts USD to coins: 0.2 / 50000 = 0.000004
+        expected_size_coins = position_size_usd / current_price
+        assert result == expected_size_coins
         mock_position_sizing_service.calculate_size.assert_called_once_with(
             signal=sample_signal,
             available_capital=available_capital,
@@ -215,21 +226,29 @@ class TestRiskManagementController:
         )
 
     async def test_calculate_position_size_without_method(self, controller, mock_position_sizing_service, sample_signal):
-        """Test position size calculation without method specified."""
+        """Test position size calculation without method specified.
+
+        IMPORTANT: Controller converts USD position size to coin quantity.
+        Service returns: 0.2 USD
+        Controller returns: 0.2 / 50000 = 0.000004 BTC
+        See src/risk_management/controller.py lines 119-132 for conversion logic.
+        """
         available_capital = Decimal("10000.00")
         current_price = Decimal("50000.00")
-        expected_size = Decimal("0.2")
-        
-        mock_position_sizing_service.calculate_size.return_value = expected_size
-        
+        position_size_usd = Decimal("0.2")
+
+        mock_position_sizing_service.calculate_size.return_value = position_size_usd
+
         with patch('src.utils.messaging_patterns.BoundaryValidator.validate_database_entity'):
             result = await controller.calculate_position_size(
                 signal=sample_signal,
                 available_capital=available_capital,
                 current_price=current_price
             )
-        
-        assert result == expected_size
+
+        # Controller converts USD to coins: 0.2 / 50000 = 0.000004
+        expected_size_coins = position_size_usd / current_price
+        assert result == expected_size_coins
         mock_position_sizing_service.calculate_size.assert_called_once_with(
             signal=sample_signal,
             available_capital=available_capital,
@@ -534,8 +553,8 @@ class TestRiskManagementController:
         assert controller._request_count == 0
 
     async def test_multiple_operations_sequence(
-        self, 
-        controller, 
+        self,
+        controller,
         mock_position_sizing_service,
         mock_risk_validation_service,
         mock_risk_metrics_service,
@@ -546,34 +565,44 @@ class TestRiskManagementController:
         sample_market_data,
         sample_risk_metrics
     ):
-        """Test sequence of multiple operations."""
+        """Test sequence of multiple operations.
+
+        IMPORTANT: Controller converts USD position size to coin quantity.
+        Service returns: 0.2 USD
+        Controller returns: 0.2 / 50000 = 0.000004 BTC
+        See src/risk_management/controller.py lines 119-132 for conversion logic.
+        """
         # Setup mocks
-        mock_position_sizing_service.calculate_size.return_value = Decimal("0.2")
+        position_size_usd = Decimal("0.2")
+        current_price = Decimal("50000.00")
+        mock_position_sizing_service.calculate_size.return_value = position_size_usd
         mock_risk_validation_service.validate_signal.return_value = True
         mock_risk_validation_service.validate_order.return_value = True
         mock_risk_metrics_service.calculate_metrics.return_value = sample_risk_metrics
         mock_risk_monitoring_service.get_risk_summary.return_value = {"status": "healthy"}
-        
+
         with patch('src.utils.messaging_patterns.BoundaryValidator.validate_database_entity'), \
              patch('src.risk_management.data_transformer.RiskDataTransformer.transform_position_to_event_data',
                   return_value={"transformed": "data"}):
-            
+
             # Execute sequence of operations
             position_size = await controller.calculate_position_size(
-                sample_signal, Decimal("10000.00"), Decimal("50000.00")
+                sample_signal, Decimal("10000.00"), current_price
             )
             signal_valid = await controller.validate_signal(sample_signal)
             order_valid = await controller.validate_order(sample_order_request)
             metrics = await controller.calculate_risk_metrics(sample_positions, sample_market_data)
             summary = await controller.get_risk_summary()
-            
+
             # Verify results
-            assert position_size == Decimal("0.2")
+            # Controller converts USD to coins: 0.2 / 50000 = 0.000004
+            expected_size_coins = position_size_usd / current_price
+            assert position_size == expected_size_coins
             assert signal_valid is True
             assert order_valid is True
             assert metrics == sample_risk_metrics
             assert summary == {"status": "healthy"}
-            
+
             # Verify all services were called
             mock_position_sizing_service.calculate_size.assert_called_once()
             mock_risk_validation_service.validate_signal.assert_called_once()

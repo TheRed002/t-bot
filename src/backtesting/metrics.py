@@ -333,9 +333,17 @@ class MetricsCalculator:
         # Maximum daily loss
         max_daily_loss = to_decimal(str(np.min(returns_array))) * initial_capital_dec
 
-        # Skewness and Kurtosis
-        skewness = to_decimal(str(stats.skew(returns_array)))
-        kurtosis = to_decimal(str(stats.kurtosis(returns_array)))
+        # Skewness and Kurtosis (check for sufficient variance)
+        if len(returns_array) < 3 or np.std(returns_array) == 0:
+            # Need at least 3 data points for skewness, and non-zero variance
+            skewness = to_decimal("0")
+            kurtosis = to_decimal("0")
+        else:
+            skew_val = stats.skew(returns_array)
+            kurt_val = stats.kurtosis(returns_array)
+            # Handle NaN from scipy.stats
+            skewness = to_decimal("0") if np.isnan(skew_val) else to_decimal(str(skew_val))
+            kurtosis = to_decimal("0") if np.isnan(kurt_val) else to_decimal(str(kurt_val))
 
         # Omega ratio (probability-weighted ratio of gains vs losses)
         threshold_return = 0

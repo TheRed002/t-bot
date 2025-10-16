@@ -64,6 +64,9 @@ class TestQualityMonitor:
         """Create valid signals for testing"""
         return [
             Signal(
+                signal_id="test_signal_1",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="BTC/USDT",
                 direction=SignalDirection.BUY,
                 strength=0.75,
@@ -71,6 +74,9 @@ class TestQualityMonitor:
                 source="test_strategy",
             ),
             Signal(
+                signal_id="test_signal_2",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol="ETH/USDT",
                 direction=SignalDirection.SELL,
                 strength=0.85,
@@ -168,6 +174,9 @@ class TestQualityMonitor:
         low_confidence_signals = []
         for i in range(10):  # Need at least 10 signals for drift detection
             signal = Signal(
+                signal_id="test_signal_3",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 direction=SignalDirection.BUY if i % 2 == 0 else SignalDirection.SELL,
                 strength=0.3 + (i * 0.01),
                 # Low confidence with slight variation
@@ -277,6 +286,9 @@ class TestQualityMonitor:
         stable_signals = []
         for i in range(20):
             signal = Signal(
+                signal_id="test_signal_4",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 direction=SignalDirection.BUY if i % 2 == 0 else SignalDirection.SELL,
                 strength=0.8,  # Stable high confidence
                 timestamp=datetime.now(timezone.utc) + timedelta(seconds=i),
@@ -296,6 +308,9 @@ class TestQualityMonitor:
         low_confidence_signals = []
         for i in range(10):
             signal = Signal(
+                signal_id="test_signal_5",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 direction=SignalDirection.BUY if i % 2 == 0 else SignalDirection.SELL,
                 strength=0.3 + (i * 0.01),
                 # Low confidence with slight variation

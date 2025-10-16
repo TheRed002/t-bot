@@ -107,6 +107,9 @@ class TestAdaptiveMomentumStrategy:
     def sample_signal(self):
         """Create a sample signal."""
         return Signal(
+            signal_id="test_signal_1",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             direction=SignalDirection.BUY,
             strength=Decimal("0.8"),
             timestamp=datetime.now(timezone.utc),
@@ -382,6 +385,9 @@ class TestAdaptiveMomentumStrategy:
 
         signals = [
             Signal(
+                signal_id="test_signal_2",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 direction=SignalDirection.BUY,
                 strength=Decimal("0.8"),
                 timestamp=datetime.now(timezone.utc),
@@ -404,6 +410,9 @@ class TestAdaptiveMomentumStrategy:
         """Test regime confidence adjustments without adaptive risk manager."""
         signals = [
             Signal(
+                signal_id="test_signal_3",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 direction=SignalDirection.BUY,
                 strength=Decimal("0.8"),
                 timestamp=datetime.now(timezone.utc),

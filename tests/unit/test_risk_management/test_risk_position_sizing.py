@@ -57,15 +57,21 @@ class TestPositionSizer:
 
     @pytest.mark.asyncio
     async def test_calculate_position_size_fixed_percentage(self, position_sizer, sample_signal):
-        """Test fixed percentage position sizing."""
+        """Test fixed percentage position sizing.
+
+        IMPORTANT: FIXED_PERCENTAGE method does NOT apply signal strength/confidence.
+        It returns exactly portfolio_value * risk_per_trade (10000 * 0.02 = 200).
+        Signal strength adjustment is handled by CONFIDENCE_WEIGHTED method explicitly.
+        See src/utils/position_sizing.py lines 84-86 for implementation details.
+        """
         portfolio_value = Decimal("10000")
 
         position_size = await position_sizer.calculate_position_size(
             sample_signal, portfolio_value, PositionSizeMethod.FIXED_PERCENTAGE
         )
 
-        # Expected: 10000 * 0.02 * 0.8 = 160
-        expected_size = portfolio_value * Decimal("0.02") * Decimal(str(sample_signal.strength))
+        # Expected: 10000 * 0.02 = 200 (NO signal strength multiplier in FIXED_PERCENTAGE)
+        expected_size = portfolio_value * Decimal("0.02")
         assert position_size == expected_size
 
     @pytest.mark.asyncio
@@ -153,13 +159,18 @@ class TestPositionSizer:
 
     @pytest.mark.asyncio
     async def test_calculate_position_size_default_method(self, position_sizer, sample_signal):
-        """Test position sizing with default method."""
+        """Test position sizing with default method.
+
+        IMPORTANT: Default method is FIXED_PERCENTAGE, which does NOT apply signal strength.
+        See src/core/config/risk.py for default method configuration.
+        See src/utils/position_sizing.py lines 84-86 for FIXED_PERCENTAGE behavior.
+        """
         portfolio_value = Decimal("10000")
 
         position_size = await position_sizer.calculate_position_size(sample_signal, portfolio_value)
 
-        # Should use default method from config
-        expected_size = portfolio_value * Decimal("0.02") * Decimal(str(sample_signal.strength))
+        # Default method is FIXED_PERCENTAGE: 10000 * 0.02 = 200 (NO signal strength multiplier)
+        expected_size = portfolio_value * Decimal("0.02")
         assert position_size == expected_size
 
     @pytest.mark.asyncio
@@ -179,16 +190,26 @@ class TestPositionSizer:
 
     @pytest.mark.asyncio
     async def test_calculate_position_size_min_limit(self, position_sizer, sample_signal):
-        """Test position size minimum limit enforcement."""
+        """Test position size minimum limit enforcement.
+
+        IMPORTANT: This test should use CONFIDENCE_WEIGHTED method to test signal strength impact.
+        FIXED_PERCENTAGE ignores signal strength, so it would always return 200 regardless.
+        With CONFIDENCE_WEIGHTED and strength=0.01, position drops below minimum and returns 0.
+        See src/utils/position_sizing.py lines 203-233 for CONFIDENCE_WEIGHTED behavior.
+        """
         portfolio_value = Decimal("10000")
 
         # Create signal with very low confidence
         sample_signal.strength = 0.01
         sample_signal.confidence = 0.01  # Update both attributes
 
-        position_size = await position_sizer.calculate_position_size(sample_signal, portfolio_value)
+        # Use CONFIDENCE_WEIGHTED to test signal strength impact on minimum threshold
+        position_size = await position_sizer.calculate_position_size(
+            sample_signal, portfolio_value, PositionSizeMethod.CONFIDENCE_WEIGHTED
+        )
 
-        # Should return 0 when below minimum position size
+        # CONFIDENCE_WEIGHTED: 10000 * 0.02 * (0.01 * 0.8) = 1.6
+        # This is 0.016% of portfolio, below 0.1% minimum, so returns 0
         assert position_size == Decimal("0")
 
     @pytest.mark.asyncio
@@ -219,14 +240,21 @@ class TestPositionSizer:
 
     @pytest.mark.asyncio
     async def test_fixed_percentage_sizing(self, position_sizer, sample_signal):
-        """Test fixed percentage sizing calculation."""
+        """Test fixed percentage sizing calculation.
+
+        IMPORTANT: FIXED_PERCENTAGE method does NOT apply signal strength/confidence.
+        It returns exactly portfolio_value * risk_per_trade (10000 * 0.02 = 200).
+        Signal strength adjustment is handled by CONFIDENCE_WEIGHTED method explicitly.
+        See src/utils/position_sizing.py lines 84-86 for implementation details.
+        """
         portfolio_value = Decimal("10000")
 
         position_size = await position_sizer.calculate_position_size(
             sample_signal, portfolio_value, PositionSizeMethod.FIXED_PERCENTAGE
         )
 
-        expected_size = portfolio_value * Decimal("0.02") * Decimal(str(sample_signal.strength))
+        # Expected: 10000 * 0.02 = 200 (NO signal strength multiplier in FIXED_PERCENTAGE)
+        expected_size = portfolio_value * Decimal("0.02")
         assert position_size == expected_size
 
     @pytest.mark.asyncio

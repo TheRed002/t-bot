@@ -342,23 +342,48 @@ class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalServ
 
             # Calculate optimal distribution
             distribution = {}
+
+            # First pass: Calculate allocation percentages and apply caps
+            allocation_percentages = {}
+            max_allocation_pct = Decimal(
+                str(
+                    self.capital_config.get(
+                        "max_allocation_pct", str(DEFAULT_MAX_ALLOCATION_PCT)
+                    )
+                )
+            )
+
             for exchange, score in composite_scores.items():
                 if total_score > 0:
                     allocation_pct = score / total_score
                 else:
                     allocation_pct = Decimal("1.0") / Decimal(len(composite_scores))
 
-                # Apply maximum allocation limit with Decimal precision
-                max_allocation_pct = Decimal(
-                    str(
-                        self.capital_config.get(
-                            "max_allocation_pct", str(DEFAULT_MAX_ALLOCATION_PCT)
-                        )
-                    )
-                )
+                # Apply maximum allocation limit
                 allocation_pct = min(allocation_pct, max_allocation_pct)
+                allocation_percentages[exchange] = allocation_pct
 
-                distribution[exchange] = total_capital * allocation_pct
+            # Renormalize percentages to ensure they sum to 1.0
+            total_pct = sum(allocation_percentages.values())
+            if total_pct > 0:
+                for exchange in allocation_percentages:
+                    allocation_percentages[exchange] = allocation_percentages[exchange] / total_pct
+
+            # Second pass: Calculate actual amounts and apply caps
+            total_allocated = Decimal("0.0")
+            for exchange, allocation_pct in allocation_percentages.items():
+                amount = total_capital * allocation_pct
+                # Apply individual max allocation limit
+                max_individual = total_capital * max_allocation_pct
+                amount = min(amount, max_individual)
+                distribution[exchange] = amount
+                total_allocated += amount
+
+            # Third pass: If total exceeds total_capital due to rounding, scale down proportionally
+            if total_allocated > total_capital:
+                scale_factor = total_capital / total_allocated
+                for exchange in distribution:
+                    distribution[exchange] = distribution[exchange] * scale_factor
 
             return distribution
 

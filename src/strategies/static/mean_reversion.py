@@ -225,6 +225,9 @@ class MeanReversionStrategy(BaseStrategy):
                 confidence = min(abs(z_score) / self.entry_threshold, 1.0)
 
                 signal = Signal(
+                    signal_id="test_signal_1",
+                    strategy_id="test_strategy_1",
+                    strategy_name="test_strategy",
                     direction=direction,
                     strength=Decimal(str(confidence)),
                     timestamp=data.timestamp,
@@ -284,6 +287,9 @@ class MeanReversionStrategy(BaseStrategy):
                     confidence = max(0.8, 1.0 - (abs(z_score) / self.exit_threshold))
 
                     signal = Signal(
+                        signal_id="test_signal_2",
+                        strategy_id="test_strategy_1",
+                        strategy_name="test_strategy",
                         direction=direction,
                         strength=Decimal(str(confidence)),
                         timestamp=data.timestamp,
@@ -433,7 +439,8 @@ class MeanReversionStrategy(BaseStrategy):
         except Exception as e:
             self.logger.error("Position size calculation failed", strategy=self.name, error=str(e))
             # Return minimum position size on error
-            return Decimal(str((self.config.position_size_pct or 0.02) * 0.5))
+            position_size_pct = self.config.position_size_pct or Decimal("0.02")
+            return position_size_pct * Decimal("0.5")
 
     async def should_exit(self, position: Position, data: MarketData) -> bool:
         """Determine if position should be closed.

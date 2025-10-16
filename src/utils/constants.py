@@ -258,7 +258,7 @@ DEFAULT_VALUES = {
     "rebalance_frequency": 24,  # Default rebalance frequency (hours)
     "data_retention_days": 365,  # Default data retention period
     # Database connection defaults (configured via environment variables in production)
-    "redis_default_url": "redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}/${REDIS_DB:0}",
+    "redis_default_url": "redis://:${REDIS_PASSWORD}@${REDIS_HOST:localhost}:${REDIS_PORT:6379}/${REDIS_DB:0}",
     "postgresql_default_url": "postgresql://${DB_USER:postgres}:${DB_PASSWORD}@${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:trading_bot}",
 }
 

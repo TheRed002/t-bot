@@ -126,6 +126,18 @@ class RedisClient(BaseComponent, CacheClientInterface):
             self.redis_url = fallback_url
             self.logger.info(f"Using fallback Redis URL: {self.redis_url}")
 
+        # Import socket for TCP keepalive constants
+        import socket as sock_module
+
+        # Build socket keepalive options with proper constants
+        socket_keepalive_options = {}
+        if hasattr(sock_module, 'TCP_KEEPIDLE'):
+            socket_keepalive_options[sock_module.TCP_KEEPIDLE] = 1
+        if hasattr(sock_module, 'TCP_KEEPINTVL'):
+            socket_keepalive_options[sock_module.TCP_KEEPINTVL] = 3
+        if hasattr(sock_module, 'TCP_KEEPCNT'):
+            socket_keepalive_options[sock_module.TCP_KEEPCNT] = 5
+
         self._client = redis.Redis.from_url(
             self.redis_url,
             decode_responses=True,
@@ -136,11 +148,7 @@ class RedisClient(BaseComponent, CacheClientInterface):
             socket_timeout=socket_timeout,
             retry_on_error=[redis.BusyLoadingError, redis.ConnectionError, redis.TimeoutError],
             socket_keepalive=True,
-            socket_keepalive_options={
-                "TCP_KEEPIDLE": 1,
-                "TCP_KEEPINTVL": 3,
-                "TCP_KEEPCNT": 5,
-            },
+            socket_keepalive_options=socket_keepalive_options if socket_keepalive_options else None,
         )
 
         # Test connection with timeout

@@ -12,7 +12,7 @@ from src.core.base.service import BaseService
 from src.core.config import Config
 from src.core.exceptions import ServiceError, ValidationError
 from src.core.logging import get_logger
-from src.core.types import BotConfiguration, BotState, OrderRequest
+from src.core.types import BotConfiguration, BotState, BotStatus, OrderRequest
 
 from .interfaces import IBotInstanceService
 
@@ -88,7 +88,7 @@ class BotInstanceService(BaseService, IBotInstanceService):
             )
 
             # Store instance
-            bot_id = bot_config.id
+            bot_id = bot_config.bot_id
             self._bot_instances[bot_id] = bot_instance
 
             self._logger.info(f"Created bot instance: {bot_id}")
@@ -209,7 +209,15 @@ class BotInstanceService(BaseService, IBotInstanceService):
                 raise ValidationError(f"Bot {bot_id} not found")
 
             bot_instance = self._bot_instances[bot_id]
-            return bot_instance.get_bot_state()
+
+            # Construct BotState model from instance data
+            return BotState(
+                bot_id=bot_id,
+                status=bot_instance.get_bot_state(),  # This returns BotStatus enum
+                configuration=bot_instance.get_bot_config(),
+                created_at=bot_instance._created_at,
+                last_heartbeat=bot_instance._last_heartbeat,
+            )
 
         except Exception as e:
             self._logger.error(f"Failed to get bot state {bot_id}: {e}")
@@ -314,7 +322,7 @@ class BotInstanceService(BaseService, IBotInstanceService):
             bot_instance = self._bot_instances[bot_id]
             bot_state = bot_instance.get_bot_state()
 
-            if bot_state in [BotState.RUNNING, BotState.PAUSED]:
+            if bot_state in [BotStatus.RUNNING, BotStatus.PAUSED]:
                 await bot_instance.stop()
 
             # Remove from instances
@@ -328,10 +336,10 @@ class BotInstanceService(BaseService, IBotInstanceService):
             return False
 
     def get_active_bot_ids(self) -> list[str]:
-        """Get list of active bot IDs."""
+        """Get list of active bot IDs (excludes STOPPED and ERROR states)."""
         return [
             bot_id for bot_id, instance in self._bot_instances.items()
-            if instance.get_bot_state() in [BotState.RUNNING, BotState.PAUSED]
+            if instance.get_bot_state() in [BotStatus.INITIALIZING, BotStatus.READY, BotStatus.RUNNING, BotStatus.PAUSED, BotStatus.MAINTENANCE]
         ]
 
     def get_bot_count(self) -> int:

@@ -33,7 +33,8 @@ class TestMockExchangeCore:
 
     def test_initialization(self, mock_exchange):
         """Test MockExchange initialization."""
-        assert mock_exchange.exchange_name == "mock"
+        # Backend uses "mock_exchange" as exchange name (visible in logs)
+        assert mock_exchange.exchange_name == "mock_exchange"
         assert isinstance(mock_exchange._mock_balances, dict)
         assert isinstance(mock_exchange._mock_orders, dict)
         assert isinstance(mock_exchange._mock_prices, dict)
@@ -96,7 +97,8 @@ class TestMockExchangeCore:
 
         info = await mock_exchange.load_exchange_info()
         assert isinstance(info, ExchangeInfo)
-        assert info.exchange == "mock"
+        # Backend uses "mock_exchange" as exchange name (visible in logs)
+        assert info.exchange == "mock_exchange"
         assert info.symbol == "BTCUSDT"  # Default symbol
         assert info.base_asset == "BTC"
         assert info.quote_asset == "USDT"
@@ -114,17 +116,19 @@ class TestMockExchangeCore:
         """Test getting ticker data."""
         await mock_exchange.start()
 
-        # Get ticker (returns dict for backward compatibility)
+        # Get ticker (backend returns Ticker object, not dict)
         ticker = await mock_exchange.get_ticker("BTCUSDT")
 
-        assert isinstance(ticker, dict)
-        assert "symbol" in ticker
-        assert "price" in ticker
-        assert "bid" in ticker
-        assert "ask" in ticker
-        assert "volume" in ticker
-        assert ticker["symbol"] == "BTCUSDT"
-        assert isinstance(ticker["price"], Decimal)
+        # Backend returns Ticker object, use attribute access
+        assert hasattr(ticker, "symbol")
+        assert hasattr(ticker, "last_price") or hasattr(ticker, "price")
+        assert hasattr(ticker, "bid_price")
+        assert hasattr(ticker, "ask_price")
+        assert hasattr(ticker, "volume")
+        assert ticker.symbol == "BTCUSDT"
+        # Check price is Decimal (use last_price or price attribute)
+        price = ticker.last_price if hasattr(ticker, "last_price") else ticker.price
+        assert isinstance(price, Decimal)
 
     @pytest.mark.asyncio
     async def test_get_ticker_price_simulation(self, mock_exchange):
@@ -135,7 +139,9 @@ class TestMockExchangeCore:
         tickers = []
         for _ in range(5):
             ticker = await mock_exchange.get_ticker("BTCUSDT")
-            tickers.append(ticker["price"])
+            # Backend returns Ticker object, extract price attribute
+            price = ticker.last_price if hasattr(ticker, "last_price") else ticker.price
+            tickers.append(price)
 
         # Prices should be realistic
         for price in tickers:
@@ -578,7 +584,9 @@ class TestMockExchangeEdgeCases:
         prices = []
         for _ in range(10):
             ticker = await mock_exchange.get_ticker("BTCUSDT")
-            prices.append(ticker["price"])
+            # Backend returns Ticker object, extract price attribute
+            price = ticker.last_price if hasattr(ticker, "last_price") else ticker.price
+            prices.append(price)
 
         # Prices should vary within reasonable bounds
         min_price = min(prices)

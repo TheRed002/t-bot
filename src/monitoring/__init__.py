@@ -85,17 +85,53 @@ AlertService = DefaultAlertService
 MetricsService = DefaultMetricsService
 PerformanceService = DefaultPerformanceService
 
-from .telemetry import (
-    OpenTelemetryConfig,
-    TradingTracer,
-    get_tracer,
-    get_trading_tracer,
-    instrument_fastapi,
-    set_global_trading_tracer,
-    setup_telemetry,
-    trace_async_function,
-    trace_function,
-)
+try:
+    from .telemetry import (
+        OpenTelemetryConfig,
+        TradingTracer,
+        get_tracer,
+        get_trading_tracer,
+        instrument_fastapi,
+        set_global_trading_tracer,
+        setup_telemetry,
+        trace_async_function,
+        trace_function,
+    )
+except ImportError as e:
+    # Telemetry module has optional dependencies, provide stubs if unavailable
+    import warnings
+    warnings.warn(f"Telemetry module could not be imported: {e}. Using stub implementations.")
+
+    class OpenTelemetryConfig:
+        pass
+
+    class TradingTracer:
+        pass
+
+    def get_tracer(*args, **kwargs):
+        return None
+
+    def get_trading_tracer(*args, **kwargs):
+        return None
+
+    def instrument_fastapi(*args, **kwargs):
+        pass
+
+    def set_global_trading_tracer(*args, **kwargs):
+        pass
+
+    def setup_telemetry(*args, **kwargs):
+        pass
+
+    def trace_async_function(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+    def trace_function(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
 
 try:
     from .trace_wrapper import (

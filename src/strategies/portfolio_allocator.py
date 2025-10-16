@@ -254,6 +254,9 @@ class PortfolioAllocator:
             if hasattr(strategy, "validate_signal"):
                 # Test signal validation
                 test_signal = Signal(
+                    signal_id=f"validation_test_{strategy.name}",
+                    strategy_id=getattr(strategy, "strategy_id", "validation"),
+                    strategy_name=strategy.name,
                     direction=SignalDirection.BUY,
                     strength=0.8,
                     timestamp=datetime.now(timezone.utc),

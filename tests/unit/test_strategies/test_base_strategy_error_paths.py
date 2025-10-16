@@ -106,6 +106,9 @@ class TestBaseStrategyErrorPaths:
     def signal(self):
         """Create test signal."""
         return Signal(
+            signal_id="test_signal_1",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol='BTC/USDT',
             direction=SignalDirection.BUY,
             strength=Decimal('0.8'),
@@ -180,6 +183,9 @@ class TestBaseStrategyErrorPaths:
     async def test_generate_signals_validation_error(self, strategy, market_data):
         """Test signal generation when validation raises error."""
         test_signal = Signal(
+            signal_id="test_signal_2",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol='BTC/USDT',
             direction=SignalDirection.BUY,
             strength=Decimal('0.8'),
@@ -198,6 +204,9 @@ class TestBaseStrategyErrorPaths:
     async def test_generate_signals_invalid_signal_validation(self, strategy, market_data):
         """Test signal generation with invalid signal validation."""
         test_signal = Signal(
+            signal_id="test_signal_3",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol='BTC/USDT',
             direction=SignalDirection.BUY,
             strength=Decimal('0.8'),
@@ -216,6 +225,9 @@ class TestBaseStrategyErrorPaths:
     async def test_generate_signals_position_size_error(self, strategy, market_data):
         """Test signal generation when position size calculation fails."""
         test_signal = Signal(
+            signal_id="test_signal_4",
+            strategy_id="test_strategy_1",
+            strategy_name="test_strategy",
             symbol='BTC/USDT',
             direction=SignalDirection.BUY,
             strength=Decimal('0.8'),
@@ -359,6 +371,9 @@ class TestBaseStrategyErrorPaths:
         # Add signals beyond the limit
         for i in range(1500):  # More than DEFAULT_SIGNAL_HISTORY_LIMIT (1000)
             signal = Signal(
+                signal_id="test_signal_5",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol='BTC/USDT',
                 direction=SignalDirection.BUY,
                 strength=Decimal('0.8'),
@@ -695,6 +710,9 @@ class TestBaseStrategyErrorPaths:
         # Add many signals to test memory management
         for i in range(2000):
             test_signal = Signal(
+                signal_id="test_signal_6",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol='BTC/USDT',
                 direction=SignalDirection.BUY,
                 strength=Decimal('0.8'),
@@ -730,6 +748,9 @@ class TestBaseStrategyErrorPaths:
         def log_signals():
             for i in range(100):
                 test_signal = Signal(
+                    signal_id="test_signal_7",
+                    strategy_id="test_strategy_1",
+                    strategy_name="test_strategy",
                     symbol='BTC/USDT',
                     direction=SignalDirection.BUY,
                     strength=Decimal('0.8'),

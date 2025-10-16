@@ -35,22 +35,22 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async start(self) -> None` - Line 120
-- `async stop(self) -> None` - Line 142
-- `async register_bot(self, bot_id: str, bot_config: BotConfiguration) -> None` - Line 182
-- `async unregister_bot(self, bot_id: str) -> None` - Line 224
-- `async report_position_change(self, ...) -> dict[str, Any]` - Line 260
-- `async share_signal(self, ...) -> int` - Line 323
-- `async get_shared_signals(self, bot_id: str) -> list[dict[str, Any]]` - Line 408
-- `async check_cross_bot_risk(self, bot_id: str, symbol: str, side: OrderSide, quantity: Decimal) -> dict[str, Any]` - Line 450
-- `async get_coordination_summary(self) -> dict[str, Any]` - Line 583
-- `async update_bot_position(self, bot_id: str, symbol: str, position_data: dict[str, Any]) -> None` - Line 950
-- `async remove_bot_position(self, bot_id: str, symbol: str) -> None` - Line 959
-- `async check_position_conflicts(self, symbol: str) -> list[dict[str, Any]]` - Line 965
-- `async coordinate_bot_actions(self, action_data: dict[str, Any]) -> dict[str, Any]` - Line 990
-- `async analyze_bot_interactions(self) -> dict[str, Any]` - Line 998
-- `async optimize_coordination(self) -> dict[str, Any]` - Line 1008
-- `async emergency_coordination(self, emergency_type: str, action: str) -> None` - Line 1012
+- `async start(self) -> None` - Line 116
+- `async stop(self) -> None` - Line 138
+- `async register_bot(self, bot_id: str, bot_config: BotConfiguration) -> None` - Line 178
+- `async unregister_bot(self, bot_id: str) -> None` - Line 220
+- `async report_position_change(self, ...) -> dict[str, Any]` - Line 256
+- `async share_signal(self, ...) -> int` - Line 319
+- `async get_shared_signals(self, bot_id: str) -> list[dict[str, Any]]` - Line 404
+- `async check_cross_bot_risk(self, bot_id: str, symbol: str, side: OrderSide, quantity: Decimal) -> dict[str, Any]` - Line 446
+- `async get_coordination_summary(self) -> dict[str, Any]` - Line 579
+- `async update_bot_position(self, bot_id: str, symbol: str, position_data: dict[str, Any]) -> None` - Line 946
+- `async remove_bot_position(self, bot_id: str, symbol: str) -> None` - Line 955
+- `async check_position_conflicts(self, symbol: str) -> list[dict[str, Any]]` - Line 961
+- `async coordinate_bot_actions(self, action_data: dict[str, Any]) -> dict[str, Any]` - Line 986
+- `async analyze_bot_interactions(self) -> dict[str, Any]` - Line 994
+- `async optimize_coordination(self) -> dict[str, Any]` - Line 1004
+- `async emergency_coordination(self, emergency_type: str, action: str) -> None` - Line 1008
 
 ### Implementation: `BotInstance` ✅
 
@@ -58,21 +58,21 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async start(self) -> None` - Line 112
-- `async stop(self) -> None` - Line 134
-- `async pause(self) -> None` - Line 155
-- `async resume(self) -> None` - Line 176
-- `get_bot_state(self) -> BotState` - Line 198
-- `get_bot_metrics(self) -> BotMetrics` - Line 207
-- `get_bot_config(self) -> BotConfiguration` - Line 218
-- `async get_bot_summary(self) -> dict[str, Any]` - Line 227
-- `async execute_trade(self, order_request: OrderRequest, execution_params: dict) -> Any` - Line 245
-- `async update_position(self, symbol: str, position_data: dict) -> None` - Line 280
-- `async close_position(self, symbol: str, reason: str) -> bool` - Line 296
-- `async get_heartbeat(self) -> dict[str, Any]` - Line 320
-- `async restart(self, reason: str) -> None` - Line 336
-- `async queue_websocket_message(self, message: dict) -> bool` - Line 357
-- `set_metrics_collector(self, metrics_collector) -> None` - Line 379
+- `async start(self) -> None` - Line 113
+- `async stop(self) -> None` - Line 135
+- `async pause(self) -> None` - Line 156
+- `async resume(self) -> None` - Line 177
+- `get_bot_state(self) -> BotState` - Line 199
+- `get_bot_metrics(self) -> BotMetrics` - Line 208
+- `get_bot_config(self) -> BotConfiguration` - Line 219
+- `async get_bot_summary(self) -> dict[str, Any]` - Line 228
+- `async execute_trade(self, order_request: OrderRequest, execution_params: dict) -> Any` - Line 246
+- `async update_position(self, symbol: str, position_data: dict) -> None` - Line 281
+- `async close_position(self, symbol: str, reason: str) -> bool` - Line 297
+- `async get_heartbeat(self) -> dict[str, Any]` - Line 321
+- `async restart(self, reason: str) -> None` - Line 337
+- `async queue_websocket_message(self, message: dict) -> bool` - Line 358
+- `set_metrics_collector(self, metrics_collector) -> None` - Line 380
 
 ### Implementation: `BotInstance` ✅
 
@@ -80,21 +80,21 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `set_metrics_collector(self, metrics_collector: MetricsCollector) -> None` - Line 317
-- `async start(self) -> None` - Line 331
-- `async stop(self) -> None` - Line 382
-- `async pause(self) -> None` - Line 460
-- `async resume(self) -> None` - Line 482
-- `get_bot_state(self) -> BotState` - Line 1369
-- `get_bot_metrics(self) -> BotMetrics` - Line 1374
-- `get_bot_config(self) -> BotConfiguration` - Line 1379
-- `async get_bot_summary(self) -> dict[str, Any]` - Line 1384
-- `async execute_trade(self, order_request: OrderRequest, execution_params: dict) -> Any` - Line 1417
-- `async update_position(self, symbol: str, position_data: dict) -> None` - Line 1528
-- `async close_position(self, symbol: str, reason: str) -> bool` - Line 1534
-- `async get_heartbeat(self) -> dict[str, Any]` - Line 1602
-- `async restart(self, reason: str) -> None` - Line 1659
-- `async queue_websocket_message(self, message: dict) -> bool` - Line 1925
+- `set_metrics_collector(self, metrics_collector: MetricsCollector) -> None` - Line 312
+- `async start(self) -> None` - Line 326
+- `async stop(self) -> None` - Line 377
+- `async pause(self) -> None` - Line 455
+- `async resume(self) -> None` - Line 477
+- `get_bot_state(self) -> BotState` - Line 1381
+- `get_bot_metrics(self) -> BotMetrics` - Line 1386
+- `get_bot_config(self) -> BotConfiguration` - Line 1391
+- `async get_bot_summary(self) -> dict[str, Any]` - Line 1396
+- `async execute_trade(self, order_request: OrderRequest, execution_params: dict) -> Any` - Line 1429
+- `async update_position(self, symbol: str, position_data: dict) -> None` - Line 1540
+- `async close_position(self, symbol: str, reason: str) -> bool` - Line 1546
+- `async get_heartbeat(self) -> dict[str, Any]` - Line 1614
+- `async restart(self, reason: str) -> None` - Line 1671
+- `async queue_websocket_message(self, message: dict) -> bool` - Line 1937
 
 ### Implementation: `BotLifecycle` ✅
 
@@ -102,14 +102,14 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async start(self) -> None` - Line 211
-- `async stop(self) -> None` - Line 232
-- `async create_bot_from_template(self, ...) -> BotConfiguration` - Line 262
-- `async deploy_bot(self, ...) -> bool` - Line 336
-- `async terminate_bot(self, ...) -> bool` - Line 414
-- `async restart_bot(self, bot_id: str, orchestrator, reason: str = 'manual_restart') -> bool` - Line 493
-- `async get_lifecycle_summary(self) -> dict[str, Any]` - Line 564
-- `async get_bot_lifecycle_details(self, bot_id: str) -> dict[str, Any] | None` - Line 631
+- `async start(self) -> None` - Line 207
+- `async stop(self) -> None` - Line 228
+- `async create_bot_from_template(self, ...) -> BotConfiguration` - Line 258
+- `async deploy_bot(self, ...) -> bool` - Line 332
+- `async terminate_bot(self, ...) -> bool` - Line 410
+- `async restart_bot(self, bot_id: str, orchestrator, reason: str = 'manual_restart') -> bool` - Line 489
+- `async get_lifecycle_summary(self) -> dict[str, Any]` - Line 560
+- `async get_bot_lifecycle_details(self, bot_id: str) -> dict[str, Any] | None` - Line 627
 
 ### Implementation: `BotMonitor` ✅
 
@@ -171,7 +171,7 @@
 - `async share_signal(self, ...) -> int` - Line 132
 - `async get_shared_signals(self, bot_id: str) -> list[dict[str, Any]]` - Line 186
 - `async check_cross_bot_risk(self, bot_id: str, symbol: str, side: OrderSide, quantity: Decimal) -> dict[str, Any]` - Line 218
-- `async cleanup_expired_signals(self) -> int` - Line 274
+- `async cleanup_expired_signals(self) -> int` - Line 275
 
 ### Implementation: `BotManagementDataTransformer` ✅
 
@@ -212,12 +212,12 @@
 - `async pause_bot(self, bot_id: str) -> bool` - Line 149
 - `async resume_bot(self, bot_id: str) -> bool` - Line 173
 - `async get_bot_state(self, bot_id: str) -> BotState` - Line 197
-- `async execute_trade(self, bot_id: str, order_request: OrderRequest, execution_params: dict[str, Any]) -> Any` - Line 218
-- `async update_position(self, bot_id: str, symbol: str, position_data: dict[str, Any]) -> None` - Line 249
-- `async close_position(self, bot_id: str, symbol: str, reason: str) -> bool` - Line 273
-- `async remove_bot_instance(self, bot_id: str) -> bool` - Line 299
-- `get_active_bot_ids(self) -> list[str]` - Line 330
-- `get_bot_count(self) -> int` - Line 337
+- `async execute_trade(self, bot_id: str, order_request: OrderRequest, execution_params: dict[str, Any]) -> Any` - Line 226
+- `async update_position(self, bot_id: str, symbol: str, position_data: dict[str, Any]) -> None` - Line 257
+- `async close_position(self, bot_id: str, symbol: str, reason: str) -> bool` - Line 281
+- `async remove_bot_instance(self, bot_id: str) -> bool` - Line 307
+- `get_active_bot_ids(self) -> list[str]` - Line 338
+- `get_bot_count(self) -> int` - Line 345
 
 ### Implementation: `IBotCoordinationService` 🔧
 
@@ -299,11 +299,11 @@
 
 **Implemented Methods:**
 - `async create_bot_from_template(self, ...) -> BotConfiguration` - Line 87
-- `async deploy_bot(self, bot_config: BotConfiguration, strategy: str = 'immediate') -> bool` - Line 161
-- `async terminate_bot(self, bot_id: str, reason: str = 'user_request') -> bool` - Line 212
-- `async restart_bot(self, bot_id: str, reason: str = 'restart_request') -> bool` - Line 257
-- `async get_lifecycle_status(self, bot_id: str) -> dict[str, Any]` - Line 306
-- `async rollback_deployment(self, bot_id: str, target_version: str) -> bool` - Line 337
+- `async deploy_bot(self, bot_config: BotConfiguration, strategy: str = 'immediate') -> bool` - Line 162
+- `async terminate_bot(self, bot_id: str, reason: str = 'user_request') -> bool` - Line 213
+- `async restart_bot(self, bot_id: str, reason: str = 'restart_request') -> bool` - Line 258
+- `async get_lifecycle_status(self, bot_id: str) -> dict[str, Any]` - Line 307
+- `async rollback_deployment(self, bot_id: str, target_version: str) -> bool` - Line 338
 
 ### Implementation: `BotMonitoringService` ✅
 
@@ -423,14 +423,14 @@
 - `async execute_with_monitoring(self, operation_name: str, operation_func: Any, *args, **kwargs) -> Any` - Line 255
 - `async create_bot(self, bot_config: BotConfiguration) -> str` - Line 336
 - `async start_bot(self, bot_id: str) -> bool` - Line 585
-- `async stop_bot(self, bot_id: str) -> bool` - Line 838
-- `async delete_bot(self, bot_id: str, force: bool = False) -> bool` - Line 960
-- `async get_bot_status(self, bot_id: str) -> dict[str, Any]` - Line 1100
-- `async get_all_bots_status(self) -> dict[str, Any]` - Line 1175
-- `async update_bot_metrics(self, bot_id: str, metrics: dict[str, Any]) -> bool` - Line 1225
-- `async start_all_bots(self, priority_filter: BotPriority | None = None) -> dict[str, bool]` - Line 1515
-- `async stop_all_bots(self) -> dict[str, bool]` - Line 1564
-- `async perform_health_check(self, bot_id: str) -> dict[str, Any]` - Line 1595
+- `async stop_bot(self, bot_id: str) -> bool` - Line 836
+- `async delete_bot(self, bot_id: str, force: bool = False) -> bool` - Line 958
+- `async get_bot_status(self, bot_id: str) -> dict[str, Any]` - Line 1098
+- `async get_all_bots_status(self) -> dict[str, Any]` - Line 1173
+- `async update_bot_metrics(self, bot_id: str, metrics: dict[str, Any]) -> bool` - Line 1223
+- `async start_all_bots(self, priority_filter: BotPriority | None = None) -> dict[str, bool]` - Line 1517
+- `async stop_all_bots(self) -> dict[str, bool]` - Line 1566
+- `async perform_health_check(self, bot_id: str) -> dict[str, Any]` - Line 1597
 
 ## COMPLETE API REFERENCE
 
@@ -450,38 +450,38 @@
 ```python
 class BotCoordinator:
     def __init__(self, config: Config)  # Line 65
-    async def start(self) -> None  # Line 120
-    async def stop(self) -> None  # Line 142
-    async def register_bot(self, bot_id: str, bot_config: BotConfiguration) -> None  # Line 182
-    async def unregister_bot(self, bot_id: str) -> None  # Line 224
-    async def report_position_change(self, ...) -> dict[str, Any]  # Line 260
-    async def share_signal(self, ...) -> int  # Line 323
-    async def get_shared_signals(self, bot_id: str) -> list[dict[str, Any]]  # Line 408
-    async def check_cross_bot_risk(self, bot_id: str, symbol: str, side: OrderSide, quantity: Decimal) -> dict[str, Any]  # Line 450
-    def _check_symbol_exposure_limits(self, ...) -> None  # Line 504
-    def _check_position_concentration(self, risk_assessment: dict[str, Any], bot_id: str, symbol: str) -> None  # Line 522
-    def _check_conflicting_positions(self, ...) -> None  # Line 537
-    def _generate_risk_recommendations(self, risk_assessment: dict[str, Any]) -> None  # Line 572
-    async def get_coordination_summary(self) -> dict[str, Any]  # Line 583
-    async def _coordination_loop(self) -> None  # Line 622
-    async def _signal_distribution_loop(self) -> None  # Line 662
-    async def _update_symbol_exposure(self, ...) -> None  # Line 695
-    async def _analyze_position_change(self, ...) -> dict[str, Any]  # Line 727
-    async def _detect_arbitrage_opportunities(self) -> None  # Line 771
-    async def _detect_position_conflicts(self) -> None  # Line 803
-    async def _analyze_symbol_conflicts(self, symbol: str) -> bool  # Line 835
-    async def _cleanup_expired_signals(self) -> None  # Line 864
-    async def _update_exchange_metrics(self) -> None  # Line 877
-    async def _analyze_signal_correlations(self) -> None  # Line 890
-    async def _process_priority_signals(self) -> None  # Line 915
-    async def _update_signal_statistics(self) -> None  # Line 932
-    async def update_bot_position(self, bot_id: str, symbol: str, position_data: dict[str, Any]) -> None  # Line 950
-    async def remove_bot_position(self, bot_id: str, symbol: str) -> None  # Line 959
-    async def check_position_conflicts(self, symbol: str) -> list[dict[str, Any]]  # Line 965
-    async def coordinate_bot_actions(self, action_data: dict[str, Any]) -> dict[str, Any]  # Line 990
-    async def analyze_bot_interactions(self) -> dict[str, Any]  # Line 998
-    async def optimize_coordination(self) -> dict[str, Any]  # Line 1008
-    async def emergency_coordination(self, emergency_type: str, action: str) -> None  # Line 1012
+    async def start(self) -> None  # Line 116
+    async def stop(self) -> None  # Line 138
+    async def register_bot(self, bot_id: str, bot_config: BotConfiguration) -> None  # Line 178
+    async def unregister_bot(self, bot_id: str) -> None  # Line 220
+    async def report_position_change(self, ...) -> dict[str, Any]  # Line 256
+    async def share_signal(self, ...) -> int  # Line 319
+    async def get_shared_signals(self, bot_id: str) -> list[dict[str, Any]]  # Line 404
+    async def check_cross_bot_risk(self, bot_id: str, symbol: str, side: OrderSide, quantity: Decimal) -> dict[str, Any]  # Line 446
+    def _check_symbol_exposure_limits(self, ...) -> None  # Line 500
+    def _check_position_concentration(self, risk_assessment: dict[str, Any], bot_id: str, symbol: str) -> None  # Line 518
+    def _check_conflicting_positions(self, ...) -> None  # Line 533
+    def _generate_risk_recommendations(self, risk_assessment: dict[str, Any]) -> None  # Line 568
+    async def get_coordination_summary(self) -> dict[str, Any]  # Line 579
+    async def _coordination_loop(self) -> None  # Line 618
+    async def _signal_distribution_loop(self) -> None  # Line 658
+    async def _update_symbol_exposure(self, ...) -> None  # Line 691
+    async def _analyze_position_change(self, ...) -> dict[str, Any]  # Line 723
+    async def _detect_arbitrage_opportunities(self) -> None  # Line 767
+    async def _detect_position_conflicts(self) -> None  # Line 799
+    async def _analyze_symbol_conflicts(self, symbol: str) -> bool  # Line 831
+    async def _cleanup_expired_signals(self) -> None  # Line 860
+    async def _update_exchange_metrics(self) -> None  # Line 873
+    async def _analyze_signal_correlations(self) -> None  # Line 886
+    async def _process_priority_signals(self) -> None  # Line 911
+    async def _update_signal_statistics(self) -> None  # Line 928
+    async def update_bot_position(self, bot_id: str, symbol: str, position_data: dict[str, Any]) -> None  # Line 946
+    async def remove_bot_position(self, bot_id: str, symbol: str) -> None  # Line 955
+    async def check_position_conflicts(self, symbol: str) -> list[dict[str, Any]]  # Line 961
+    async def coordinate_bot_actions(self, action_data: dict[str, Any]) -> dict[str, Any]  # Line 986
+    async def analyze_bot_interactions(self) -> dict[str, Any]  # Line 994
+    async def optimize_coordination(self) -> dict[str, Any]  # Line 1004
+    async def emergency_coordination(self, emergency_type: str, action: str) -> None  # Line 1008
 ```
 
 ### File: bot_entity.py
@@ -499,24 +499,24 @@ class BotCoordinator:
 
 ```python
 class BotInstance:
-    def __init__(self, ...)  # Line 36
-    def _validate_configuration(self) -> None  # Line 70
-    def _create_default_metrics(self) -> BotMetrics  # Line 92
-    async def start(self) -> None  # Line 112
-    async def stop(self) -> None  # Line 134
-    async def pause(self) -> None  # Line 155
-    async def resume(self) -> None  # Line 176
-    def get_bot_state(self) -> BotState  # Line 198
-    def get_bot_metrics(self) -> BotMetrics  # Line 207
-    def get_bot_config(self) -> BotConfiguration  # Line 218
-    async def get_bot_summary(self) -> dict[str, Any]  # Line 227
-    async def execute_trade(self, order_request: OrderRequest, execution_params: dict) -> Any  # Line 245
-    async def update_position(self, symbol: str, position_data: dict) -> None  # Line 280
-    async def close_position(self, symbol: str, reason: str) -> bool  # Line 296
-    async def get_heartbeat(self) -> dict[str, Any]  # Line 320
-    async def restart(self, reason: str) -> None  # Line 336
-    async def queue_websocket_message(self, message: dict) -> bool  # Line 357
-    def set_metrics_collector(self, metrics_collector) -> None  # Line 379
+    def __init__(self, ...)  # Line 37
+    def _validate_configuration(self) -> None  # Line 71
+    def _create_default_metrics(self) -> BotMetrics  # Line 93
+    async def start(self) -> None  # Line 113
+    async def stop(self) -> None  # Line 135
+    async def pause(self) -> None  # Line 156
+    async def resume(self) -> None  # Line 177
+    def get_bot_state(self) -> BotState  # Line 199
+    def get_bot_metrics(self) -> BotMetrics  # Line 208
+    def get_bot_config(self) -> BotConfiguration  # Line 219
+    async def get_bot_summary(self) -> dict[str, Any]  # Line 228
+    async def execute_trade(self, order_request: OrderRequest, execution_params: dict) -> Any  # Line 246
+    async def update_position(self, symbol: str, position_data: dict) -> None  # Line 281
+    async def close_position(self, symbol: str, reason: str) -> bool  # Line 297
+    async def get_heartbeat(self) -> dict[str, Any]  # Line 321
+    async def restart(self, reason: str) -> None  # Line 337
+    async def queue_websocket_message(self, message: dict) -> bool  # Line 358
+    def set_metrics_collector(self, metrics_collector) -> None  # Line 380
 ```
 
 ### File: bot_instance.py
@@ -534,79 +534,79 @@ class BotInstance:
 
 ```python
 class BotInstance:
-    def _convert_to_strategy_type(strategy_id: str) -> StrategyType  # Line 135
-    def __init__(self, ...)  # Line 153
-    def set_metrics_collector(self, metrics_collector: MetricsCollector) -> None  # Line 317
-    async def start(self) -> None  # Line 331
-    async def stop(self) -> None  # Line 382
-    async def pause(self) -> None  # Line 460
-    async def resume(self) -> None  # Line 482
-    async def _validate_configuration(self) -> None  # Line 503
-    async def _initialize_components(self) -> None  # Line 533
-    async def _allocate_resources(self) -> None  # Line 555
-    async def _initialize_strategy(self) -> None  # Line 590
-    async def _start_strategy_execution(self) -> None  # Line 631
-    async def _strategy_execution_loop(self) -> None  # Line 639
-    async def _get_current_market_data(self, symbol: str) -> MarketData | None  # Line 710
-    async def _process_trading_signal(self, signal) -> None  # Line 744
-    async def _check_position_limits(self) -> bool  # Line 784
-    async def _create_order_request_from_signal(self, signal) -> OrderRequest | None  # Line 796
-    async def _validate_order_request(self, order_request: OrderRequest, symbol: str) -> bool  # Line 829
-    async def _execute_order_request(self, order_request: OrderRequest, signal) -> Any | None  # Line 873
-    async def _record_execution_metrics(self, start_time: datetime) -> None  # Line 928
-    async def _start_monitoring(self) -> None  # Line 957
-    async def _start_websocket_monitoring(self) -> None  # Line 961
-    async def _heartbeat_loop(self) -> None  # Line 971
-    async def _check_daily_limits(self) -> None  # Line 993
-    async def _update_strategy_state(self) -> None  # Line 1017
-    async def _track_execution(self, execution_result, order_request = None) -> None  # Line 1044
-    async def _get_order_from_execution(self, execution_result, order_request = None)  # Line 1070
-    def _update_basic_execution_metrics(self, execution_result) -> None  # Line 1080
-    async def _update_position_tracking(self, order) -> None  # Line 1086
-    async def _process_execution_pnl(self, execution_result, order) -> None  # Line 1099
-    async def _record_pnl_metrics(self, trade_pnl: Decimal) -> None  # Line 1119
-    async def _notify_strategy_of_execution(self, execution_result, order) -> None  # Line 1135
-    async def _calculate_portfolio_value(self) -> Decimal  # Line 1175
-    async def _update_performance_metrics(self) -> None  # Line 1181
-    async def _check_resource_usage(self) -> None  # Line 1207
-    async def _create_state_checkpoint(self) -> None  # Line 1216
-    async def _close_open_positions(self) -> None  # Line 1232
-    async def _cancel_pending_orders(self) -> None  # Line 1247
-    async def _release_resources(self) -> None  # Line 1263
-    async def _release_capital_resources(self) -> None  # Line 1276
-    async def _close_websocket_connections(self) -> None  # Line 1289
-    async def _close_individual_connections(self, websocket_connections: list) -> None  # Line 1314
-    async def _cleanup_remaining_connections(self, websocket_connections: list) -> None  # Line 1344
-    def get_bot_state(self) -> BotState  # Line 1369
-    def get_bot_metrics(self) -> BotMetrics  # Line 1374
-    def get_bot_config(self) -> BotConfiguration  # Line 1379
-    async def get_bot_summary(self) -> dict[str, Any]  # Line 1384
-    async def execute_trade(self, order_request: OrderRequest, execution_params: dict) -> Any  # Line 1417
-    async def update_position(self, symbol: str, position_data: dict) -> None  # Line 1528
-    async def close_position(self, symbol: str, reason: str) -> bool  # Line 1534
-    async def get_heartbeat(self) -> dict[str, Any]  # Line 1602
-    async def _trading_loop(self) -> None  # Line 1617
-    async def _calculate_performance_metrics(self) -> None  # Line 1629
-    async def _check_risk_limits(self, order_request: OrderRequest) -> bool  # Line 1649
-    async def restart(self, reason: str) -> None  # Line 1659
-    async def _websocket_heartbeat_loop(self) -> None  # Line 1670
-    async def _websocket_timeout_monitor_loop(self) -> None  # Line 1731
-    async def _check_and_handle_websocket_timeouts(self) -> None  # Line 1754
-    async def _handle_websocket_timeout(self, exchange_name: str) -> None  # Line 1776
-    async def _websocket_message_processor_loop(self) -> None  # Line 1811
-    async def _process_websocket_message_batch(self, messages: list) -> None  # Line 1841
-    async def _process_single_websocket_message(self, message: dict) -> None  # Line 1854
-    async def _handle_market_data_message(self, message: dict) -> None  # Line 1878
-    async def _handle_order_update_message(self, message: dict) -> None  # Line 1895
-    async def _handle_account_update_message(self, message: dict) -> None  # Line 1906
-    async def _handle_pong_message(self, message: dict) -> None  # Line 1920
-    async def queue_websocket_message(self, message: dict) -> bool  # Line 1925
-    async def _close_existing_websocket_connection(self, exchange_name: str) -> None  # Line 1952
-    async def _attempt_websocket_reconnection(self, exchange_name: str) -> bool  # Line 1972
-    async def _collect_message_batch(self) -> list  # Line 2039
-    async def _process_remaining_messages_on_shutdown(self) -> None  # Line 2066
-    async def _clear_message_queue(self) -> None  # Line 2111
-    async def _circuit_breaker_reset_loop(self) -> None  # Line 2140
+    def _convert_to_strategy_type(strategy_id: str) -> StrategyType  # Line 134
+    def __init__(self, ...)  # Line 152
+    def set_metrics_collector(self, metrics_collector: MetricsCollector) -> None  # Line 312
+    async def start(self) -> None  # Line 326
+    async def stop(self) -> None  # Line 377
+    async def pause(self) -> None  # Line 455
+    async def resume(self) -> None  # Line 477
+    async def _validate_configuration(self) -> None  # Line 498
+    async def _initialize_components(self) -> None  # Line 528
+    async def _allocate_resources(self) -> None  # Line 550
+    async def _initialize_strategy(self) -> None  # Line 585
+    async def _start_strategy_execution(self) -> None  # Line 626
+    async def _strategy_execution_loop(self) -> None  # Line 634
+    async def _get_current_market_data(self, symbol: str) -> MarketData | None  # Line 705
+    async def _process_trading_signal(self, signal) -> None  # Line 756
+    async def _check_position_limits(self) -> bool  # Line 796
+    async def _create_order_request_from_signal(self, signal) -> OrderRequest | None  # Line 808
+    async def _validate_order_request(self, order_request: OrderRequest, symbol: str) -> bool  # Line 841
+    async def _execute_order_request(self, order_request: OrderRequest, signal) -> Any | None  # Line 885
+    async def _record_execution_metrics(self, start_time: datetime) -> None  # Line 940
+    async def _start_monitoring(self) -> None  # Line 969
+    async def _start_websocket_monitoring(self) -> None  # Line 973
+    async def _heartbeat_loop(self) -> None  # Line 983
+    async def _check_daily_limits(self) -> None  # Line 1005
+    async def _update_strategy_state(self) -> None  # Line 1029
+    async def _track_execution(self, execution_result, order_request = None) -> None  # Line 1056
+    async def _get_order_from_execution(self, execution_result, order_request = None)  # Line 1082
+    def _update_basic_execution_metrics(self, execution_result) -> None  # Line 1092
+    async def _update_position_tracking(self, order) -> None  # Line 1098
+    async def _process_execution_pnl(self, execution_result, order) -> None  # Line 1111
+    async def _record_pnl_metrics(self, trade_pnl: Decimal) -> None  # Line 1131
+    async def _notify_strategy_of_execution(self, execution_result, order) -> None  # Line 1147
+    async def _calculate_portfolio_value(self) -> Decimal  # Line 1187
+    async def _update_performance_metrics(self) -> None  # Line 1193
+    async def _check_resource_usage(self) -> None  # Line 1219
+    async def _create_state_checkpoint(self) -> None  # Line 1228
+    async def _close_open_positions(self) -> None  # Line 1244
+    async def _cancel_pending_orders(self) -> None  # Line 1259
+    async def _release_resources(self) -> None  # Line 1275
+    async def _release_capital_resources(self) -> None  # Line 1288
+    async def _close_websocket_connections(self) -> None  # Line 1301
+    async def _close_individual_connections(self, websocket_connections: list) -> None  # Line 1326
+    async def _cleanup_remaining_connections(self, websocket_connections: list) -> None  # Line 1356
+    def get_bot_state(self) -> BotState  # Line 1381
+    def get_bot_metrics(self) -> BotMetrics  # Line 1386
+    def get_bot_config(self) -> BotConfiguration  # Line 1391
+    async def get_bot_summary(self) -> dict[str, Any]  # Line 1396
+    async def execute_trade(self, order_request: OrderRequest, execution_params: dict) -> Any  # Line 1429
+    async def update_position(self, symbol: str, position_data: dict) -> None  # Line 1540
+    async def close_position(self, symbol: str, reason: str) -> bool  # Line 1546
+    async def get_heartbeat(self) -> dict[str, Any]  # Line 1614
+    async def _trading_loop(self) -> None  # Line 1629
+    async def _calculate_performance_metrics(self) -> None  # Line 1641
+    async def _check_risk_limits(self, order_request: OrderRequest) -> bool  # Line 1661
+    async def restart(self, reason: str) -> None  # Line 1671
+    async def _websocket_heartbeat_loop(self) -> None  # Line 1682
+    async def _websocket_timeout_monitor_loop(self) -> None  # Line 1743
+    async def _check_and_handle_websocket_timeouts(self) -> None  # Line 1766
+    async def _handle_websocket_timeout(self, exchange_name: str) -> None  # Line 1788
+    async def _websocket_message_processor_loop(self) -> None  # Line 1823
+    async def _process_websocket_message_batch(self, messages: list) -> None  # Line 1853
+    async def _process_single_websocket_message(self, message: dict) -> None  # Line 1866
+    async def _handle_market_data_message(self, message: dict) -> None  # Line 1890
+    async def _handle_order_update_message(self, message: dict) -> None  # Line 1907
+    async def _handle_account_update_message(self, message: dict) -> None  # Line 1918
+    async def _handle_pong_message(self, message: dict) -> None  # Line 1932
+    async def queue_websocket_message(self, message: dict) -> bool  # Line 1937
+    async def _close_existing_websocket_connection(self, exchange_name: str) -> None  # Line 1964
+    async def _attempt_websocket_reconnection(self, exchange_name: str) -> bool  # Line 1984
+    async def _collect_message_batch(self) -> list  # Line 2051
+    async def _process_remaining_messages_on_shutdown(self) -> None  # Line 2078
+    async def _clear_message_queue(self) -> None  # Line 2123
+    async def _circuit_breaker_reset_loop(self) -> None  # Line 2152
 ```
 
 ### File: bot_lifecycle.py
@@ -625,29 +625,29 @@ class BotInstance:
 ```python
 class BotLifecycle:
     def __init__(self, config: Config)  # Line 59
-    def _initialize_bot_templates(self) -> None  # Line 109
-    def _initialize_deployment_strategies(self) -> None  # Line 199
-    async def start(self) -> None  # Line 211
-    async def stop(self) -> None  # Line 232
-    async def create_bot_from_template(self, ...) -> BotConfiguration  # Line 262
-    async def deploy_bot(self, ...) -> bool  # Line 336
-    async def terminate_bot(self, ...) -> bool  # Line 414
-    async def restart_bot(self, bot_id: str, orchestrator, reason: str = 'manual_restart') -> bool  # Line 493
-    async def get_lifecycle_summary(self) -> dict[str, Any]  # Line 564
-    async def get_bot_lifecycle_details(self, bot_id: str) -> dict[str, Any] | None  # Line 631
-    async def _initialize_bot_lifecycle(self, bot_id: str, template_name: str, deployment_strategy: str) -> None  # Line 681
-    async def _record_lifecycle_event(self, bot_id: str, event_type: str, event_data: dict[str, Any]) -> None  # Line 696
-    async def _deploy_immediate(self, bot_config: BotConfiguration, orchestrator, options: dict[str, Any]) -> bool  # Line 716
-    async def _deploy_staged(self, bot_config: BotConfiguration, orchestrator, options: dict[str, Any]) -> bool  # Line 734
-    async def _deploy_blue_green(self, bot_config: BotConfiguration, orchestrator, options: dict[str, Any]) -> bool  # Line 755
-    async def _deploy_canary(self, bot_config: BotConfiguration, orchestrator, options: dict[str, Any]) -> bool  # Line 763
-    async def _deploy_rolling(self, bot_config: BotConfiguration, orchestrator, options: dict[str, Any]) -> bool  # Line 771
-    async def _graceful_termination(self, bot_id: str, orchestrator) -> bool  # Line 779
-    async def _immediate_termination(self, bot_id: str, orchestrator) -> bool  # Line 806
-    async def _lifecycle_loop(self) -> None  # Line 821
-    async def _cleanup_old_events(self) -> None  # Line 845
-    async def _monitor_lifecycle_health(self) -> None  # Line 860
-    async def _update_lifecycle_statistics(self) -> None  # Line 877
+    def _initialize_bot_templates(self) -> None  # Line 105
+    def _initialize_deployment_strategies(self) -> None  # Line 195
+    async def start(self) -> None  # Line 207
+    async def stop(self) -> None  # Line 228
+    async def create_bot_from_template(self, ...) -> BotConfiguration  # Line 258
+    async def deploy_bot(self, ...) -> bool  # Line 332
+    async def terminate_bot(self, ...) -> bool  # Line 410
+    async def restart_bot(self, bot_id: str, orchestrator, reason: str = 'manual_restart') -> bool  # Line 489
+    async def get_lifecycle_summary(self) -> dict[str, Any]  # Line 560
+    async def get_bot_lifecycle_details(self, bot_id: str) -> dict[str, Any] | None  # Line 627
+    async def _initialize_bot_lifecycle(self, bot_id: str, template_name: str, deployment_strategy: str) -> None  # Line 677
+    async def _record_lifecycle_event(self, bot_id: str, event_type: str, event_data: dict[str, Any]) -> None  # Line 692
+    async def _deploy_immediate(self, bot_config: BotConfiguration, orchestrator, options: dict[str, Any]) -> bool  # Line 712
+    async def _deploy_staged(self, bot_config: BotConfiguration, orchestrator, options: dict[str, Any]) -> bool  # Line 730
+    async def _deploy_blue_green(self, bot_config: BotConfiguration, orchestrator, options: dict[str, Any]) -> bool  # Line 751
+    async def _deploy_canary(self, bot_config: BotConfiguration, orchestrator, options: dict[str, Any]) -> bool  # Line 759
+    async def _deploy_rolling(self, bot_config: BotConfiguration, orchestrator, options: dict[str, Any]) -> bool  # Line 767
+    async def _graceful_termination(self, bot_id: str, orchestrator) -> bool  # Line 775
+    async def _immediate_termination(self, bot_id: str, orchestrator) -> bool  # Line 802
+    async def _lifecycle_loop(self) -> None  # Line 817
+    async def _cleanup_old_events(self) -> None  # Line 841
+    async def _monitor_lifecycle_health(self) -> None  # Line 856
+    async def _update_lifecycle_statistics(self) -> None  # Line 873
 ```
 
 ### File: bot_monitor.py
@@ -787,14 +787,14 @@ class BotCoordinationService(BaseService, IBotCoordinationService):
     async def share_signal(self, ...) -> int  # Line 132
     async def get_shared_signals(self, bot_id: str) -> list[dict[str, Any]]  # Line 186
     async def check_cross_bot_risk(self, bot_id: str, symbol: str, side: OrderSide, quantity: Decimal) -> dict[str, Any]  # Line 218
-    async def cleanup_expired_signals(self) -> int  # Line 274
-    def _detect_position_conflict(self, bot1: dict[str, Any], bot2: dict[str, Any], symbol: str) -> dict[str, Any] | None  # Line 304
-    def _calculate_total_exposure(self, symbol: str) -> Decimal  # Line 328
-    def _check_symbol_exposure_limits(self, risk_assessment: dict[str, Any], symbol: str, quantity: Decimal) -> None  # Line 340
-    def _check_position_concentration(self, risk_assessment: dict[str, Any], bot_id: str, symbol: str) -> None  # Line 347
-    def _check_conflicting_positions(self, ...) -> None  # Line 354
-    def _generate_risk_recommendations(self, risk_assessment: dict[str, Any]) -> None  # Line 366
-    def _get_current_timestamp(self)  # Line 371
+    async def cleanup_expired_signals(self) -> int  # Line 275
+    def _detect_position_conflict(self, bot1: dict[str, Any], bot2: dict[str, Any], symbol: str) -> dict[str, Any] | None  # Line 305
+    def _calculate_total_exposure(self, symbol: str) -> Decimal  # Line 329
+    def _check_symbol_exposure_limits(self, risk_assessment: dict[str, Any], symbol: str, quantity: Decimal) -> None  # Line 341
+    def _check_position_concentration(self, risk_assessment: dict[str, Any], bot_id: str, symbol: str) -> None  # Line 348
+    def _check_conflicting_positions(self, ...) -> None  # Line 355
+    def _generate_risk_recommendations(self, risk_assessment: dict[str, Any]) -> None  # Line 367
+    def _get_current_timestamp(self)  # Line 372
 ```
 
 ### File: data_transformer.py
@@ -893,13 +893,13 @@ class BotInstanceService(BaseService, IBotInstanceService):
     async def pause_bot(self, bot_id: str) -> bool  # Line 149
     async def resume_bot(self, bot_id: str) -> bool  # Line 173
     async def get_bot_state(self, bot_id: str) -> BotState  # Line 197
-    async def execute_trade(self, bot_id: str, order_request: OrderRequest, execution_params: dict[str, Any]) -> Any  # Line 218
-    async def update_position(self, bot_id: str, symbol: str, position_data: dict[str, Any]) -> None  # Line 249
-    async def close_position(self, bot_id: str, symbol: str, reason: str) -> bool  # Line 273
-    async def remove_bot_instance(self, bot_id: str) -> bool  # Line 299
-    def get_active_bot_ids(self) -> list[str]  # Line 330
-    def get_bot_count(self) -> int  # Line 337
-    async def _validate_exchange_connectivity(self, bot_config: BotConfiguration) -> None  # Line 341
+    async def execute_trade(self, bot_id: str, order_request: OrderRequest, execution_params: dict[str, Any]) -> Any  # Line 226
+    async def update_position(self, bot_id: str, symbol: str, position_data: dict[str, Any]) -> None  # Line 257
+    async def close_position(self, bot_id: str, symbol: str, reason: str) -> bool  # Line 281
+    async def remove_bot_instance(self, bot_id: str) -> bool  # Line 307
+    def get_active_bot_ids(self) -> list[str]  # Line 338
+    def get_bot_count(self) -> int  # Line 345
+    async def _validate_exchange_connectivity(self, bot_config: BotConfiguration) -> None  # Line 349
 ```
 
 ### File: interfaces.py
@@ -1008,20 +1008,20 @@ class BotLifecycleService(BaseService, IBotLifecycleService):
     def _initialize_bot_templates(self) -> None  # Line 37
     def _initialize_deployment_strategies(self) -> None  # Line 77
     async def create_bot_from_template(self, ...) -> BotConfiguration  # Line 87
-    async def deploy_bot(self, bot_config: BotConfiguration, strategy: str = 'immediate') -> bool  # Line 161
-    async def terminate_bot(self, bot_id: str, reason: str = 'user_request') -> bool  # Line 212
-    async def restart_bot(self, bot_id: str, reason: str = 'restart_request') -> bool  # Line 257
-    async def get_lifecycle_status(self, bot_id: str) -> dict[str, Any]  # Line 306
-    async def rollback_deployment(self, bot_id: str, target_version: str) -> bool  # Line 337
-    async def _record_lifecycle_event(self, bot_id: str, event_type: str, data: dict[str, Any]) -> None  # Line 383
-    def _merge_configs(self, default_config: dict[str, Any], custom_config: dict[str, Any]) -> dict[str, Any]  # Line 403
-    def _determine_lifecycle_status(self, latest_events: dict[str, Any]) -> str  # Line 409
-    async def _deploy_immediate(self, bot_config: BotConfiguration) -> bool  # Line 424
-    async def _deploy_staged(self, bot_config: BotConfiguration) -> bool  # Line 429
-    async def _deploy_blue_green(self, bot_config: BotConfiguration) -> bool  # Line 434
-    async def _deploy_canary(self, bot_config: BotConfiguration) -> bool  # Line 439
-    async def _deploy_rolling(self, bot_config: BotConfiguration) -> bool  # Line 444
-    async def _graceful_termination(self, bot_id: str) -> bool  # Line 449
+    async def deploy_bot(self, bot_config: BotConfiguration, strategy: str = 'immediate') -> bool  # Line 162
+    async def terminate_bot(self, bot_id: str, reason: str = 'user_request') -> bool  # Line 213
+    async def restart_bot(self, bot_id: str, reason: str = 'restart_request') -> bool  # Line 258
+    async def get_lifecycle_status(self, bot_id: str) -> dict[str, Any]  # Line 307
+    async def rollback_deployment(self, bot_id: str, target_version: str) -> bool  # Line 338
+    async def _record_lifecycle_event(self, bot_id: str, event_type: str, data: dict[str, Any]) -> None  # Line 384
+    def _merge_configs(self, default_config: dict[str, Any], custom_config: dict[str, Any]) -> dict[str, Any]  # Line 404
+    def _determine_lifecycle_status(self, latest_events: dict[str, Any]) -> str  # Line 410
+    async def _deploy_immediate(self, bot_config: BotConfiguration) -> bool  # Line 425
+    async def _deploy_staged(self, bot_config: BotConfiguration) -> bool  # Line 430
+    async def _deploy_blue_green(self, bot_config: BotConfiguration) -> bool  # Line 435
+    async def _deploy_canary(self, bot_config: BotConfiguration) -> bool  # Line 440
+    async def _deploy_rolling(self, bot_config: BotConfiguration) -> bool  # Line 445
+    async def _graceful_termination(self, bot_id: str) -> bool  # Line 450
 ```
 
 ### File: monitoring_service.py
@@ -1247,28 +1247,28 @@ class BotService(BaseService):
     async def _create_bot_impl(self, bot_config: BotConfiguration) -> str  # Line 352
     async def start_bot(self, bot_id: str) -> bool  # Line 585
     async def _start_bot_impl(self, bot_id: str) -> bool  # Line 600
-    async def stop_bot(self, bot_id: str) -> bool  # Line 838
-    async def _stop_bot_impl(self, bot_id: str) -> bool  # Line 850
-    async def delete_bot(self, bot_id: str, force: bool = False) -> bool  # Line 960
-    async def _delete_bot_impl(self, bot_id: str, force: bool = False) -> bool  # Line 975
-    async def get_bot_status(self, bot_id: str) -> dict[str, Any]  # Line 1100
-    async def _get_bot_status_impl(self, bot_id: str) -> dict[str, Any]  # Line 1114
-    async def get_all_bots_status(self) -> dict[str, Any]  # Line 1175
-    async def _get_all_bots_status_impl(self) -> dict[str, Any]  # Line 1186
-    async def update_bot_metrics(self, bot_id: str, metrics: dict[str, Any]) -> bool  # Line 1225
-    async def _update_bot_metrics_impl(self, bot_id: str, metrics: dict[str, Any]) -> bool  # Line 1240
-    async def _handle_risk_action(self, bot_id: str, risk_metrics: dict[str, Any]) -> None  # Line 1367
-    async def _handle_high_risk_bot(self, bot_id: str, risk_metrics: Any) -> None  # Line 1412
-    def _setup_event_handlers(self) -> None  # Line 1458
-    def _calculate_bot_rate_requirements(self, bot_config: BotConfiguration) -> int  # Line 1474
-    async def start_all_bots(self, priority_filter: BotPriority | None = None) -> dict[str, bool]  # Line 1515
-    async def _start_all_bots_impl(self, priority_filter: BotPriority | None = None) -> dict[str, bool]  # Line 1529
-    async def stop_all_bots(self) -> dict[str, bool]  # Line 1564
-    async def _stop_all_bots_impl(self) -> dict[str, bool]  # Line 1573
-    async def perform_health_check(self, bot_id: str) -> dict[str, Any]  # Line 1595
-    async def _perform_health_check_impl(self, bot_id: str) -> dict[str, Any]  # Line 1609
-    async def _validate_bot_configuration(self, bot_config: BotConfiguration) -> None  # Line 1688
-    async def _validate_exchange_configuration(self, bot_config: BotConfiguration) -> None  # Line 1724
+    async def stop_bot(self, bot_id: str) -> bool  # Line 836
+    async def _stop_bot_impl(self, bot_id: str) -> bool  # Line 848
+    async def delete_bot(self, bot_id: str, force: bool = False) -> bool  # Line 958
+    async def _delete_bot_impl(self, bot_id: str, force: bool = False) -> bool  # Line 973
+    async def get_bot_status(self, bot_id: str) -> dict[str, Any]  # Line 1098
+    async def _get_bot_status_impl(self, bot_id: str) -> dict[str, Any]  # Line 1112
+    async def get_all_bots_status(self) -> dict[str, Any]  # Line 1173
+    async def _get_all_bots_status_impl(self) -> dict[str, Any]  # Line 1184
+    async def update_bot_metrics(self, bot_id: str, metrics: dict[str, Any]) -> bool  # Line 1223
+    async def _update_bot_metrics_impl(self, bot_id: str, metrics: dict[str, Any]) -> bool  # Line 1238
+    async def _handle_risk_action(self, bot_id: str, risk_metrics: dict[str, Any]) -> None  # Line 1363
+    async def _handle_high_risk_bot(self, bot_id: str, risk_metrics: Any) -> None  # Line 1408
+    def _setup_event_handlers(self) -> None  # Line 1454
+    def _calculate_bot_rate_requirements(self, bot_config: BotConfiguration) -> int  # Line 1476
+    async def start_all_bots(self, priority_filter: BotPriority | None = None) -> dict[str, bool]  # Line 1517
+    async def _start_all_bots_impl(self, priority_filter: BotPriority | None = None) -> dict[str, bool]  # Line 1531
+    async def stop_all_bots(self) -> dict[str, bool]  # Line 1566
+    async def _stop_all_bots_impl(self) -> dict[str, bool]  # Line 1575
+    async def perform_health_check(self, bot_id: str) -> dict[str, Any]  # Line 1597
+    async def _perform_health_check_impl(self, bot_id: str) -> dict[str, Any]  # Line 1611
+    async def _validate_bot_configuration(self, bot_config: BotConfiguration) -> None  # Line 1690
+    async def _validate_exchange_configuration(self, bot_config: BotConfiguration) -> None  # Line 1726
     async def _stop_all_active_bots(self) -> None  # Line 1865
     async def _load_existing_bot_states(self) -> None  # Line 1880
     async def _service_health_check(self) -> Any  # Line 1971

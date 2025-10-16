@@ -85,7 +85,7 @@ class CapitalService(AbstractCapitalService, TransactionalService, ErrorPropagat
         """Stop the capital service."""
         self._logger.info("CapitalService stopped")
 
-    @with_circuit_breaker
+    @with_circuit_breaker()
     @with_retry(max_attempts=3)
     async def allocate_capital(
         self,
@@ -220,7 +220,7 @@ class CapitalService(AbstractCapitalService, TransactionalService, ErrorPropagat
             self._logger.error(f"Capital allocation failed: {error_data}")
             raise CapitalAllocationError(f"Failed to allocate capital: {e}") from e
 
-    @with_circuit_breaker
+    @with_circuit_breaker()
     @with_retry(max_attempts=3)
     async def release_capital(
         self,

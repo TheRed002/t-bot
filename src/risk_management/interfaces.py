@@ -7,7 +7,7 @@ service layer, ensuring proper separation of concerns and dependency injection.
 
 from abc import ABC, abstractmethod
 from decimal import Decimal
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from src.core.types import (
     MarketData,
@@ -20,6 +20,7 @@ from src.core.types import (
 )
 
 
+@runtime_checkable
 class CacheServiceInterface(Protocol):
     """Protocol for cache service implementations."""
 
@@ -44,6 +45,7 @@ class CacheServiceInterface(Protocol):
         ...
 
 
+@runtime_checkable
 class ExchangeServiceInterface(Protocol):
     """Protocol for exchange service implementations to avoid direct coupling."""
 
@@ -60,6 +62,7 @@ class ExchangeServiceInterface(Protocol):
         ...
 
 
+@runtime_checkable
 class RiskServiceInterface(Protocol):
     """Protocol for risk management service implementations."""
 
@@ -116,6 +119,7 @@ class RiskServiceInterface(Protocol):
         ...
 
 
+@runtime_checkable
 class PositionSizingServiceInterface(Protocol):
     """Protocol for position sizing service implementations."""
 
@@ -134,6 +138,7 @@ class PositionSizingServiceInterface(Protocol):
         ...
 
 
+@runtime_checkable
 class RiskMetricsServiceInterface(Protocol):
     """Protocol for risk metrics service implementations."""
 
@@ -150,6 +155,7 @@ class RiskMetricsServiceInterface(Protocol):
         ...
 
 
+@runtime_checkable
 class RiskValidationServiceInterface(Protocol):
     """Protocol for risk validation service implementations."""
 
@@ -166,6 +172,7 @@ class RiskValidationServiceInterface(Protocol):
         ...
 
 
+@runtime_checkable
 class PortfolioLimitsServiceInterface(Protocol):
     """Protocol for portfolio limits service implementations."""
 
@@ -188,6 +195,7 @@ class PortfolioLimitsServiceInterface(Protocol):
         ...
 
 
+@runtime_checkable
 class RiskMonitoringServiceInterface(Protocol):
     """Protocol for risk monitoring service implementations."""
 
@@ -245,6 +253,7 @@ class AbstractRiskService(ABC):
         pass
 
 
+@runtime_checkable
 class RiskMetricsRepositoryInterface(Protocol):
     """Protocol for risk metrics data access."""
 
@@ -269,6 +278,7 @@ class RiskMetricsRepositoryInterface(Protocol):
         ...
 
 
+@runtime_checkable
 class PortfolioRepositoryInterface(Protocol):
     """Protocol for portfolio data access."""
 

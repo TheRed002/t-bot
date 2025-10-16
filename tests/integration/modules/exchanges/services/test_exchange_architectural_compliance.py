@@ -239,13 +239,11 @@ class TestExchangeArchitecturalCompliance:
         """Test DI registration structure exists."""
         try:
             from src.exchanges.di_registration import (
-                register_exchange_dependencies,
                 register_exchange_services,
                 setup_exchange_services,
             )
 
             # Verify registration functions exist
-            assert callable(register_exchange_dependencies)
             assert callable(register_exchange_services)
             assert callable(setup_exchange_services)
 

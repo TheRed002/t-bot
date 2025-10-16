@@ -311,7 +311,7 @@
 
 **Implemented Methods:**
 - `calculate_all(self, ...) -> dict[str, Any]` - Line 79
-- `calculate_rolling_metrics(self, equity_curve: list[dict[str, Any]], window: int = 30) -> pd.DataFrame` - Line 359
+- `calculate_rolling_metrics(self, equity_curve: list[dict[str, Any]], window: int = 30) -> pd.DataFrame` - Line 367
 
 ### Implementation: `BacktestRepository` ✅
 
@@ -320,13 +320,13 @@
 **Status**: Complete
 
 **Implemented Methods:**
-- `async save_backtest_result(self, result_data: dict[str, Any], request_data: dict[str, Any]) -> str` - Line 45
-- `async get_backtest_result(self, result_id: str) -> dict[str, Any] | None` - Line 125
-- `async list_backtest_results(self, limit: int = 50, offset: int = 0, strategy_type: str | None = None) -> list[dict[str, Any]]` - Line 184
-- `async delete_backtest_result(self, result_id: str) -> bool` - Line 232
-- `async save_trade_history(self, backtest_id: str, trades: list[dict[str, Any]]) -> None` - Line 260
-- `async get_trade_history(self, backtest_id: str) -> list[dict[str, Any]]` - Line 296
-- `async cleanup_old_results(self, days_old: int = 30) -> int` - Line 335
+- `async save_backtest_result(self, result_data: dict[str, Any], request_data: dict[str, Any]) -> str` - Line 77
+- `async get_backtest_result(self, result_id: str) -> dict[str, Any] | None` - Line 191
+- `async list_backtest_results(self, limit: int = 50, offset: int = 0, strategy_type: str | None = None) -> list[dict[str, Any]]` - Line 258
+- `async delete_backtest_result(self, result_id: str) -> bool` - Line 306
+- `async save_trade_history(self, backtest_id: str, trades: list[dict[str, Any]]) -> None` - Line 342
+- `async get_trade_history(self, backtest_id: str) -> list[dict[str, Any]]` - Line 378
+- `async cleanup_old_results(self, days_old: int = 30) -> int` - Line 417
 
 ### Implementation: `BacktestRequest` ✅
 
@@ -854,7 +854,7 @@ class MetricsCalculator:
     def _calculate_drawdown_metrics(self, equity_curve: list[dict[str, Any]]) -> dict[str, Any]  # Line 175
     def _calculate_trade_statistics(self, trades: list[dict[str, Any]]) -> dict[str, Any]  # Line 227
     def _calculate_risk_metrics(self, daily_returns: list[float], initial_capital: float) -> dict[str, Any]  # Line 316
-    def calculate_rolling_metrics(self, equity_curve: list[dict[str, Any]], window: int = 30) -> pd.DataFrame  # Line 359
+    def calculate_rolling_metrics(self, equity_curve: list[dict[str, Any]], window: int = 30) -> pd.DataFrame  # Line 367
 ```
 
 ### File: repository.py
@@ -874,13 +874,14 @@ class MetricsCalculator:
 ```python
 class BacktestRepository(BaseComponent):
     def __init__(self, db_manager: DatabaseServiceInterface)  # Line 34
-    async def save_backtest_result(self, result_data: dict[str, Any], request_data: dict[str, Any]) -> str  # Line 45
-    async def get_backtest_result(self, result_id: str) -> dict[str, Any] | None  # Line 125
-    async def list_backtest_results(self, limit: int = 50, offset: int = 0, strategy_type: str | None = None) -> list[dict[str, Any]]  # Line 184
-    async def delete_backtest_result(self, result_id: str) -> bool  # Line 232
-    async def save_trade_history(self, backtest_id: str, trades: list[dict[str, Any]]) -> None  # Line 260
-    async def get_trade_history(self, backtest_id: str) -> list[dict[str, Any]]  # Line 296
-    async def cleanup_old_results(self, days_old: int = 30) -> int  # Line 335
+    def _serialize_jsonb_field(self, data: Any) -> Any  # Line 45
+    async def save_backtest_result(self, result_data: dict[str, Any], request_data: dict[str, Any]) -> str  # Line 77
+    async def get_backtest_result(self, result_id: str) -> dict[str, Any] | None  # Line 191
+    async def list_backtest_results(self, limit: int = 50, offset: int = 0, strategy_type: str | None = None) -> list[dict[str, Any]]  # Line 258
+    async def delete_backtest_result(self, result_id: str) -> bool  # Line 306
+    async def save_trade_history(self, backtest_id: str, trades: list[dict[str, Any]]) -> None  # Line 342
+    async def get_trade_history(self, backtest_id: str) -> list[dict[str, Any]]  # Line 378
+    async def cleanup_old_results(self, days_old: int = 30) -> int  # Line 417
 ```
 
 ### File: service.py

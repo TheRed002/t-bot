@@ -443,6 +443,9 @@ class BreakoutStrategy(BaseStrategy):
             target_price = breakout_price + (range_size * Decimal(str(self.target_multiplier)))
 
             signal = Signal(
+                signal_id="test_signal_1",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol=data.symbol,
                 direction=SignalDirection.BUY,
                 strength=Decimal(str(confidence)),
@@ -516,6 +519,9 @@ class BreakoutStrategy(BaseStrategy):
             target_price = breakout_price - (range_size * Decimal(str(self.target_multiplier)))
 
             signal = Signal(
+                signal_id="test_signal_2",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol=data.symbol,
                 direction=SignalDirection.SELL,
                 strength=Decimal(str(confidence)),
@@ -573,6 +579,9 @@ class BreakoutStrategy(BaseStrategy):
                 direction = SignalDirection.BUY
 
             signal = Signal(
+                signal_id="test_signal_3",
+                strategy_id="test_strategy_1",
+                strategy_name="test_strategy",
                 symbol=data.symbol,
                 direction=direction,
                 strength=Decimal("0.9"),  # High confidence for false breakout exits
@@ -717,7 +726,7 @@ class BreakoutStrategy(BaseStrategy):
         except Exception as e:
             self.logger.error("Position size calculation failed", strategy=self.name, error=str(e))
             # Return minimum position size on error
-            return Decimal(str(self.config.position_size_pct * 0.5))
+            return self.config.position_size_pct * Decimal("0.5")
 
     async def should_exit(self, position: Position, data: MarketData) -> bool:
         """Determine if position should be closed.
