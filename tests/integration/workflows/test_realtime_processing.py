@@ -56,15 +56,24 @@ class TestWebSocketConnections:
                 message_counts[self.exchange_name] = 0
                 logger.info(f"{self.exchange_name} WebSocket connected")
 
-                # Start message simulation
-                asyncio.create_task(self._simulate_message_stream())
-                asyncio.create_task(self._heartbeat_monitor())
+                # Start message simulation and store task references
+                self._stream_task = asyncio.create_task(self._simulate_message_stream())
+                self._heartbeat_task = asyncio.create_task(self._heartbeat_monitor())
 
             async def disconnect(self):
                 """Simulate WebSocket disconnection."""
                 self.connected = False
                 connection_status[self.exchange_name] = "disconnected"
                 logger.info(f"{self.exchange_name} WebSocket disconnected")
+
+                # Cancel background tasks
+                if hasattr(self, '_stream_task') and not self._stream_task.done():
+                    self._stream_task.cancel()
+                if hasattr(self, '_heartbeat_task') and not self._heartbeat_task.done():
+                    self._heartbeat_task.cancel()
+
+                # Give tasks a moment to cancel gracefully
+                await asyncio.sleep(0.1)
 
             async def _simulate_message_stream(self):
                 """Simulate incoming market data messages."""
